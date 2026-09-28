@@ -1,0 +1,15 @@
+namespace UpscaleLab.Domain.Entities;
+
+public sealed class User : BaseEntity
+{
+    public string Email { get; set; } = string.Empty;
+    public string Username { get; set; } = string.Empty;
+    public string PasswordHash { get; set; } = string.Empty;
+
+    public UserSetting? Setting { get; set; }
+    public ICollection<Device> Devices { get; set; } = new List<Device>();
+    public ICollection<Image> Images { get; set; } = new List<Image>();
+    public ICollection<GalleryPost> GalleryPosts { get; set; } = new List<GalleryPost>();
+    public ICollection<Comment> Comments { get; set; } = new List<Comment>();
+    public ICollection<GalleryLike> Likes { get; set; } = new List<GalleryLike>();
+}

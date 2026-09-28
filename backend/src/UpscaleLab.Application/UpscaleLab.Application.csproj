@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\UpscaleLab.Domain\UpscaleLab.Domain.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,36 @@
+# .NET
+**/bin/
+**/obj/
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+
+# Local SDK/tooling used for verification
+.dotnet/
+.dotnet-home/
+.nuget/
+.store/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+appsettings.*.local.json
+appsettings.Production.json
+secrets.json
+*.pfx
+*.pem
+*.key
+
+# Logs and local data
+*.log
+logs/
+tmp/
+TestResults/
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
