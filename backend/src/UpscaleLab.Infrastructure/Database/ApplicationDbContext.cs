@@ -13,6 +13,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<GalleryPost> GalleryPosts => Set<GalleryPost>();
     public DbSet<Comment> Comments => Set<Comment>();
     public DbSet<GalleryLike> GalleryLikes => Set<GalleryLike>();
+    public DbSet<LiveLayerProject> LiveLayerProjects => Set<LiveLayerProject>();
+    public DbSet<ImageLayer> ImageLayers => Set<ImageLayer>();
+    public DbSet<ProcessingJob> ProcessingJobs => Set<ProcessingJob>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -24,6 +27,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         ConfigureOptimizedImage(modelBuilder);
         ConfigureUserSetting(modelBuilder);
         ConfigureGallery(modelBuilder);
+        ConfigureLiveLayer(modelBuilder);
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -93,6 +97,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         var entity = modelBuilder.Entity<UserSetting>();
         entity.ToTable("user_settings");
         entity.HasIndex(x => x.UserId).IsUnique();
+        entity.Property(x => x.SensorSensitivity).HasDefaultValue(1d);
         entity.HasOne(x => x.User).WithOne(x => x.Setting).HasForeignKey<UserSetting>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
     }
 
@@ -102,9 +107,12 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         post.ToTable("gallery_posts");
         post.Property(x => x.Title).HasMaxLength(160).IsRequired();
         post.Property(x => x.Description).HasMaxLength(2000);
+        post.Property(x => x.IsPublic).HasDefaultValue(true);
         post.HasIndex(x => x.CreatedAt);
         post.HasOne(x => x.User).WithMany(x => x.GalleryPosts).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         post.HasOne(x => x.Image).WithMany(x => x.GalleryPosts).HasForeignKey(x => x.ImageId).OnDelete(DeleteBehavior.Cascade);
+        post.HasIndex(x => new { x.IsPublic, x.CreatedAt });
+        post.HasOne(x => x.Project).WithMany(x => x.GalleryPosts).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.SetNull);
 
         var comment = modelBuilder.Entity<Comment>();
         comment.ToTable("comments");
@@ -118,6 +126,33 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         like.HasIndex(x => new { x.GalleryPostId, x.UserId }).IsUnique();
         like.HasOne(x => x.GalleryPost).WithMany(x => x.Likes).HasForeignKey(x => x.GalleryPostId).OnDelete(DeleteBehavior.Cascade);
         like.HasOne(x => x.User).WithMany(x => x.Likes).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+    }
+
+    private static void ConfigureLiveLayer(ModelBuilder modelBuilder)
+    {
+        var project = modelBuilder.Entity<LiveLayerProject>();
+        project.ToTable("live_layer_projects");
+        project.Property(x => x.Title).HasMaxLength(160).IsRequired();
+        project.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        project.Property(x => x.FailureReason).HasMaxLength(2000);
+        project.HasIndex(x => new { x.UserId, x.CreatedAt });
+        project.HasOne(x => x.User).WithMany(x => x.Projects).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        project.HasOne(x => x.OriginalImage).WithMany(x => x.LiveLayerProjects).HasForeignKey(x => x.OriginalImageId).OnDelete(DeleteBehavior.Restrict);
+
+        var layer = modelBuilder.Entity<ImageLayer>();
+        layer.ToTable("image_layers");
+        layer.Property(x => x.LayerType).HasConversion<string>().HasMaxLength(30);
+        layer.Property(x => x.ImageUrl).HasMaxLength(2048).IsRequired();
+        layer.Property(x => x.ObjectKey).HasMaxLength(1024).IsRequired();
+        layer.HasIndex(x => new { x.ProjectId, x.LayerOrder }).IsUnique();
+        layer.HasOne(x => x.Project).WithMany(x => x.Layers).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+
+        var job = modelBuilder.Entity<ProcessingJob>();
+        job.ToTable("processing_jobs");
+        job.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        job.Property(x => x.ErrorMessage).HasMaxLength(2000);
+        job.HasIndex(x => new { x.ProjectId, x.CreatedAt });
+        job.HasOne(x => x.Project).WithMany(x => x.ProcessingJobs).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
     }
 
     private void ApplyUtcTimestamps()

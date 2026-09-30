@@ -149,6 +149,14 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.Property<Guid>("ImageId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("IsPublic")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(160)
@@ -166,7 +174,11 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
 
                     b.HasIndex("ImageId");
 
+                    b.HasIndex("ProjectId");
+
                     b.HasIndex("UserId");
+
+                    b.HasIndex("IsPublic", "CreatedAt");
 
                     b.ToTable("gallery_posts", (string)null);
                 });
@@ -219,6 +231,109 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.ToTable("images", (string)null);
                 });
 
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.ImageLayer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<double>("Depth")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("ImageUrl")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<int>("LayerOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("LayerType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<double>("MovementX")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("MovementY")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("ObjectKey")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<double>("PositionX")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("PositionY")
+                        .HasColumnType("double precision");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<double>("Rotation")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("Scale")
+                        .HasColumnType("double precision");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "LayerOrder")
+                        .IsUnique();
+
+                    b.ToTable("image_layers", (string)null);
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.LiveLayerProject", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid>("OriginalImageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OriginalImageId");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.ToTable("live_layer_projects", (string)null);
+                });
+
             modelBuilder.Entity("UpscaleLab.Domain.Entities.OptimizedImage", b =>
                 {
                     b.Property<Guid>("Id")
@@ -266,6 +381,46 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .IsUnique();
 
                     b.ToTable("optimized_images", (string)null);
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.ProcessingJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int>("Progress")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "CreatedAt");
+
+                    b.ToTable("processing_jobs", (string)null);
                 });
 
             modelBuilder.Entity("UpscaleLab.Domain.Entities.User", b =>
@@ -320,6 +475,11 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
 
                     b.Property<bool>("DynamicOrientation")
                         .HasColumnType("boolean");
+
+                    b.Property<double>("SensorSensitivity")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(1.0);
 
                     b.Property<bool>("SyncEnabled")
                         .HasColumnType("boolean");
@@ -395,6 +555,11 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("UpscaleLab.Domain.Entities.LiveLayerProject", "Project")
+                        .WithMany("GalleryPosts")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("UpscaleLab.Domain.Entities.User", "User")
                         .WithMany("GalleryPosts")
                         .HasForeignKey("UserId")
@@ -402,6 +567,8 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .IsRequired();
 
                     b.Navigation("Image");
+
+                    b.Navigation("Project");
 
                     b.Navigation("User");
                 });
@@ -413,6 +580,36 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.ImageLayer", b =>
+                {
+                    b.HasOne("UpscaleLab.Domain.Entities.LiveLayerProject", "Project")
+                        .WithMany("Layers")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.LiveLayerProject", b =>
+                {
+                    b.HasOne("UpscaleLab.Domain.Entities.Image", "OriginalImage")
+                        .WithMany("LiveLayerProjects")
+                        .HasForeignKey("OriginalImageId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UpscaleLab.Domain.Entities.User", "User")
+                        .WithMany("Projects")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("OriginalImage");
 
                     b.Navigation("User");
                 });
@@ -434,6 +631,17 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.Navigation("Device");
 
                     b.Navigation("Image");
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.ProcessingJob", b =>
+                {
+                    b.HasOne("UpscaleLab.Domain.Entities.LiveLayerProject", "Project")
+                        .WithMany("ProcessingJobs")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
                 });
 
             modelBuilder.Entity("UpscaleLab.Domain.Entities.UserSetting", b =>
@@ -463,7 +671,18 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                 {
                     b.Navigation("GalleryPosts");
 
+                    b.Navigation("LiveLayerProjects");
+
                     b.Navigation("OptimizedImages");
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.LiveLayerProject", b =>
+                {
+                    b.Navigation("GalleryPosts");
+
+                    b.Navigation("Layers");
+
+                    b.Navigation("ProcessingJobs");
                 });
 
             modelBuilder.Entity("UpscaleLab.Domain.Entities.User", b =>
@@ -477,6 +696,8 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.Navigation("Images");
 
                     b.Navigation("Likes");
+
+                    b.Navigation("Projects");
 
                     b.Navigation("Setting");
                 });

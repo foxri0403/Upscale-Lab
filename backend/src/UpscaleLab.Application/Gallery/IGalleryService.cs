@@ -12,5 +12,5 @@ public interface IGalleryService
     Task DeleteCommentAsync(Guid userId, Guid commentId, CancellationToken cancellationToken);
     Task LikeAsync(Guid userId, Guid postId, CancellationToken cancellationToken);
     Task UnlikeAsync(Guid userId, Guid postId, CancellationToken cancellationToken);
-    Task<DownloadUrlResponse> CreateDownloadUrlAsync(Guid postId, CancellationToken cancellationToken);
+    Task<DownloadUrlResponse> CreateDownloadUrlAsync(Guid postId, Guid? currentUserId, CancellationToken cancellationToken);
 }

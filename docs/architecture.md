@@ -18,6 +18,11 @@ erDiagram
     IMAGE ||--o{ OPTIMIZED_IMAGE : produces
     DEVICE ||--o{ OPTIMIZED_IMAGE : targets
     USER ||--o{ GALLERY_POST : writes
+    USER ||--o{ LIVE_LAYER_PROJECT : owns
+    IMAGE ||--o{ LIVE_LAYER_PROJECT : sources
+    LIVE_LAYER_PROJECT ||--o{ IMAGE_LAYER : contains
+    LIVE_LAYER_PROJECT ||--o{ PROCESSING_JOB : tracks
+    LIVE_LAYER_PROJECT ||--o{ GALLERY_POST : publishes
     IMAGE ||--o{ GALLERY_POST : publishes
     GALLERY_POST ||--o{ COMMENT : contains
     USER ||--o{ COMMENT : writes
@@ -64,6 +69,20 @@ erDiagram
 | POST/DELETE | `/api/gallery/{id}/likes` | 필요 | 좋아요/취소 |
 | POST | `/api/gallery/{id}/download-url` | 없음 | 다운로드 URL 발급 및 카운트 증가 |
 | SignalR | `/hubs/notifications` | 필요 | 향후 실시간 알림 기반 |
+| GET/POST | `/api/projects` | 필요 | 내 LiveLayer 목록/원본 업로드 |
+| GET/DELETE | `/api/projects/{id}` | 필요 | 프로젝트 상세/삭제 |
+| POST | `/api/projects/{id}/process` | 필요 | 비동기 See-through 처리 시작 |
+| GET | `/api/projects/{id}/processing-status` | 필요 | 최신 처리 상태 조회 |
+| GET | `/api/projects/{id}/layers` | 필요 | 렌더링 레이어 조회 |
+| PATCH | `/api/projects/{id}/layers/{layerId}` | 필요 | depth/transform/movement 수정 |
+
+## LiveLayer AI 경계
+
+- API와 영속성은 기존 ASP.NET Core/EF Core 구조를 유지합니다.
+- `ProcessingJob`이 queue 상태를 DB에 보존하고 단일 background worker가 처리합니다. 프로세스 재시작 시 `Queued`/`Processing` 작업을 다시 queue에 넣습니다.
+- Python 어댑터는 See-through 저장소를 vendoring하지 않고 공식 `inference/scripts/inference_psd.py`를 실행합니다.
+- 성공 결과만 기존 레이어와 원자적으로 교체하며, 실패 시 기존 완료 레이어는 보존합니다.
+- Project, Layer, 비공개 GalleryPost 조회는 항상 인증 UserId 또는 공개 여부를 확인합니다.
 
 ## 보안 경계
 

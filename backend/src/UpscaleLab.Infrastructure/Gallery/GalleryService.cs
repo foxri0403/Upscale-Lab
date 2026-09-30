@@ -18,6 +18,7 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
     {
         var posts = await BaseQuery()
             .AsNoTracking()
+            .Where(x => x.IsPublic)
             .OrderByDescending(x => x.CreatedAt)
             .Take(100)
             .ToListAsync(cancellationToken);
@@ -35,6 +36,8 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
             .SingleOrDefaultAsync(x => x.Id == postId, cancellationToken)
             ?? throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
 
+        EnsureAccessible(post, currentUserId);
+
         var comments = post.Comments
             .OrderBy(x => x.CreatedAt)
             .Select(MapComment)
@@ -48,16 +51,29 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         CreateGalleryPostRequest request,
         CancellationToken cancellationToken)
     {
+        LiveLayerProject? project = null;
+        if (request.ProjectId.HasValue)
+        {
+            project = await dbContext.LiveLayerProjects
+                .Include(x => x.OriginalImage)
+                .SingleOrDefaultAsync(x => x.Id == request.ProjectId && x.UserId == userId, cancellationToken)
+                ?? throw new NotFoundException("게시할 프로젝트를 찾을 수 없습니다.");
+        }
+
+        var imageId = project?.OriginalImageId ?? request.ImageId
+            ?? throw new ValidationException("ImageId 또는 ProjectId가 필요합니다.");
         var image = await dbContext.Images.SingleOrDefaultAsync(
-            x => x.Id == request.ImageId && x.UserId == userId,
+            x => x.Id == imageId && x.UserId == userId,
             cancellationToken) ?? throw new NotFoundException("게시할 이미지를 찾을 수 없습니다.");
 
         var post = new GalleryPost
         {
             UserId = userId,
             ImageId = image.Id,
+            ProjectId = project?.Id,
             Title = request.Title.Trim(),
-            Description = request.Description?.Trim()
+            Description = request.Description?.Trim(),
+            IsPublic = request.IsPublic
         };
 
         dbContext.GalleryPosts.Add(post);
@@ -87,15 +103,14 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         CreateCommentRequest request,
         CancellationToken cancellationToken)
     {
-        if (!await dbContext.GalleryPosts.AnyAsync(x => x.Id == postId, cancellationToken))
-        {
-            throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
-        }
+        var accessiblePost = await dbContext.GalleryPosts.SingleOrDefaultAsync(
+            x => x.Id == postId && (x.IsPublic || x.UserId == userId),
+            cancellationToken) ?? throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
 
         var comment = new Comment
         {
             UserId = userId,
-            GalleryPostId = postId,
+            GalleryPostId = accessiblePost.Id,
             Content = request.Content.Trim()
         };
 
@@ -123,7 +138,9 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
 
     public async Task LikeAsync(Guid userId, Guid postId, CancellationToken cancellationToken)
     {
-        if (!await dbContext.GalleryPosts.AnyAsync(x => x.Id == postId, cancellationToken))
+        if (!await dbContext.GalleryPosts.AnyAsync(
+                x => x.Id == postId && (x.IsPublic || x.UserId == userId),
+                cancellationToken))
         {
             throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
         }
@@ -152,12 +169,17 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<DownloadUrlResponse> CreateDownloadUrlAsync(Guid postId, CancellationToken cancellationToken)
+    public async Task<DownloadUrlResponse> CreateDownloadUrlAsync(
+        Guid postId,
+        Guid? currentUserId,
+        CancellationToken cancellationToken)
     {
         var post = await dbContext.GalleryPosts
             .Include(x => x.Image)
             .SingleOrDefaultAsync(x => x.Id == postId, cancellationToken)
             ?? throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
+
+        EnsureAccessible(post, currentUserId);
 
         var expiresAt = DateTime.UtcNow.Add(DownloadLifetime);
         var url = storageService.CreateDownloadUrl(post.Image.OriginalObjectKey, DownloadLifetime);
@@ -186,7 +208,17 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         post.Comments.Count,
         post.DownloadCount,
         post.CreatedAt,
-        currentUserId.HasValue && post.Likes.Any(x => x.UserId == currentUserId.Value));
+        currentUserId.HasValue && post.Likes.Any(x => x.UserId == currentUserId.Value),
+        post.ProjectId,
+        post.IsPublic);
+
+    private static void EnsureAccessible(GalleryPost post, Guid? currentUserId)
+    {
+        if (!post.IsPublic && post.UserId != currentUserId)
+        {
+            throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
+        }
+    }
 
     private static CommentResponse MapComment(Comment comment) => new(
         comment.Id,

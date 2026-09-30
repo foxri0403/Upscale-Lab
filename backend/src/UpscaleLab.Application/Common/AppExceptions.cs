@@ -11,3 +11,5 @@ public sealed class ForbiddenException(string message) : AppException(message);
 public sealed class UnauthorizedException(string message) : AppException(message);
 
 public sealed class ConfigurationException(string message) : AppException(message);
+
+public sealed class ValidationException(string message) : AppException(message);

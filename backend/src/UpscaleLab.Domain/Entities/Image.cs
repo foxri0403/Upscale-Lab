@@ -12,5 +12,6 @@ public sealed class Image : BaseEntity
 
     public User User { get; set; } = null!;
     public ICollection<OptimizedImage> OptimizedImages { get; set; } = new List<OptimizedImage>();
+    public ICollection<LiveLayerProject> LiveLayerProjects { get; set; } = new List<LiveLayerProject>();
     public ICollection<GalleryPost> GalleryPosts { get; set; } = new List<GalleryPost>();
 }

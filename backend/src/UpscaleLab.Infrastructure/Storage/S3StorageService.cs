@@ -34,6 +34,13 @@ public sealed class S3StorageService(IAmazonS3 s3Client, S3StorageOptions option
         await s3Client.DeleteObjectAsync(options.BucketName, objectKey, cancellationToken);
     }
 
+    public async Task DownloadAsync(string objectKey, Stream destination, CancellationToken cancellationToken)
+    {
+        EnsureConfigured();
+        using var response = await s3Client.GetObjectAsync(options.BucketName, objectKey, cancellationToken);
+        await response.ResponseStream.CopyToAsync(destination, cancellationToken);
+    }
+
     public string CreateDownloadUrl(string objectKey, TimeSpan lifetime)
     {
         EnsureConfigured();

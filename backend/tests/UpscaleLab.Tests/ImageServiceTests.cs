@@ -78,6 +78,11 @@ public sealed class ImageServiceTests
 
         public Task DeleteAsync(string objectKey, CancellationToken cancellationToken) => Task.CompletedTask;
 
+        public async Task DownloadAsync(string objectKey, Stream destination, CancellationToken cancellationToken)
+        {
+            await destination.WriteAsync(new byte[] { 1, 2, 3, 4 }, cancellationToken);
+        }
+
         public string CreateDownloadUrl(string objectKey, TimeSpan lifetime) =>
             $"https://example.test/{objectKey}";
     }

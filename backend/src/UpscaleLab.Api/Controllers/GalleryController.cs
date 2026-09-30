@@ -75,6 +75,6 @@ public sealed class GalleryController(IGalleryService galleryService) : Controll
         Guid id,
         CancellationToken cancellationToken)
     {
-        return Ok(await galleryService.CreateDownloadUrlAsync(id, cancellationToken));
+        return Ok(await galleryService.CreateDownloadUrlAsync(id, User.GetOptionalUserId(), cancellationToken));
     }
 }

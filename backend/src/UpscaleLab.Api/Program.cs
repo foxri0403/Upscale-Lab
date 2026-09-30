@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using UpscaleLab.Api.Authentication;
+using UpscaleLab.Api.Background;
 using UpscaleLab.Api.Configuration;
 using UpscaleLab.Api.Hubs;
 using UpscaleLab.Api.Middleware;
@@ -16,6 +17,8 @@ using UpscaleLab.Application.Auth;
 using UpscaleLab.Application.Devices;
 using UpscaleLab.Application.Gallery;
 using UpscaleLab.Application.Images;
+using UpscaleLab.Application.Processing;
+using UpscaleLab.Application.Projects;
 using UpscaleLab.Application.Settings;
 using UpscaleLab.Application.Storage;
 using UpscaleLab.Application.Upscaling;
@@ -24,6 +27,8 @@ using UpscaleLab.Infrastructure.Database;
 using UpscaleLab.Infrastructure.Devices;
 using UpscaleLab.Infrastructure.Gallery;
 using UpscaleLab.Infrastructure.Images;
+using UpscaleLab.Infrastructure.Processing;
+using UpscaleLab.Infrastructure.Projects;
 using UpscaleLab.Infrastructure.Settings;
 using UpscaleLab.Infrastructure.Storage;
 using UpscaleLab.Infrastructure.Upscaling;
@@ -50,10 +55,12 @@ if (Encoding.UTF8.GetByteCount(jwtOptions.Secret) < 32)
 
 var s3Options = builder.Configuration.GetSection("AWS").Get<S3StorageOptions>() ?? new S3StorageOptions();
 var replicateOptions = builder.Configuration.GetSection("Replicate").Get<ReplicateOptions>() ?? new ReplicateOptions();
+var seeThroughOptions = builder.Configuration.GetSection("SeeThrough").Get<SeeThroughOptions>() ?? new SeeThroughOptions();
 
 builder.Services.AddSingleton(jwtOptions);
 builder.Services.AddSingleton(s3Options);
 builder.Services.AddSingleton(replicateOptions);
+builder.Services.AddSingleton(seeThroughOptions);
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure(3)));
@@ -74,6 +81,11 @@ builder.Services.AddScoped<IDeviceService, DeviceService>();
 builder.Services.AddScoped<IUserSettingService, UserSettingService>();
 builder.Services.AddScoped<IImageService, ImageService>();
 builder.Services.AddScoped<IGalleryService, GalleryService>();
+builder.Services.AddScoped<IProjectService, ProjectService>();
+builder.Services.AddScoped<IProjectProcessingService, ProjectProcessingService>();
+builder.Services.AddSingleton<IProcessingJobQueue, ProcessingJobQueue>();
+builder.Services.AddSingleton<IImageLayerProcessor, SeeThroughImageLayerProcessor>();
+builder.Services.AddHostedService<LiveLayerProcessingWorker>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -114,7 +126,7 @@ builder.Services.AddCors(options => options.AddPolicy("ClientPolicy", policy =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
-    options.SwaggerDoc("v1", new OpenApiInfo { Title = "Upscale Lab API", Version = "v1" });
+    options.SwaggerDoc("v1", new OpenApiInfo { Title = "LiveLayer API", Version = "v1" });
     var bearerScheme = new OpenApiSecurityScheme
     {
         Name = "Authorization",

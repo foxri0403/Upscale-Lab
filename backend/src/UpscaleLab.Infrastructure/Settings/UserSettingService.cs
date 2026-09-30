@@ -22,6 +22,7 @@ public sealed class UserSettingService(ApplicationDbContext dbContext) : IUserSe
         setting.SyncEnabled = request.SyncEnabled;
         setting.DynamicOrientation = request.DynamicOrientation;
         setting.AutoUpscale = request.AutoUpscale;
+        setting.SensorSensitivity = request.SensorSensitivity;
         await dbContext.SaveChangesAsync(cancellationToken);
         return Map(setting);
     }
@@ -45,5 +46,6 @@ public sealed class UserSettingService(ApplicationDbContext dbContext) : IUserSe
         setting.SyncEnabled,
         setting.DynamicOrientation,
         setting.AutoUpscale,
+        setting.SensorSensitivity,
         setting.UpdatedAt);
 }

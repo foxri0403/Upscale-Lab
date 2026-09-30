@@ -3,9 +3,11 @@ using System.ComponentModel.DataAnnotations;
 namespace UpscaleLab.Application.Gallery;
 
 public sealed record CreateGalleryPostRequest(
-    Guid ImageId,
+    Guid? ImageId,
     [param: Required, MaxLength(160)] string Title,
-    [param: MaxLength(2000)] string? Description);
+    [param: MaxLength(2000)] string? Description,
+    Guid? ProjectId = null,
+    bool IsPublic = true);
 
 public sealed record GalleryPostResponse(
     Guid Id,
@@ -19,7 +21,9 @@ public sealed record GalleryPostResponse(
     int CommentCount,
     long DownloadCount,
     DateTime CreatedAt,
-    bool IsLikedByCurrentUser);
+    bool IsLikedByCurrentUser,
+    Guid? ProjectId,
+    bool IsPublic);
 
 public sealed record GalleryPostDetailResponse(
     GalleryPostResponse Post,

@@ -29,6 +29,7 @@ public sealed class ExceptionHandlingMiddleware(
             ForbiddenException => (StatusCodes.Status403Forbidden, "Forbidden", exception.Message),
             UnauthorizedException => (StatusCodes.Status401Unauthorized, "Unauthorized", exception.Message),
             ConfigurationException => (StatusCodes.Status503ServiceUnavailable, "Service Unavailable", exception.Message),
+            ValidationException => (StatusCodes.Status400BadRequest, "Validation Failed", exception.Message),
             DbUpdateException => (StatusCodes.Status409Conflict, "Conflict", "데이터 제약 조건을 확인해 주세요."),
             _ => (StatusCodes.Status500InternalServerError, "Internal Server Error", "요청을 처리하는 중 오류가 발생했습니다.")
         };

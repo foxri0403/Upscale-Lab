@@ -59,8 +59,15 @@ Jwt__Secret=YOUR_RANDOM_SECRET_AT_LEAST_32_CHARACTERS
 AWS__Region=ap-northeast-2
 AWS__S3BucketName=YOUR_S3_BUCKET
 Replicate__ApiToken=YOUR_REPLICATE_TOKEN
+SeeThrough__Enabled=false
+SeeThrough__RepositoryPath=/opt/see-through
+SeeThrough__PythonExecutable=/opt/see-through/.venv/bin/python
+SeeThrough__AdapterScriptPath=/home/ubuntu/UpscaleLab/backend/ai-worker/see_through_adapter.py
+SeeThrough__TimeoutMinutes=30
 Cors__AllowedOrigins__0=https://YOUR_WEB_DOMAIN
 ```
+
+현재 문서화된 EC2에는 GPU/See-through 모델 환경이 확인되지 않았으므로 기본값은 비활성화입니다. AI를 활성화하기 전에 별도 GPU host에서 공식 See-through 단일 이미지 명령을 검증하고, 모델 다운로드 용량·CUDA 호환성·약 12–16 GB VRAM 요구량을 확인하세요. API와 AI worker를 분리 배치할 경우 현재 프로세스 실행 adapter를 queue 기반 원격 worker로 교체해야 합니다.
 
 ## systemd
 
