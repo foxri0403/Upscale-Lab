@@ -72,7 +72,7 @@
 
 ## 7. Authentication 방식
 
-BCrypt work factor 12로 비밀번호를 저장하고 JWT HS256 access token에 UserId, Email, Username claim을 넣습니다. 신규 계정에는 Resend로 6자리 이메일 인증 코드를 보내며 인증이 완료되기 전에는 JWT를 발급하지 않습니다. 인증 코드 원문 대신 별도 secret을 사용하는 HMAC-SHA256 결과만 저장합니다. JWT secret은 설정 파일에 존재하지 않으며 32바이트 미만이면 앱 시작이 거부됩니다. 모든 사용자 소유 데이터는 서비스 쿼리에서 UserId를 함께 검사합니다.
+BCrypt work factor 12로 비밀번호를 저장하고 JWT HS256 access token에 UserId, Email, Username claim을 넣습니다. 신규 계정은 Amazon Cognito User Pool에도 등록되며 Cognito가 6자리 이메일 인증 코드의 생성·전송·검증을 담당합니다. 인증 완료 전에는 JWT를 발급하지 않으며 인증 코드 원문이나 hash는 애플리케이션 DB에 저장하지 않습니다. JWT secret은 설정 파일에 존재하지 않으며 32바이트 미만이면 앱 시작이 거부됩니다. 모든 사용자 소유 데이터는 서비스 쿼리에서 UserId를 함께 검사합니다.
 
 ## 8. AWS S3 연동 상태
 
@@ -98,9 +98,9 @@ Bearer token 설정, Real-ESRGAN prediction 생성/조회 서비스는 구현했
 
 - `ConnectionStrings__DefaultConnection`
 - `Jwt__Secret`
-- `EmailVerification__ApiKey`
-- `EmailVerification__FromAddress`
-- `EmailVerification__CodeHashKey`
+- `Cognito__ClientId`
+- `Cognito__ClientSecret` (선택)
+- `Cognito__Region` (기본 `ap-northeast-2`)
 - `AWS__Region` (기본 `ap-northeast-2`)
 - `AWS__S3BucketName`
 - `Replicate__ApiToken`
@@ -116,6 +116,7 @@ Bearer token 설정, Real-ESRGAN prediction 생성/조회 서비스는 구현했
 - RDS endpoint, port, database name, username, password, security group 연결
 - S3 bucket name/region과 EC2 IAM Role 생성·연결 승인
 - JWT 운영 secret
+- Cognito User Pool app client ID와 선택적인 client secret
 - Replicate API token
 - 운영 Web origin/domain, HTTPS 종료 방식
 - Secrets Manager 사용 여부와 비용/권한 승인

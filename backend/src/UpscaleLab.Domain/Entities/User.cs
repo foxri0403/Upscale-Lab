@@ -7,10 +7,7 @@ public sealed class User : BaseEntity
     public string PasswordHash { get; set; } = string.Empty;
     public bool IsEmailVerified { get; set; }
     public DateTime? EmailVerifiedAt { get; set; }
-    public string? EmailVerificationCodeHash { get; set; }
-    public DateTime? EmailVerificationCodeExpiresAt { get; set; }
-    public DateTime? EmailVerificationCodeSentAt { get; set; }
-    public int EmailVerificationFailedAttempts { get; set; }
+    public DateTime? EmailVerificationSentAt { get; set; }
 
     public UserSetting? Setting { get; set; }
     public ICollection<Device> Devices { get; set; } = new List<Device>();

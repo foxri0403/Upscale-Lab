@@ -13,19 +13,14 @@ public interface IJwtTokenService
     (string Token, DateTime ExpiresAt) Create(User user);
 }
 
-public interface IEmailSender
+public interface IEmailVerificationProvider
 {
-    Task SendVerificationCodeAsync(
-        string recipientEmail,
-        string recipientName,
-        string code,
-        int expiresInMinutes,
+    Task<DateTime> SignUpAsync(
+        string email,
+        string password,
         CancellationToken cancellationToken);
-}
 
-public interface IEmailVerificationCodeProtector
-{
-    string Generate();
-    string Hash(string email, string code);
-    bool Verify(string email, string code, string expectedHash);
+    Task ConfirmSignUpAsync(string email, string code, CancellationToken cancellationToken);
+
+    Task ResendConfirmationCodeAsync(string email, CancellationToken cancellationToken);
 }

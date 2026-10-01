@@ -4,7 +4,6 @@ using UpscaleLab.Application.Common;
 using UpscaleLab.Domain.Entities;
 using UpscaleLab.Infrastructure.Auth;
 using UpscaleLab.Infrastructure.Database;
-using UpscaleLab.Infrastructure.Email;
 using Xunit;
 
 namespace UpscaleLab.Tests;
@@ -14,10 +13,10 @@ public sealed class AuthServiceTests
     private const string ValidPassword = "Correct-horse1!";
 
     [Fact]
-    public async Task Register_HashesPasswordAndSendsVerificationCode()
+    public async Task Register_HashesPasswordAndStartsCognitoEmailVerification()
     {
         await using var dbContext = CreateDbContext();
-        var (service, emailSender) = CreateService(dbContext);
+        var (service, provider) = CreateService(dbContext);
 
         var result = await service.RegisterAsync(
             new RegisterRequest("USER@example.com", "tester", ValidPassword),
@@ -29,11 +28,10 @@ public sealed class AuthServiceTests
         Assert.StartsWith("$2", stored.PasswordHash);
         Assert.True(new PasswordHasher().Verify(ValidPassword, stored.PasswordHash));
         Assert.False(stored.IsEmailVerified);
-        Assert.NotEqual("000001", stored.EmailVerificationCodeHash);
-        Assert.NotNull(stored.EmailVerificationCodeExpiresAt);
+        Assert.NotNull(stored.EmailVerificationSentAt);
         Assert.True(result.RequiresEmailVerification);
         Assert.False(result.User.IsEmailVerified);
-        Assert.Equal("000001", Assert.Single(emailSender.SentMessages).Code);
+        Assert.Equal(("user@example.com", ValidPassword), Assert.Single(provider.SignUps));
         Assert.NotNull(stored.Setting);
     }
 
@@ -45,7 +43,7 @@ public sealed class AuthServiceTests
     public async Task Register_WithPasswordThatDoesNotMeetPolicy_IsRejected(string password)
     {
         await using var dbContext = CreateDbContext();
-        var (service, emailSender) = CreateService(dbContext);
+        var (service, provider) = CreateService(dbContext);
 
         var exception = await Assert.ThrowsAsync<ValidationException>(() => service.RegisterAsync(
             new RegisterRequest("user@example.com", "tester", password),
@@ -53,14 +51,14 @@ public sealed class AuthServiceTests
 
         Assert.Equal(PasswordPolicy.ErrorMessage, exception.Message);
         Assert.Empty(dbContext.Users);
-        Assert.Empty(emailSender.SentMessages);
+        Assert.Empty(provider.SignUps);
     }
 
     [Fact]
-    public async Task VerifyEmail_WithValidCode_VerifiesUserAndReturnsToken()
+    public async Task VerifyEmail_WithValidCode_ConfirmsCognitoUserAndReturnsToken()
     {
         await using var dbContext = CreateDbContext();
-        var (service, _) = CreateService(dbContext);
+        var (service, provider) = CreateService(dbContext);
         await service.RegisterAsync(
             new RegisterRequest("user@example.com", "tester", ValidPassword),
             CancellationToken.None);
@@ -72,79 +70,54 @@ public sealed class AuthServiceTests
         var stored = await dbContext.Users.SingleAsync();
         Assert.True(stored.IsEmailVerified);
         Assert.NotNull(stored.EmailVerifiedAt);
-        Assert.Null(stored.EmailVerificationCodeHash);
-        Assert.Null(stored.EmailVerificationCodeExpiresAt);
+        Assert.Null(stored.EmailVerificationSentAt);
+        Assert.Equal(("user@example.com", "000001"), Assert.Single(provider.Confirmations));
         Assert.Equal("test-token", result.AccessToken);
         Assert.True(result.User.IsEmailVerified);
     }
 
     [Fact]
-    public async Task VerifyEmail_WithExpiredCode_IsRejected()
+    public async Task VerifyEmail_WhenCognitoRejectsCode_DoesNotVerifyUser()
     {
         await using var dbContext = CreateDbContext();
-        var (service, _) = CreateService(dbContext);
+        var (service, provider) = CreateService(dbContext);
+        await service.RegisterAsync(
+            new RegisterRequest("user@example.com", "tester", ValidPassword),
+            CancellationToken.None);
+        provider.ConfirmationException = new ValidationException("invalid code");
+
+        await Assert.ThrowsAsync<ValidationException>(() => service.VerifyEmailAsync(
+            new VerifyEmailRequest("user@example.com", "999999"),
+            CancellationToken.None));
+
+        Assert.False((await dbContext.Users.SingleAsync()).IsEmailVerified);
+    }
+
+    [Fact]
+    public async Task ResendVerificationEmail_AfterCooldown_RequestsNewCognitoCode()
+    {
+        await using var dbContext = CreateDbContext();
+        var (service, provider) = CreateService(dbContext);
         await service.RegisterAsync(
             new RegisterRequest("user@example.com", "tester", ValidPassword),
             CancellationToken.None);
         var user = await dbContext.Users.SingleAsync();
-        user.EmailVerificationCodeExpiresAt = DateTime.UtcNow.AddSeconds(-1);
-        await dbContext.SaveChangesAsync();
-
-        await Assert.ThrowsAsync<ValidationException>(() => service.VerifyEmailAsync(
-            new VerifyEmailRequest("user@example.com", "000001"),
-            CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task VerifyEmail_AfterMaximumFailedAttempts_InvalidatesCode()
-    {
-        await using var dbContext = CreateDbContext();
-        var (service, _) = CreateService(dbContext);
-        await service.RegisterAsync(
-            new RegisterRequest("user@example.com", "tester", ValidPassword),
-            CancellationToken.None);
-
-        for (var attempt = 0; attempt < 5; attempt++)
-        {
-            await Assert.ThrowsAsync<ValidationException>(() => service.VerifyEmailAsync(
-                new VerifyEmailRequest("user@example.com", "999999"),
-                CancellationToken.None));
-        }
-
-        var stored = await dbContext.Users.SingleAsync();
-        Assert.Null(stored.EmailVerificationCodeHash);
-        await Assert.ThrowsAsync<ValidationException>(() => service.VerifyEmailAsync(
-            new VerifyEmailRequest("user@example.com", "000001"),
-            CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task ResendVerificationEmail_AfterCooldown_ReplacesCode()
-    {
-        await using var dbContext = CreateDbContext();
-        var (service, emailSender) = CreateService(dbContext);
-        await service.RegisterAsync(
-            new RegisterRequest("user@example.com", "tester", ValidPassword),
-            CancellationToken.None);
-        var user = await dbContext.Users.SingleAsync();
-        var originalHash = user.EmailVerificationCodeHash;
-        user.EmailVerificationCodeSentAt = DateTime.UtcNow.AddMinutes(-2);
+        user.EmailVerificationSentAt = DateTime.UtcNow.AddMinutes(-2);
         await dbContext.SaveChangesAsync();
 
         await service.ResendVerificationEmailAsync(
             new ResendVerificationEmailRequest("user@example.com"),
             CancellationToken.None);
 
-        Assert.Equal(2, emailSender.SentMessages.Count);
-        Assert.Equal("000002", emailSender.SentMessages[1].Code);
-        Assert.NotEqual(originalHash, user.EmailVerificationCodeHash);
+        Assert.Equal("user@example.com", Assert.Single(provider.Resends));
+        Assert.True(user.EmailVerificationSentAt > DateTime.UtcNow.AddSeconds(-5));
     }
 
     [Fact]
     public async Task ResendVerificationEmail_WithinCooldown_DoesNotSendAgain()
     {
         await using var dbContext = CreateDbContext();
-        var (service, emailSender) = CreateService(dbContext);
+        var (service, provider) = CreateService(dbContext);
         await service.RegisterAsync(
             new RegisterRequest("user@example.com", "tester", ValidPassword),
             CancellationToken.None);
@@ -153,7 +126,7 @@ public sealed class AuthServiceTests
             new ResendVerificationEmailRequest("user@example.com"),
             CancellationToken.None);
 
-        Assert.Single(emailSender.SentMessages);
+        Assert.Empty(provider.Resends);
     }
 
     [Fact]
@@ -204,23 +177,21 @@ public sealed class AuthServiceTests
             CancellationToken.None));
     }
 
-    private static (AuthService Service, FakeEmailSender EmailSender) CreateService(
+    private static (AuthService Service, FakeEmailVerificationProvider Provider) CreateService(
         ApplicationDbContext dbContext)
     {
-        var emailSender = new FakeEmailSender();
+        var provider = new FakeEmailVerificationProvider();
+        var options = new CognitoOptions
+        {
+            ResendCooldownSeconds = 60
+        };
         var service = new AuthService(
             dbContext,
             new PasswordHasher(),
             new FakeJwtTokenService(),
-            emailSender,
-            new FakeVerificationCodeProtector(),
-            new EmailVerificationOptions
-            {
-                CodeExpirationMinutes = 10,
-                ResendCooldownSeconds = 60,
-                MaxFailedAttempts = 5
-            });
-        return (service, emailSender);
+            provider,
+            options);
+        return (service, provider);
     }
 
     private static ApplicationDbContext CreateDbContext()
@@ -237,37 +208,40 @@ public sealed class AuthServiceTests
             ("test-token", DateTime.UtcNow.AddHours(1));
     }
 
-    private sealed class FakeVerificationCodeProtector : IEmailVerificationCodeProtector
+    private sealed class FakeEmailVerificationProvider : IEmailVerificationProvider
     {
-        private int sequence;
+        public List<(string Email, string Password)> SignUps { get; } = [];
+        public List<(string Email, string Code)> Confirmations { get; } = [];
+        public List<string> Resends { get; } = [];
+        public Exception? ConfirmationException { get; set; }
 
-        public string Generate() => (++sequence).ToString("D6");
-
-        public string Hash(string email, string code) => $"hash:{email.ToLowerInvariant()}:{code}";
-
-        public bool Verify(string email, string code, string expectedHash) =>
-            Hash(email, code) == expectedHash;
-    }
-
-    private sealed class FakeEmailSender : IEmailSender
-    {
-        public List<SentMessage> SentMessages { get; } = [];
-
-        public Task SendVerificationCodeAsync(
-            string recipientEmail,
-            string recipientName,
-            string code,
-            int expiresInMinutes,
+        public Task<DateTime> SignUpAsync(
+            string email,
+            string password,
             CancellationToken cancellationToken)
         {
-            SentMessages.Add(new SentMessage(recipientEmail, recipientName, code, expiresInMinutes));
+            SignUps.Add((email, password));
+            return Task.FromResult(DateTime.UtcNow.AddHours(24));
+        }
+
+        public Task ConfirmSignUpAsync(
+            string email,
+            string code,
+            CancellationToken cancellationToken)
+        {
+            if (ConfirmationException is not null)
+            {
+                throw ConfirmationException;
+            }
+
+            Confirmations.Add((email, code));
+            return Task.CompletedTask;
+        }
+
+        public Task ResendConfirmationCodeAsync(string email, CancellationToken cancellationToken)
+        {
+            Resends.Add(email);
             return Task.CompletedTask;
         }
     }
-
-    private sealed record SentMessage(
-        string RecipientEmail,
-        string RecipientName,
-        string Code,
-        int ExpiresInMinutes);
 }

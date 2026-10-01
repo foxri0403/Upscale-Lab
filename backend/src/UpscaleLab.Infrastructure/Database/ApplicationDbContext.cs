@@ -52,7 +52,6 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         entity.Property(x => x.Email).HasMaxLength(320).IsRequired();
         entity.Property(x => x.Username).HasMaxLength(50).IsRequired();
         entity.Property(x => x.PasswordHash).HasMaxLength(200).IsRequired();
-        entity.Property(x => x.EmailVerificationCodeHash).HasMaxLength(64);
         entity.HasIndex(x => x.Email).IsUnique();
         entity.HasIndex(x => x.Username).IsUnique();
     }

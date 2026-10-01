@@ -3,7 +3,6 @@ using UpscaleLab.Application.Auth;
 using UpscaleLab.Application.Common;
 using UpscaleLab.Domain.Entities;
 using UpscaleLab.Infrastructure.Database;
-using UpscaleLab.Infrastructure.Email;
 
 namespace UpscaleLab.Infrastructure.Auth;
 
@@ -11,9 +10,8 @@ public sealed class AuthService(
     ApplicationDbContext dbContext,
     IPasswordHasher passwordHasher,
     IJwtTokenService jwtTokenService,
-    IEmailSender emailSender,
-    IEmailVerificationCodeProtector verificationCodeProtector,
-    EmailVerificationOptions emailOptions) : IAuthService
+    IEmailVerificationProvider emailVerificationProvider,
+    CognitoOptions cognitoOptions) : IAuthService
 {
     private const string InvalidVerificationCodeMessage =
         "인증 코드가 올바르지 않거나 만료되었습니다. 새 코드를 요청해 주세요.";
@@ -45,24 +43,22 @@ public sealed class AuthService(
             Email = email,
             Username = username,
             PasswordHash = passwordHasher.Hash(request.Password),
+            EmailVerificationSentAt = DateTime.UtcNow,
             Setting = new UserSetting()
         };
-        var verificationCode = SetNewVerificationCode(user, DateTime.UtcNow);
+
+        var verificationCodeExpiresAt = await emailVerificationProvider.SignUpAsync(
+            email,
+            request.Password,
+            cancellationToken);
 
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        await emailSender.SendVerificationCodeAsync(
-            user.Email,
-            user.Username,
-            verificationCode,
-            emailOptions.CodeExpirationMinutes,
-            cancellationToken);
-
         return new RegisterResponse(
             MapUser(user),
             RequiresEmailVerification: true,
-            user.EmailVerificationCodeExpiresAt!.Value);
+            verificationCodeExpiresAt);
     }
 
     public async Task<AuthResponse> VerifyEmailAsync(
@@ -71,33 +67,17 @@ public sealed class AuthService(
     {
         var email = NormalizeEmail(request.Email);
         var user = await dbContext.Users.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
-        var now = DateTime.UtcNow;
 
-        if (user is null ||
-            user.IsEmailVerified ||
-            user.EmailVerificationCodeHash is null ||
-            user.EmailVerificationCodeExpiresAt is null ||
-            user.EmailVerificationCodeExpiresAt <= now ||
-            user.EmailVerificationFailedAttempts >= emailOptions.MaxFailedAttempts)
+        if (user is null || user.IsEmailVerified)
         {
             throw new ValidationException(InvalidVerificationCodeMessage);
         }
 
-        if (!verificationCodeProtector.Verify(email, request.Code, user.EmailVerificationCodeHash))
-        {
-            user.EmailVerificationFailedAttempts++;
-            if (user.EmailVerificationFailedAttempts >= emailOptions.MaxFailedAttempts)
-            {
-                ClearVerificationCode(user);
-            }
-
-            await dbContext.SaveChangesAsync(cancellationToken);
-            throw new ValidationException(InvalidVerificationCodeMessage);
-        }
+        await emailVerificationProvider.ConfirmSignUpAsync(email, request.Code, cancellationToken);
 
         user.IsEmailVerified = true;
-        user.EmailVerifiedAt = now;
-        ClearVerificationCode(user);
+        user.EmailVerifiedAt = DateTime.UtcNow;
+        user.EmailVerificationSentAt = null;
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return CreateResponse(user);
@@ -116,21 +96,15 @@ public sealed class AuthService(
             return;
         }
 
-        if (user.EmailVerificationCodeSentAt is not null &&
-            user.EmailVerificationCodeSentAt.Value.AddSeconds(emailOptions.ResendCooldownSeconds) > now)
+        if (user.EmailVerificationSentAt is not null &&
+            user.EmailVerificationSentAt.Value.AddSeconds(cognitoOptions.ResendCooldownSeconds) > now)
         {
             return;
         }
 
-        var verificationCode = SetNewVerificationCode(user, now);
+        await emailVerificationProvider.ResendConfirmationCodeAsync(email, cancellationToken);
+        user.EmailVerificationSentAt = now;
         await dbContext.SaveChangesAsync(cancellationToken);
-
-        await emailSender.SendVerificationCodeAsync(
-            user.Email,
-            user.Username,
-            verificationCode,
-            emailOptions.CodeExpirationMinutes,
-            cancellationToken);
     }
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
@@ -163,24 +137,6 @@ public sealed class AuthService(
     {
         var (token, expiresAt) = jwtTokenService.Create(user);
         return new AuthResponse(token, expiresAt, MapUser(user));
-    }
-
-    private string SetNewVerificationCode(User user, DateTime now)
-    {
-        var code = verificationCodeProtector.Generate();
-        user.EmailVerificationCodeHash = verificationCodeProtector.Hash(user.Email, code);
-        user.EmailVerificationCodeExpiresAt = now.AddMinutes(emailOptions.CodeExpirationMinutes);
-        user.EmailVerificationCodeSentAt = now;
-        user.EmailVerificationFailedAttempts = 0;
-        return code;
-    }
-
-    private static void ClearVerificationCode(User user)
-    {
-        user.EmailVerificationCodeHash = null;
-        user.EmailVerificationCodeExpiresAt = null;
-        user.EmailVerificationCodeSentAt = null;
-        user.EmailVerificationFailedAttempts = 0;
     }
 
     private static UserResponse MapUser(User user) =>
