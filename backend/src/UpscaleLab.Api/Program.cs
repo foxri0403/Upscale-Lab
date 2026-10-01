@@ -62,8 +62,13 @@ var cognitoOptions = builder.Configuration
     .GetSection(CognitoOptions.SectionName)
     .Get<CognitoOptions>() ?? new CognitoOptions();
 
-if (string.IsNullOrWhiteSpace(cognitoOptions.Region) ||
-    cognitoOptions.ResendCooldownSeconds < 0)
+if (string.IsNullOrWhiteSpace(cognitoOptions.ClientId))
+{
+    throw new InvalidOperationException(
+        "Cognito:ClientId is required. Use user-secrets or an environment variable.");
+}
+
+if (string.IsNullOrWhiteSpace(cognitoOptions.Region) || cognitoOptions.ResendCooldownSeconds < 0)
 {
     throw new InvalidOperationException("Cognito settings must contain a region and valid positive numeric values.");
 }

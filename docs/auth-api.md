@@ -136,12 +136,26 @@ JWT 기본 만료 시간은 60분입니다. Refresh token은 아직 제공하지
 
 AWS Cognito에서 이메일 로그인을 사용하는 User Pool을 만들고 자체 회원가입과 이메일 자동 인증을 활성화합니다. 비밀번호 정책은 최소 10자, 대문자·숫자·특수문자 필수로 설정해야 합니다. 이메일 공급자는 자체 도메인이 필요 없는 `Send email with Cognito`를 선택합니다.
 
-User Pool에 app client를 만든 뒤 Client ID와, 생성했다면 Client Secret을 user-secrets에 설정합니다.
+팀원 AWS 계정의 User Pool을 사용하는 경우 팀원이 아래 항목을 확인해 전달해야 합니다.
+
+- User Pool을 생성한 AWS Region(서울이면 `ap-northeast-2`)
+- App client의 Client ID
+- App client secret 생성 여부와, 생성했다면 Client Secret
+- Self-service sign-up 활성화 여부
+- 이메일을 로그인 식별자 및 자동 확인 속성으로 설정했는지 여부
+- 비밀번호 정책이 최소 10자, 대문자·숫자·특수문자 필수인지 여부
+- 이메일 공급자가 `Send email with Cognito`인지 여부
+
+현재 코드에는 User Pool ID, AWS 계정 로그인 정보, AWS Access Key가 필요하지 않습니다. 팀원은 root 계정이나 IAM 자격 증명을 공유하지 말고 위 Cognito 설정값만 안전한 채널로 전달합니다.
+
+받은 Client ID와, 생성했다면 Client Secret을 user-secrets에 설정합니다. `.env` 파일은 현재 `dotnet run`에서 자동으로 로드되지 않습니다.
 
 ```powershell
 dotnet user-secrets set --project backend/src/UpscaleLab.Api "Cognito:ClientId" "YOUR_COGNITO_APP_CLIENT_ID"
 # App client에 secret을 생성한 경우에만 설정합니다.
 dotnet user-secrets set --project backend/src/UpscaleLab.Api "Cognito:ClientSecret" "YOUR_COGNITO_APP_CLIENT_SECRET"
+# User Pool이 서울 리전이 아닌 경우에만 설정합니다.
+dotnet user-secrets set --project backend/src/UpscaleLab.Api "Cognito:Region" "YOUR_COGNITO_REGION"
 ```
 
 secret이 없는 public app client라면 `Cognito:ClientSecret`은 생략합니다. 기본 리전은 `ap-northeast-2`이며 `Cognito:Region` 또는 `Cognito__Region`으로 변경할 수 있습니다. 실제 Client ID와 Client Secret은 Git에 커밋하지 않습니다. Cognito 기본 이메일 구성은 AWS 계정당 하루 50건 제한이 있으므로 운영 트래픽이 늘어나면 SES 연결을 검토해야 합니다.
