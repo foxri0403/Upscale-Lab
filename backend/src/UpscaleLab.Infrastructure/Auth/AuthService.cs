@@ -16,6 +16,11 @@ public sealed class AuthService(
         var email = NormalizeEmail(request.Email);
         var username = request.Username.Trim();
 
+        if (!PasswordPolicy.IsSatisfiedBy(request.Password))
+        {
+            throw new ValidationException(PasswordPolicy.ErrorMessage);
+        }
+
         if (await dbContext.Users.AnyAsync(x => x.Email == email, cancellationToken))
         {
             throw new ConflictException("이미 사용 중인 이메일입니다.");

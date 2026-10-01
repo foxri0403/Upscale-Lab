@@ -5,7 +5,7 @@ namespace UpscaleLab.Application.Auth;
 public sealed record RegisterRequest(
     [param: Required, EmailAddress, MaxLength(320)] string Email,
     [param: Required, MinLength(2), MaxLength(50)] string Username,
-    [param: Required, MinLength(8), MaxLength(128)] string Password);
+    [param: Required, PasswordPolicy] string Password);
 
 public sealed record LoginRequest(
     [param: Required, EmailAddress, MaxLength(320)] string Email,
