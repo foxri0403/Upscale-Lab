@@ -53,7 +53,9 @@ erDiagram
 | Method | Path | 인증 | 용도 |
 |---|---|---:|---|
 | GET | `/health` | 없음 | 프로세스 상태 확인 |
-| POST | `/api/auth/register` | 없음 | 회원가입, 비밀번호 정책 검증, BCrypt hash, JWT 발급 |
+| POST | `/api/auth/register` | 없음 | 회원가입, BCrypt hash, Resend 인증 코드 발송 |
+| POST | `/api/auth/verify-email` | 없음 | 6자리 이메일 인증 후 JWT 발급 |
+| POST | `/api/auth/resend-verification` | 없음 | 이메일 인증 코드 재전송 |
 | POST | `/api/auth/login` | 없음 | 로그인 및 JWT 발급 |
 | GET | `/api/auth/me` | 필요 | 현재 사용자 조회 |
 | GET/POST | `/api/devices` | 필요 | 내 디바이스 목록/등록 |
@@ -89,7 +91,9 @@ erDiagram
 - JWT secret, DB connection string, S3 bucket, Replicate token은 설정 공급자에서만 읽습니다.
 - 비밀번호는 10~128자이며 대문자, 숫자, 특수문자를 각각 포함해야 합니다.
 - 비밀번호 원문은 DB 또는 응답에 저장하지 않고 BCrypt(work factor 12) 단방향 해시만 저장합니다.
-- 이메일 인증은 후속 범위이며 현재 회원가입과 로그인 흐름에는 포함하지 않습니다.
+- 이메일 인증 코드는 6자리 난수로 생성하고 원문 대신 HMAC-SHA256 결과만 저장합니다.
+- 인증 코드는 10분 만료, 최대 5회 실패, 재전송 60초 제한을 적용하며 인증 전 로그인을 차단합니다.
+- Resend API key와 인증 코드 hash key는 설정 공급자에서만 읽습니다.
 - AWS SDK는 기본 credential chain을 사용하며 EC2 IAM Role을 우선합니다.
 - S3 bucket은 public access block을 유지하고 pre-signed URL 방식으로 다운로드합니다.
 - CORS 허용 origin은 명시 목록이며 `AllowAnyOrigin`과 credentials를 함께 사용하지 않습니다.

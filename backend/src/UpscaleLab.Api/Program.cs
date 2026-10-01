@@ -25,6 +25,7 @@ using UpscaleLab.Application.Upscaling;
 using UpscaleLab.Infrastructure.Auth;
 using UpscaleLab.Infrastructure.Database;
 using UpscaleLab.Infrastructure.Devices;
+using UpscaleLab.Infrastructure.Email;
 using UpscaleLab.Infrastructure.Gallery;
 using UpscaleLab.Infrastructure.Images;
 using UpscaleLab.Infrastructure.Processing;
@@ -56,11 +57,22 @@ if (Encoding.UTF8.GetByteCount(jwtOptions.Secret) < 32)
 var s3Options = builder.Configuration.GetSection("AWS").Get<S3StorageOptions>() ?? new S3StorageOptions();
 var replicateOptions = builder.Configuration.GetSection("Replicate").Get<ReplicateOptions>() ?? new ReplicateOptions();
 var seeThroughOptions = builder.Configuration.GetSection("SeeThrough").Get<SeeThroughOptions>() ?? new SeeThroughOptions();
+var emailVerificationOptions = builder.Configuration
+    .GetSection(EmailVerificationOptions.SectionName)
+    .Get<EmailVerificationOptions>() ?? new EmailVerificationOptions();
+
+if (emailVerificationOptions.CodeExpirationMinutes <= 0 ||
+    emailVerificationOptions.ResendCooldownSeconds < 0 ||
+    emailVerificationOptions.MaxFailedAttempts <= 0)
+{
+    throw new InvalidOperationException("EmailVerification numeric settings must be valid positive values.");
+}
 
 builder.Services.AddSingleton(jwtOptions);
 builder.Services.AddSingleton(s3Options);
 builder.Services.AddSingleton(replicateOptions);
 builder.Services.AddSingleton(seeThroughOptions);
+builder.Services.AddSingleton(emailVerificationOptions);
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure(3)));
@@ -73,9 +85,15 @@ builder.Services.AddHttpClient<IUpscaleService, ReplicateUpscaleService>(client 
     client.BaseAddress = new Uri(replicateOptions.ApiBaseUrl);
     client.Timeout = TimeSpan.FromSeconds(30);
 });
+builder.Services.AddHttpClient<IEmailSender, ResendEmailSender>(client =>
+{
+    client.BaseAddress = new Uri(emailVerificationOptions.ApiBaseUrl);
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
 
 builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+builder.Services.AddSingleton<IEmailVerificationCodeProtector, EmailVerificationCodeProtector>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IDeviceService, DeviceService>();
 builder.Services.AddScoped<IUserSettingService, UserSettingService>();

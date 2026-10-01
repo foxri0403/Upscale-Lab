@@ -50,6 +50,9 @@ dotnet restore
 dotnet tool restore
 dotnet user-secrets set --project src/UpscaleLab.Api "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=upscale_lab;Username=upscale_lab;Password=YOUR_LOCAL_PASSWORD"
 dotnet user-secrets set --project src/UpscaleLab.Api "Jwt:Secret" "YOUR_RANDOM_SECRET_AT_LEAST_32_CHARACTERS"
+dotnet user-secrets set --project src/UpscaleLab.Api "EmailVerification:ApiKey" "YOUR_RESEND_API_KEY"
+dotnet user-secrets set --project src/UpscaleLab.Api "EmailVerification:FromAddress" "no-reply@YOUR_VERIFIED_DOMAIN"
+dotnet user-secrets set --project src/UpscaleLab.Api "EmailVerification:CodeHashKey" "YOUR_RANDOM_SECRET_AT_LEAST_32_CHARACTERS"
 dotnet ef database update --project src/UpscaleLab.Infrastructure --startup-project src/UpscaleLab.Api
 dotnet run --project src/UpscaleLab.Api
 ```
@@ -100,6 +103,9 @@ dotnet ef database update --project src/UpscaleLab.Infrastructure --startup-proj
 
 - `ConnectionStrings__DefaultConnection`
 - `Jwt__Secret`
+- `EmailVerification__ApiKey`
+- `EmailVerification__FromAddress`
+- `EmailVerification__CodeHashKey`
 - `AWS__S3BucketName`
 - `Replicate__ApiToken`
 - `SeeThrough__Enabled`

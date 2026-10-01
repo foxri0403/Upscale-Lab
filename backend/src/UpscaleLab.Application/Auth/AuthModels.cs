@@ -11,6 +11,25 @@ public sealed record LoginRequest(
     [param: Required, EmailAddress, MaxLength(320)] string Email,
     [param: Required, MaxLength(128)] string Password);
 
-public sealed record UserResponse(Guid Id, string Email, string Username, DateTime CreatedAt);
+public sealed record VerifyEmailRequest(
+    [param: Required, EmailAddress, MaxLength(320)] string Email,
+    [param: Required, RegularExpression("^[0-9]{6}$")] string Code);
+
+public sealed record ResendVerificationEmailRequest(
+    [param: Required, EmailAddress, MaxLength(320)] string Email);
+
+public sealed record UserResponse(
+    Guid Id,
+    string Email,
+    string Username,
+    bool IsEmailVerified,
+    DateTime CreatedAt);
+
+public sealed record RegisterResponse(
+    UserResponse User,
+    bool RequiresEmailVerification,
+    DateTime VerificationCodeExpiresAt);
 
 public sealed record AuthResponse(string AccessToken, DateTime ExpiresAt, UserResponse User);
+
+public sealed record MessageResponse(string Message);

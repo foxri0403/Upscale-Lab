@@ -3,15 +3,24 @@ using UpscaleLab.Application.Auth;
 using UpscaleLab.Application.Common;
 using UpscaleLab.Domain.Entities;
 using UpscaleLab.Infrastructure.Database;
+using UpscaleLab.Infrastructure.Email;
 
 namespace UpscaleLab.Infrastructure.Auth;
 
 public sealed class AuthService(
     ApplicationDbContext dbContext,
     IPasswordHasher passwordHasher,
-    IJwtTokenService jwtTokenService) : IAuthService
+    IJwtTokenService jwtTokenService,
+    IEmailSender emailSender,
+    IEmailVerificationCodeProtector verificationCodeProtector,
+    EmailVerificationOptions emailOptions) : IAuthService
 {
-    public async Task<AuthResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken)
+    private const string InvalidVerificationCodeMessage =
+        "인증 코드가 올바르지 않거나 만료되었습니다. 새 코드를 요청해 주세요.";
+
+    public async Task<RegisterResponse> RegisterAsync(
+        RegisterRequest request,
+        CancellationToken cancellationToken)
     {
         var email = NormalizeEmail(request.Email);
         var username = request.Username.Trim();
@@ -38,11 +47,90 @@ public sealed class AuthService(
             PasswordHash = passwordHasher.Hash(request.Password),
             Setting = new UserSetting()
         };
+        var verificationCode = SetNewVerificationCode(user, DateTime.UtcNow);
 
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        await emailSender.SendVerificationCodeAsync(
+            user.Email,
+            user.Username,
+            verificationCode,
+            emailOptions.CodeExpirationMinutes,
+            cancellationToken);
+
+        return new RegisterResponse(
+            MapUser(user),
+            RequiresEmailVerification: true,
+            user.EmailVerificationCodeExpiresAt!.Value);
+    }
+
+    public async Task<AuthResponse> VerifyEmailAsync(
+        VerifyEmailRequest request,
+        CancellationToken cancellationToken)
+    {
+        var email = NormalizeEmail(request.Email);
+        var user = await dbContext.Users.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+        var now = DateTime.UtcNow;
+
+        if (user is null ||
+            user.IsEmailVerified ||
+            user.EmailVerificationCodeHash is null ||
+            user.EmailVerificationCodeExpiresAt is null ||
+            user.EmailVerificationCodeExpiresAt <= now ||
+            user.EmailVerificationFailedAttempts >= emailOptions.MaxFailedAttempts)
+        {
+            throw new ValidationException(InvalidVerificationCodeMessage);
+        }
+
+        if (!verificationCodeProtector.Verify(email, request.Code, user.EmailVerificationCodeHash))
+        {
+            user.EmailVerificationFailedAttempts++;
+            if (user.EmailVerificationFailedAttempts >= emailOptions.MaxFailedAttempts)
+            {
+                ClearVerificationCode(user);
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            throw new ValidationException(InvalidVerificationCodeMessage);
+        }
+
+        user.IsEmailVerified = true;
+        user.EmailVerifiedAt = now;
+        ClearVerificationCode(user);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
         return CreateResponse(user);
+    }
+
+    public async Task ResendVerificationEmailAsync(
+        ResendVerificationEmailRequest request,
+        CancellationToken cancellationToken)
+    {
+        var email = NormalizeEmail(request.Email);
+        var user = await dbContext.Users.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+        var now = DateTime.UtcNow;
+
+        if (user is null || user.IsEmailVerified)
+        {
+            return;
+        }
+
+        if (user.EmailVerificationCodeSentAt is not null &&
+            user.EmailVerificationCodeSentAt.Value.AddSeconds(emailOptions.ResendCooldownSeconds) > now)
+        {
+            return;
+        }
+
+        var verificationCode = SetNewVerificationCode(user, now);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await emailSender.SendVerificationCodeAsync(
+            user.Email,
+            user.Username,
+            verificationCode,
+            emailOptions.CodeExpirationMinutes,
+            cancellationToken);
     }
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
@@ -53,6 +141,11 @@ public sealed class AuthService(
         if (user is null || !passwordHasher.Verify(request.Password, user.PasswordHash))
         {
             throw new UnauthorizedException("이메일 또는 비밀번호가 올바르지 않습니다.");
+        }
+
+        if (!user.IsEmailVerified)
+        {
+            throw new ForbiddenException("이메일 인증이 필요합니다.");
         }
 
         return CreateResponse(user);
@@ -72,7 +165,26 @@ public sealed class AuthService(
         return new AuthResponse(token, expiresAt, MapUser(user));
     }
 
-    private static UserResponse MapUser(User user) => new(user.Id, user.Email, user.Username, user.CreatedAt);
+    private string SetNewVerificationCode(User user, DateTime now)
+    {
+        var code = verificationCodeProtector.Generate();
+        user.EmailVerificationCodeHash = verificationCodeProtector.Hash(user.Email, code);
+        user.EmailVerificationCodeExpiresAt = now.AddMinutes(emailOptions.CodeExpirationMinutes);
+        user.EmailVerificationCodeSentAt = now;
+        user.EmailVerificationFailedAttempts = 0;
+        return code;
+    }
+
+    private static void ClearVerificationCode(User user)
+    {
+        user.EmailVerificationCodeHash = null;
+        user.EmailVerificationCodeExpiresAt = null;
+        user.EmailVerificationCodeSentAt = null;
+        user.EmailVerificationFailedAttempts = 0;
+    }
+
+    private static UserResponse MapUser(User user) =>
+        new(user.Id, user.Email, user.Username, user.IsEmailVerified, user.CreatedAt);
 
     private static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
 }

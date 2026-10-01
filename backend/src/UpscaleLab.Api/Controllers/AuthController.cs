@@ -11,13 +11,34 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
 {
     [AllowAnonymous]
     [HttpPost("register")]
-    [ProducesResponseType<AuthResponse>(StatusCodes.Status201Created)]
-    public async Task<ActionResult<AuthResponse>> Register(
+    [ProducesResponseType<RegisterResponse>(StatusCodes.Status201Created)]
+    public async Task<ActionResult<RegisterResponse>> Register(
         RegisterRequest request,
         CancellationToken cancellationToken)
     {
         var response = await authService.RegisterAsync(request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, response);
+    }
+
+    [AllowAnonymous]
+    [HttpPost("verify-email")]
+    [ProducesResponseType<AuthResponse>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<AuthResponse>> VerifyEmail(
+        VerifyEmailRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await authService.VerifyEmailAsync(request, cancellationToken));
+    }
+
+    [AllowAnonymous]
+    [HttpPost("resend-verification")]
+    [ProducesResponseType<MessageResponse>(StatusCodes.Status202Accepted)]
+    public async Task<ActionResult<MessageResponse>> ResendVerificationEmail(
+        ResendVerificationEmailRequest request,
+        CancellationToken cancellationToken)
+    {
+        await authService.ResendVerificationEmailAsync(request, cancellationToken);
+        return Accepted(new MessageResponse("인증 메일 요청이 접수되었습니다."));
     }
 
     [AllowAnonymous]

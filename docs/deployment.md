@@ -22,11 +22,12 @@ EC2 홈 quota 때문에 .NET 8 SDK 전체 설치는 불가능했고, 실제 실�
 - EC2 instance profile/IAM Role 연결 여부
 - Replicate API token
 - 충분히 긴 JWT signing secret
+- Resend API key, 인증된 발신 주소, 이메일 코드 hash key
 - 운영 Web origin 목록
 
 권장 S3 권한은 대상 bucket/prefix에 대한 `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`로 제한합니다. bucket 삭제, policy 전체 변경, public 공개는 필요하지 않습니다.
 
-Secrets Manager를 사용할 경우 DB connection, JWT secret, Replicate token을 별도 secret으로 만들고 EC2 Role에 필요한 `secretsmanager:GetSecretValue`만 부여합니다. 현재 EC2에는 IAM Role이 없으므로 비용과 권한 범위를 합의하기 전에는 구성하지 않았습니다.
+Secrets Manager를 사용할 경우 DB connection, JWT secret, Replicate token, Resend API key, 이메일 코드 hash key를 별도 secret으로 만들고 EC2 Role에 필요한 `secretsmanager:GetSecretValue`만 부여합니다. 현재 EC2에는 IAM Role이 없으므로 비용과 권한 범위를 합의하기 전에는 구성하지 않았습니다.
 
 ## Publish
 
@@ -56,6 +57,9 @@ ASPNETCORE_ENVIRONMENT=Production
 ASPNETCORE_URLS=http://127.0.0.1:5080
 ConnectionStrings__DefaultConnection=Host=YOUR_DB_ENDPOINT;Port=5432;Database=YOUR_DB_NAME;Username=YOUR_DB_USER;Password=YOUR_DB_PASSWORD;SSL Mode=Require;Trust Server Certificate=true
 Jwt__Secret=YOUR_RANDOM_SECRET_AT_LEAST_32_CHARACTERS
+EmailVerification__ApiKey=YOUR_RESEND_API_KEY
+EmailVerification__FromAddress=no-reply@YOUR_VERIFIED_DOMAIN
+EmailVerification__CodeHashKey=YOUR_RANDOM_SECRET_AT_LEAST_32_CHARACTERS
 AWS__Region=ap-northeast-2
 AWS__S3BucketName=YOUR_S3_BUCKET
 Replicate__ApiToken=YOUR_REPLICATE_TOKEN

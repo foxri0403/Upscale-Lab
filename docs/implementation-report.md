@@ -2,6 +2,8 @@
 
 기준일: 2026-09-28
 
+인증 기능 업데이트: 2026-10-02
+
 ## 1. 현재 GitHub Repository 구조
 
 - 원격 저장소 기본 브랜치: `main`
@@ -58,7 +60,7 @@
 ## 6. 구현 API
 
 - Health: `GET /health`
-- Auth: `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`
+- Auth: `POST /api/auth/register`, `POST /api/auth/verify-email`, `POST /api/auth/resend-verification`, `POST /api/auth/login`, `GET /api/auth/me`
 - Device: `GET/POST /api/devices`, `PUT/DELETE /api/devices/{id}`
 - UserSetting: `GET/PUT /api/settings`
 - Image: `GET/POST /api/images`, `GET/DELETE /api/images/{id}`, `POST /api/images/{id}/download-url`
@@ -70,7 +72,7 @@
 
 ## 7. Authentication 방식
 
-BCrypt work factor 12로 비밀번호를 저장하고 JWT HS256 access token에 UserId, Email, Username claim을 넣습니다. Secret은 설정에 존재하지 않으며 32바이트 미만이면 앱 시작이 거부됩니다. 모든 사용자 소유 데이터는 서비스 쿼리에서 UserId를 함께 검사합니다.
+BCrypt work factor 12로 비밀번호를 저장하고 JWT HS256 access token에 UserId, Email, Username claim을 넣습니다. 신규 계정에는 Resend로 6자리 이메일 인증 코드를 보내며 인증이 완료되기 전에는 JWT를 발급하지 않습니다. 인증 코드 원문 대신 별도 secret을 사용하는 HMAC-SHA256 결과만 저장합니다. JWT secret은 설정 파일에 존재하지 않으며 32바이트 미만이면 앱 시작이 거부됩니다. 모든 사용자 소유 데이터는 서비스 쿼리에서 UserId를 함께 검사합니다.
 
 ## 8. AWS S3 연동 상태
 
@@ -96,6 +98,9 @@ Bearer token 설정, Real-ESRGAN prediction 생성/조회 서비스는 구현했
 
 - `ConnectionStrings__DefaultConnection`
 - `Jwt__Secret`
+- `EmailVerification__ApiKey`
+- `EmailVerification__FromAddress`
+- `EmailVerification__CodeHashKey`
 - `AWS__Region` (기본 `ap-northeast-2`)
 - `AWS__S3BucketName`
 - `Replicate__ApiToken`
@@ -120,7 +125,7 @@ Bearer token 설정, Real-ESRGAN prediction 생성/조회 서비스는 구현했
 - 실제 RDS/S3/Replicate 통합 테스트
 - Replicate 비동기 작업 queue/polling/retry와 OptimizedImage 자동 기록
 - SignalR 도메인 이벤트 연결과 오프라인 sync
-- refresh token, email verification, password reset, rate limiting
+- refresh token, password reset, API 전체 rate limiting
 - 썸네일/바이러스 또는 이미지 디코딩 검증, pagination
 - nginx/ALB HTTPS, 운영 systemd 활성화, GitHub Actions CI/CD
 - WPF/Flutter 클라이언트 연동
