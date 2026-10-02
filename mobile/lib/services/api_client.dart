@@ -25,6 +25,49 @@ class ApiClient {
     _accessToken = (jsonDecode(response.body) as Map<String, dynamic>)['accessToken'] as String;
   }
 
+  // 회원가입: 성공하면 Cognito가 이메일로 6자리 인증 코드를 전송한다.
+  Future<void> register({
+    required String email,
+    required String username,
+    required String password,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/auth/register'),
+      headers: _headers,
+      body: jsonEncode({
+        'email': email,
+        'username': username,
+        'password': password,
+      }),
+    );
+    _ensureSuccess(response);
+  }
+
+  // 이메일 인증: 성공 응답의 JWT를 저장해 바로 로그인 상태로 만든다.
+  Future<void> verifyEmail({
+    required String email,
+    required String code,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/auth/verify-email'),
+      headers: _headers,
+      body: jsonEncode({'email': email, 'code': code}),
+    );
+    _ensureSuccess(response);
+    _accessToken =
+        (jsonDecode(response.body) as Map<String, dynamic>)['accessToken'] as String;
+  }
+
+  // Cognito 이메일 인증 코드 재전송.
+  Future<void> resendVerification(String email) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/auth/resend-verification'),
+      headers: _headers,
+      body: jsonEncode({'email': email}),
+    );
+    _ensureSuccess(response);
+  }
+
   Future<List<LiveLayerProject>> getProjects() async {
     final response = await http.get(Uri.parse('$baseUrl/api/projects'), headers: _headers);
     _ensureSuccess(response);
