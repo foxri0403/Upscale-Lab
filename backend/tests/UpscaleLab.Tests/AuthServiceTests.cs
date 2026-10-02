@@ -282,6 +282,26 @@ public sealed class AuthServiceTests
     }
 
     [Fact]
+    public async Task Login_WithUsername_ReturnsToken()
+    {
+        await using var dbContext = CreateDbContext();
+        var (service, _) = CreateService(dbContext);
+        await service.RegisterAsync(
+            new RegisterRequest("user@example.com", "tester", ValidPassword),
+            CancellationToken.None);
+        await service.VerifyEmailAsync(
+            new VerifyEmailRequest("user@example.com", "000001"),
+            CancellationToken.None);
+
+        var result = await service.LoginAsync(
+            new LoginRequest("tester", ValidPassword),
+            CancellationToken.None);
+
+        Assert.Equal("test-token", result.AccessToken);
+        Assert.Equal("tester", result.User.Username);
+    }
+
+    [Fact]
     public async Task Login_WithWrongPassword_IsRejected()
     {
         await using var dbContext = CreateDbContext();

@@ -11,20 +11,25 @@ class ApiClient {
   String? _accessToken;
 
   Map<String, String> get _headers => {
-    'content-type': 'application/json',
-    if (_accessToken != null) 'authorization': 'Bearer $_accessToken',
-  };
+        'content-type': 'application/json',
+        if (_accessToken != null) 'authorization': 'Bearer $_accessToken',
+      };
 
-  Future<void> login(String email, String password) async {
+  Future<void> login(String identifier, String password) async {
     final response = await http.post(
       Uri.parse('$baseUrl/api/auth/login'),
       headers: _headers,
-      body: jsonEncode({'email': email, 'password': password}),
+      // The API keeps the legacy "email" key for existing clients, but accepts
+      // either an email address or username as its value.
+      body: jsonEncode({'email': identifier, 'password': password}),
     );
     _ensureSuccess(response);
-    _accessToken =
-        (jsonDecode(response.body) as Map<String, dynamic>)['accessToken']
-            as String;
+    _accessToken = (jsonDecode(response.body)
+        as Map<String, dynamic>)['accessToken'] as String;
+  }
+
+  void logout() {
+    _accessToken = null;
   }
 
   // 회원가입: 성공하면 Cognito가 이메일로 6자리 인증 코드를 전송한다.
@@ -56,9 +61,8 @@ class ApiClient {
       body: jsonEncode({'email': email, 'code': code}),
     );
     _ensureSuccess(response);
-    _accessToken =
-        (jsonDecode(response.body) as Map<String, dynamic>)['accessToken']
-            as String;
+    _accessToken = (jsonDecode(response.body)
+        as Map<String, dynamic>)['accessToken'] as String;
   }
 
   // Cognito 이메일 인증 코드 재전송.
@@ -208,6 +212,35 @@ class ApiException implements Exception {
   final int statusCode;
   final String body;
 
+  Map<String, dynamic>? get _problem {
+    try {
+      final decoded = jsonDecode(body);
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, String> get fieldErrors {
+    final errors = _problem?['errors'];
+    if (errors is! Map<String, dynamic>) return const {};
+
+    return errors.map((key, value) {
+      if (value is List && value.isNotEmpty) {
+        return MapEntry(key, '${value.first}');
+      }
+      return MapEntry(key, '$value');
+    });
+  }
+
+  String get message {
+    final problem = _problem;
+    final detail = problem?['detail'];
+    if (detail is String && detail.trim().isNotEmpty) return detail;
+    if (fieldErrors.isNotEmpty) return fieldErrors.values.first;
+    return '요청을 처리하지 못했습니다. ($statusCode)';
+  }
+
   @override
-  String toString() => 'API request failed ($statusCode): $body';
+  String toString() => message;
 }

@@ -8,7 +8,8 @@ public sealed record RegisterRequest(
     [param: Required, PasswordPolicy] string Password);
 
 public sealed record LoginRequest(
-    [param: Required, EmailAddress, MaxLength(320)] string Email,
+    // Backward-compatible field name: accepts either an email address or username.
+    [param: Required, MinLength(2), MaxLength(320)] string Email,
     [param: Required, MaxLength(128)] string Password);
 
 public sealed record VerifyEmailRequest(

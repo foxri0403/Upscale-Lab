@@ -177,12 +177,21 @@ public sealed class AuthService(
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
     {
-        var email = NormalizeEmail(request.Email);
-        var user = await dbContext.Users.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+        var identifier = request.Email.Trim();
+        User? user;
+        if (identifier.Contains('@'))
+        {
+            var email = NormalizeEmail(identifier);
+            user = await dbContext.Users.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+        }
+        else
+        {
+            user = await dbContext.Users.SingleOrDefaultAsync(x => x.Username == identifier, cancellationToken);
+        }
 
         if (user is null || !passwordHasher.Verify(request.Password, user.PasswordHash))
         {
-            throw new UnauthorizedException("이메일 또는 비밀번호가 올바르지 않습니다.");
+            throw new UnauthorizedException("이메일/사용자 아이디 또는 비밀번호가 올바르지 않습니다.");
         }
 
         if (!user.IsEmailVerified)

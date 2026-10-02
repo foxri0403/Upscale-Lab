@@ -16,6 +16,17 @@ void main() {
   runApp(LiveLayerApp(apiClient: ApiClient(baseUrl: apiBaseUrl)));
 }
 
+bool _meetsPasswordPolicy(String password) {
+  return password.length >= 10 &&
+      password.length <= 128 &&
+      RegExp('[A-Z]').hasMatch(password) &&
+      RegExp(r'\d').hasMatch(password) &&
+      RegExp(r'[^A-Za-z0-9\s]').hasMatch(password);
+}
+
+bool _isValidEmail(String email) =>
+    RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
+
 class LiveLayerApp extends StatelessWidget {
   const LiveLayerApp({super.key, required this.apiClient});
 
@@ -44,6 +55,9 @@ class LiveLayerTextField extends StatelessWidget {
     required this.icon,
     this.obscureText = false,
     this.keyboardType,
+    this.errorText,
+    this.suffixIcon,
+    this.onChanged,
   });
 
   final TextEditingController controller;
@@ -51,6 +65,9 @@ class LiveLayerTextField extends StatelessWidget {
   final IconData icon;
   final bool obscureText;
   final TextInputType? keyboardType;
+  final String? errorText;
+  final Widget? suffixIcon;
+  final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -58,10 +75,13 @@ class LiveLayerTextField extends StatelessWidget {
       controller: controller,
       obscureText: obscureText,
       keyboardType: keyboardType,
+      onChanged: onChanged,
       decoration: InputDecoration(
         hintText: hintText,
+        errorText: errorText,
         hintStyle: const TextStyle(color: Color(0xFF9299AA), fontSize: 15),
         prefixIcon: Icon(icon, color: const Color(0xFF6F7789)),
+        suffixIcon: suffixIcon,
         filled: true,
         fillColor: const Color(0xFFFAFAFC),
         contentPadding: const EdgeInsets.symmetric(
@@ -75,6 +95,14 @@ class LiveLayerTextField extends StatelessWidget {
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: Color(0xFF536DFE), width: 1.5),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Color(0xFFD93025), width: 1.5),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Color(0xFFD93025), width: 1.5),
         ),
       ),
     );
@@ -126,19 +154,20 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final _email = TextEditingController();
+  final _identifier = TextEditingController();
   final _password = TextEditingController();
   bool _busy = false;
+  bool _showPassword = false;
 
   Future<void> _login() async {
-    if (_email.text.trim().isEmpty || _password.text.isEmpty) {
-      _message('이메일과 비밀번호를 입력해주세요.');
+    if (_identifier.text.trim().isEmpty || _password.text.isEmpty) {
+      _message('이메일 또는 사용자 아이디와 비밀번호를 입력해주세요.');
       return;
     }
 
     setState(() => _busy = true);
     try {
-      await widget.apiClient.login(_email.text.trim(), _password.text);
+      await widget.apiClient.login(_identifier.text.trim(), _password.text);
       if (!mounted) return;
       await Navigator.of(context).pushReplacement(
         MaterialPageRoute(
@@ -159,7 +188,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   void dispose() {
-    _email.dispose();
+    _identifier.dispose();
     _password.dispose();
     super.dispose();
   }
@@ -193,17 +222,27 @@ class _LoginPageState extends State<LoginPage> {
               ),
               const SizedBox(height: 55),
               LiveLayerTextField(
-                controller: _email,
-                hintText: '이메일 주소',
-                icon: Icons.mail_outline,
-                keyboardType: TextInputType.emailAddress,
+                controller: _identifier,
+                hintText: '이메일 또는 사용자 아이디',
+                icon: Icons.person_outline,
               ),
               const SizedBox(height: 14),
               LiveLayerTextField(
                 controller: _password,
                 hintText: '비밀번호',
                 icon: Icons.lock_outline,
-                obscureText: true,
+                obscureText: !_showPassword,
+                suffixIcon: IconButton(
+                  tooltip: _showPassword ? '비밀번호 숨기기' : '비밀번호 보기',
+                  onPressed: () =>
+                      setState(() => _showPassword = !_showPassword),
+                  icon: Icon(
+                    _showPassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                    color: const Color(0xFF6F7789),
+                  ),
+                ),
               ),
               const SizedBox(height: 22),
               LiveLayerButton(
@@ -403,6 +442,8 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
   final _passwordCheck = TextEditingController();
   bool _codeSent = false;
   bool _busy = false;
+  bool _showNewPassword = false;
+  bool _showPasswordCheck = false;
 
   Future<void> _sendCode() async {
     final email = _email.text.trim();
@@ -431,7 +472,7 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
       _message('이메일로 받은 6자리 코드를 입력해주세요.');
       return;
     }
-    if (!_isValidPassword(password)) {
+    if (!_meetsPasswordPolicy(password)) {
       _message('비밀번호는 10자 이상이며 대문자, 숫자, 특수문자를 포함해야 합니다.');
       return;
     }
@@ -457,13 +498,6 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  bool _isValidPassword(String password) {
-    return password.length >= 10 &&
-        RegExp('[A-Z]').hasMatch(password) &&
-        RegExp(r'\d').hasMatch(password) &&
-        RegExp(r'[^A-Za-z0-9\s]').hasMatch(password);
   }
 
   void _message(String message) {
@@ -528,7 +562,18 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
                   controller: _newPassword,
                   hintText: '새 비밀번호',
                   icon: Icons.lock_reset_outlined,
-                  obscureText: true,
+                  obscureText: !_showNewPassword,
+                  suffixIcon: IconButton(
+                    tooltip: _showNewPassword ? '비밀번호 숨기기' : '비밀번호 보기',
+                    onPressed: () =>
+                        setState(() => _showNewPassword = !_showNewPassword),
+                    icon: Icon(
+                      _showNewPassword
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      color: const Color(0xFF6F7789),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 const Padding(
@@ -543,7 +588,18 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
                   controller: _passwordCheck,
                   hintText: '새 비밀번호 확인',
                   icon: Icons.lock_outline,
-                  obscureText: true,
+                  obscureText: !_showPasswordCheck,
+                  suffixIcon: IconButton(
+                    tooltip: _showPasswordCheck ? '비밀번호 숨기기' : '비밀번호 보기',
+                    onPressed: () => setState(
+                        () => _showPasswordCheck = !_showPasswordCheck),
+                    icon: Icon(
+                      _showPasswordCheck
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      color: const Color(0xFF6F7789),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 22),
                 LiveLayerButton(
@@ -575,23 +631,108 @@ class _SignUpPageState extends State<SignUpPage> {
   final _password = TextEditingController();
   final _passwordCheck = TextEditingController();
   bool _busy = false;
+  bool _showPassword = false;
+  bool _showPasswordCheck = false;
+  String? _emailError;
+  String? _usernameError;
+  String? _passwordError;
+  String? _passwordCheckError;
+  String? _submitError;
+
+  bool _validateForm() {
+    final email = _email.text.trim();
+    final username = _username.text.trim();
+    final password = _password.text;
+    final passwordCheck = _passwordCheck.text;
+
+    setState(() {
+      _emailError = email.isEmpty
+          ? '이메일을 입력해주세요.'
+          : (!_isValidEmail(email) ? '올바른 이메일 형식이 아닙니다.' : null);
+      _usernameError = username.isEmpty
+          ? '사용자 아이디를 입력해주세요.'
+          : (username.length < 2 || username.length > 50
+              ? '사용자 아이디는 2~50자로 입력해주세요.'
+              : null);
+      _passwordError = password.isEmpty
+          ? '비밀번호를 입력해주세요.'
+          : (!_meetsPasswordPolicy(password)
+              ? '10~128자이며 대문자, 숫자, 특수문자를 포함해야 합니다.'
+              : null);
+      _passwordCheckError = passwordCheck.isEmpty
+          ? '비밀번호 확인을 입력해주세요.'
+          : (password != passwordCheck ? '비밀번호가 일치하지 않습니다.' : null);
+      _submitError = null;
+    });
+
+    final valid = _emailError == null &&
+        _usernameError == null &&
+        _passwordError == null &&
+        _passwordCheckError == null;
+    if (!valid) {
+      setState(() => _submitError = '붉게 표시된 입력 내용을 확인해주세요.');
+    }
+    return valid;
+  }
+
+  void _applyRegistrationError(Object error) {
+    var message = '회원가입 요청을 처리하지 못했습니다.';
+    String? emailError;
+    String? usernameError;
+    String? passwordError;
+
+    if (error is ApiException) {
+      message = error.message;
+      emailError = error.fieldErrors['Email'];
+      usernameError = error.fieldErrors['Username'];
+      passwordError = error.fieldErrors['Password'];
+
+      if (message.contains('이메일') && message.contains('사용 중')) {
+        emailError = '이미 사용 중인 이메일입니다.';
+      }
+      if ((message.contains('사용자 이름') || message.contains('사용자 아이디')) &&
+          message.contains('사용 중')) {
+        usernameError = '이미 사용 중인 사용자 아이디입니다.';
+      }
+      if (message.contains('비밀번호') && passwordError == null) {
+        passwordError = message;
+      }
+    }
+
+    setState(() {
+      _emailError = emailError;
+      _usernameError = usernameError;
+      _passwordError = passwordError;
+      _submitError = message;
+    });
+  }
+
+  void _clearFieldError(String field) {
+    setState(() {
+      switch (field) {
+        case 'email':
+          _emailError = null;
+          break;
+        case 'username':
+          _usernameError = null;
+          break;
+        case 'password':
+          _passwordError = null;
+          break;
+        case 'passwordCheck':
+          _passwordCheckError = null;
+          break;
+      }
+      _submitError = null;
+    });
+  }
 
   Future<void> _signUp() async {
     final email = _email.text.trim();
     final username = _username.text.trim();
     final password = _password.text;
 
-    if (email.isEmpty ||
-        username.isEmpty ||
-        password.isEmpty ||
-        _passwordCheck.text.isEmpty) {
-      _message('모든 항목을 입력해주세요.');
-      return;
-    }
-    if (password != _passwordCheck.text) {
-      _message('비밀번호가 일치하지 않습니다.');
-      return;
-    }
+    if (!_validateForm()) return;
 
     setState(() => _busy = true);
     try {
@@ -608,15 +749,10 @@ class _SignUpPageState extends State<SignUpPage> {
         ),
       );
     } catch (error) {
-      if (mounted) _message('회원가입에 실패했습니다.\n$error');
+      if (mounted) _applyRegistrationError(error);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  void _message(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -669,19 +805,36 @@ class _SignUpPageState extends State<SignUpPage> {
                 hintText: '이메일 주소',
                 icon: Icons.mail_outline,
                 keyboardType: TextInputType.emailAddress,
+                errorText: _emailError,
+                onChanged: (_) => _clearFieldError('email'),
               ),
               const SizedBox(height: 14),
               LiveLayerTextField(
                 controller: _username,
-                hintText: '사용자 이름',
+                hintText: '사용자 아이디',
                 icon: Icons.person_outline,
+                errorText: _usernameError,
+                onChanged: (_) => _clearFieldError('username'),
               ),
               const SizedBox(height: 14),
               LiveLayerTextField(
                 controller: _password,
                 hintText: '비밀번호',
                 icon: Icons.lock_outline,
-                obscureText: true,
+                obscureText: !_showPassword,
+                errorText: _passwordError,
+                onChanged: (_) => _clearFieldError('password'),
+                suffixIcon: IconButton(
+                  tooltip: _showPassword ? '비밀번호 숨기기' : '비밀번호 보기',
+                  onPressed: () =>
+                      setState(() => _showPassword = !_showPassword),
+                  icon: Icon(
+                    _showPassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                    color: const Color(0xFF6F7789),
+                  ),
+                ),
               ),
               const SizedBox(height: 8),
               const Padding(
@@ -696,13 +849,41 @@ class _SignUpPageState extends State<SignUpPage> {
                 controller: _passwordCheck,
                 hintText: '비밀번호 확인',
                 icon: Icons.lock_outline,
-                obscureText: true,
+                obscureText: !_showPasswordCheck,
+                errorText: _passwordCheckError,
+                onChanged: (_) => _clearFieldError('passwordCheck'),
+                suffixIcon: IconButton(
+                  tooltip: _showPasswordCheck ? '비밀번호 숨기기' : '비밀번호 보기',
+                  onPressed: () =>
+                      setState(() => _showPasswordCheck = !_showPasswordCheck),
+                  icon: Icon(
+                    _showPasswordCheck
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                    color: const Color(0xFF6F7789),
+                  ),
+                ),
               ),
               const SizedBox(height: 24),
               LiveLayerButton(
                 text: _busy ? '회원가입 중...' : '회원가입하기',
                 onPressed: _busy ? null : _signUp,
               ),
+              if (_submitError != null) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: Text(
+                    _submitError!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFFD93025),
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 25),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -929,6 +1110,30 @@ class _ProjectListPageState extends State<ProjectListPage> {
 
   void _reload() => setState(() => _projects = widget.apiClient.getProjects());
 
+  void _logout() {
+    widget.apiClient.logout();
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => LoginPage(apiClient: widget.apiClient),
+      ),
+      (_) => false,
+    );
+  }
+
+  Widget _settings() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 22),
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: OutlinedButton.icon(
+          onPressed: _logout,
+          icon: const Icon(Icons.logout),
+          label: const Text('로그아웃'),
+        ),
+      ),
+    );
+  }
+
   Future<void> _createProject() async {
     final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
     if (picked == null) return;
@@ -1030,7 +1235,7 @@ class _ProjectListPageState extends State<ProjectListPage> {
         content = const Center(child: Text('탐색 화면은 다음 단계에서 연결합니다.'));
         break;
       case 2:
-        content = const Center(child: Text('설정 화면은 다음 단계에서 연결합니다.'));
+        content = _settings();
         break;
       default:
         content = _home();

@@ -101,12 +101,12 @@
 
 ```json
 {
-  "email": "user@example.com",
+  "email": "user@example.com 또는 tester",
   "password": "Correct-horse1!"
 }
 ```
 
-이메일 인증 완료 후 `200 OK`와 `AuthResponse`를 반환합니다. 인증 전 로그인은 `403 Forbidden`, 로그인 정보 불일치는 `401 Unauthorized`입니다.
+하위 호환성을 위해 요청 필드명은 `email`을 유지하지만 값에는 이메일 또는 사용자 아이디를 입력할 수 있습니다. 이메일 인증 완료 후 `200 OK`와 `AuthResponse`를 반환합니다. 인증 전 로그인은 `403 Forbidden`, 로그인 정보 불일치는 `401 Unauthorized`입니다.
 
 인증이 필요한 후속 API에는 다음 헤더를 사용합니다.
 
