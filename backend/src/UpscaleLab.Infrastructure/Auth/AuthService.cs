@@ -114,14 +114,14 @@ public sealed class AuthService(
         FindIdRequest request,
         CancellationToken cancellationToken)
     {
-        var username = request.Username.Trim();
-        var email = await dbContext.Users
+        var email = NormalizeEmail(request.Email);
+        var username = await dbContext.Users
             .AsNoTracking()
-            .Where(x => x.Username == username && x.IsEmailVerified)
-            .Select(x => x.Email)
+            .Where(x => x.Email == email && x.IsEmailVerified)
+            .Select(x => x.Username)
             .SingleOrDefaultAsync(cancellationToken);
 
-        return new FindIdResponse(email is null ? null : MaskEmail(email));
+        return new FindIdResponse(username);
     }
 
     public async Task StartPasswordResetAsync(
@@ -158,11 +158,6 @@ public sealed class AuthService(
         if (user is null)
         {
             throw new ValidationException(InvalidPasswordResetMessage);
-        }
-
-        if (passwordHasher.Verify(request.NewPassword, user.PasswordHash))
-        {
-            throw new ValidationException("새 비밀번호는 기존 비밀번호와 달라야 합니다.");
         }
 
         await passwordRecoveryProvider.ConfirmPasswordResetAsync(
@@ -218,17 +213,6 @@ public sealed class AuthService(
 
     private static UserResponse MapUser(User user) =>
         new(user.Id, user.Email, user.Username, user.IsEmailVerified, user.CreatedAt);
-
-    private static string MaskEmail(string email)
-    {
-        var separatorIndex = email.IndexOf('@');
-        if (separatorIndex <= 0 || separatorIndex == email.Length - 1)
-        {
-            return "***";
-        }
-
-        return $"{email[0]}***{email[separatorIndex..]}";
-    }
 
     private static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
 }

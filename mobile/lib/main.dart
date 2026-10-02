@@ -325,14 +325,14 @@ class FindIdPage extends StatefulWidget {
 }
 
 class _FindIdPageState extends State<FindIdPage> {
-  final _username = TextEditingController();
+  final _email = TextEditingController();
   bool _busy = false;
   String? _result;
 
   Future<void> _findId() async {
-    final username = _username.text.trim();
-    if (username.length < 2) {
-      _message('사용자 이름을 2자 이상 입력해주세요.');
+    final email = _email.text.trim();
+    if (!_isValidEmail(email)) {
+      _message('올바른 이메일 주소를 입력해주세요.');
       return;
     }
 
@@ -341,12 +341,12 @@ class _FindIdPageState extends State<FindIdPage> {
       _result = null;
     });
     try {
-      final maskedEmail = await widget.apiClient.findId(username);
+      final username = await widget.apiClient.findId(email);
       if (!mounted) return;
       setState(() {
-        _result = maskedEmail == null
+        _result = username == null
             ? '일치하는 인증 완료 계정을 찾지 못했습니다.'
-            : '등록된 로그인 이메일은 $maskedEmail 입니다.';
+            : '등록된 사용자 아이디는 $username 입니다.';
       });
     } catch (error) {
       if (mounted) _message('아이디를 찾지 못했습니다.\n$error');
@@ -362,7 +362,7 @@ class _FindIdPageState extends State<FindIdPage> {
 
   @override
   void dispose() {
-    _username.dispose();
+    _email.dispose();
     super.dispose();
   }
 
@@ -381,7 +381,7 @@ class _FindIdPageState extends State<FindIdPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                '사용자 이름을 입력하면 가입할 때 사용한 이메일을 일부 가려서 알려드려요.',
+                '가입할 때 사용한 이메일을 입력하면 사용자 아이디를 알려드려요.',
                 style: TextStyle(
                   fontSize: 15,
                   height: 1.5,
@@ -390,9 +390,10 @@ class _FindIdPageState extends State<FindIdPage> {
               ),
               const SizedBox(height: 30),
               LiveLayerTextField(
-                controller: _username,
-                hintText: '사용자 이름',
-                icon: Icons.person_outline,
+                controller: _email,
+                hintText: '이메일 주소',
+                icon: Icons.mail_outline,
+                keyboardType: TextInputType.emailAddress,
               ),
               const SizedBox(height: 20),
               LiveLayerButton(

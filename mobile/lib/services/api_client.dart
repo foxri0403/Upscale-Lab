@@ -75,16 +75,16 @@ class ApiClient {
     _ensureSuccess(response);
   }
 
-  // 사용자 이름과 일치하는 인증 완료 계정의 마스킹된 이메일을 반환한다.
-  Future<String?> findId(String username) async {
+  // 이메일과 일치하는 인증 완료 계정의 사용자 아이디 전체를 반환한다.
+  Future<String?> findId(String email) async {
     final response = await http.post(
       Uri.parse('$baseUrl/api/auth/find-id'),
       headers: _headers,
-      body: jsonEncode({'username': username}),
+      body: jsonEncode({'email': email}),
     );
     _ensureSuccess(response);
     final body = jsonDecode(response.body) as Map<String, dynamic>;
-    return body['maskedEmail'] as String?;
+    return body['username'] as String?;
   }
 
   // 계정 존재 여부와 관계없이 서버는 동일한 응답을 반환한다.

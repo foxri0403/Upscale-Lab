@@ -20,9 +20,9 @@ public sealed record ResendVerificationEmailRequest(
     [param: Required, EmailAddress, MaxLength(320)] string Email);
 
 public sealed record FindIdRequest(
-    [param: Required, MinLength(2), MaxLength(50)] string Username);
+    [param: Required, EmailAddress, MaxLength(320)] string Email);
 
-public sealed record FindIdResponse(string? MaskedEmail);
+public sealed record FindIdResponse(string? Username);
 
 public sealed record PasswordResetStartRequest(
     [param: Required, EmailAddress, MaxLength(320)] string Email);

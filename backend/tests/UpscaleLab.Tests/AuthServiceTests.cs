@@ -130,7 +130,7 @@ public sealed class AuthServiceTests
     }
 
     [Fact]
-    public async Task FindId_ForVerifiedUser_ReturnsMaskedEmail()
+    public async Task FindId_ForVerifiedUser_ReturnsFullUsername()
     {
         await using var dbContext = CreateDbContext();
         var (service, _) = CreateService(dbContext);
@@ -142,14 +142,14 @@ public sealed class AuthServiceTests
             CancellationToken.None);
 
         var result = await service.FindIdAsync(
-            new FindIdRequest(" tester "),
+            new FindIdRequest(" USER@example.com "),
             CancellationToken.None);
 
-        Assert.Equal("u***@example.com", result.MaskedEmail);
+        Assert.Equal("tester", result.Username);
     }
 
     [Fact]
-    public async Task FindId_ForUnverifiedUser_DoesNotReturnEmail()
+    public async Task FindId_ForUnverifiedUser_DoesNotReturnUsername()
     {
         await using var dbContext = CreateDbContext();
         var (service, _) = CreateService(dbContext);
@@ -158,10 +158,10 @@ public sealed class AuthServiceTests
             CancellationToken.None);
 
         var result = await service.FindIdAsync(
-            new FindIdRequest("tester"),
+            new FindIdRequest("user@example.com"),
             CancellationToken.None);
 
-        Assert.Null(result.MaskedEmail);
+        Assert.Null(result.Username);
     }
 
     [Fact]
@@ -221,6 +221,31 @@ public sealed class AuthServiceTests
         Assert.True(stored.UpdatedAt >= before);
         Assert.Equal(
             ("user@example.com", "123456", newPassword),
+            Assert.Single(provider.PasswordResetConfirmations));
+    }
+
+    [Fact]
+    public async Task ConfirmPasswordReset_WithSamePassword_IsAcceptedAndRehashed()
+    {
+        await using var dbContext = CreateDbContext();
+        var (service, provider) = CreateService(dbContext);
+        await service.RegisterAsync(
+            new RegisterRequest("user@example.com", "tester", ValidPassword),
+            CancellationToken.None);
+        await service.VerifyEmailAsync(
+            new VerifyEmailRequest("user@example.com", "000001"),
+            CancellationToken.None);
+        var previousHash = (await dbContext.Users.SingleAsync()).PasswordHash;
+
+        await service.ConfirmPasswordResetAsync(
+            new PasswordResetConfirmRequest("user@example.com", "123456", ValidPassword),
+            CancellationToken.None);
+
+        var stored = await dbContext.Users.SingleAsync();
+        Assert.NotEqual(previousHash, stored.PasswordHash);
+        Assert.True(new PasswordHasher().Verify(ValidPassword, stored.PasswordHash));
+        Assert.Equal(
+            ("user@example.com", "123456", ValidPassword),
             Assert.Single(provider.PasswordResetConfirmations));
     }
 
