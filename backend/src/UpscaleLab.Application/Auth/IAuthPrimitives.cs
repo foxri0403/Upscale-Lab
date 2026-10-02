@@ -24,3 +24,14 @@ public interface IEmailVerificationProvider
 
     Task ResendConfirmationCodeAsync(string email, CancellationToken cancellationToken);
 }
+
+public interface IPasswordRecoveryProvider
+{
+    Task StartPasswordResetAsync(string email, CancellationToken cancellationToken);
+
+    Task ConfirmPasswordResetAsync(
+        string email,
+        string code,
+        string newPassword,
+        CancellationToken cancellationToken);
+}

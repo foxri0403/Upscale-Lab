@@ -42,6 +42,39 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     }
 
     [AllowAnonymous]
+    [HttpPost("find-id")]
+    [ProducesResponseType<FindIdResponse>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<FindIdResponse>> FindId(
+        FindIdRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await authService.FindIdAsync(request, cancellationToken));
+    }
+
+    [AllowAnonymous]
+    [HttpPost("forgot-password")]
+    [ProducesResponseType<MessageResponse>(StatusCodes.Status202Accepted)]
+    public async Task<ActionResult<MessageResponse>> ForgotPassword(
+        PasswordResetStartRequest request,
+        CancellationToken cancellationToken)
+    {
+        await authService.StartPasswordResetAsync(request, cancellationToken);
+        return Accepted(new MessageResponse(
+            "일치하는 계정이 있다면 등록된 이메일로 재설정 코드를 전송했습니다."));
+    }
+
+    [AllowAnonymous]
+    [HttpPost("reset-password")]
+    [ProducesResponseType<MessageResponse>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<MessageResponse>> ResetPassword(
+        PasswordResetConfirmRequest request,
+        CancellationToken cancellationToken)
+    {
+        await authService.ConfirmPasswordResetAsync(request, cancellationToken);
+        return Ok(new MessageResponse("비밀번호가 변경되었습니다."));
+    }
+
+    [AllowAnonymous]
     [HttpPost("login")]
     [ProducesResponseType<AuthResponse>(StatusCodes.Status200OK)]
     public async Task<ActionResult<AuthResponse>> Login(

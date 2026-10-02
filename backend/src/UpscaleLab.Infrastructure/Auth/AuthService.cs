@@ -11,10 +11,13 @@ public sealed class AuthService(
     IPasswordHasher passwordHasher,
     IJwtTokenService jwtTokenService,
     IEmailVerificationProvider emailVerificationProvider,
+    IPasswordRecoveryProvider passwordRecoveryProvider,
     CognitoOptions cognitoOptions) : IAuthService
 {
     private const string InvalidVerificationCodeMessage =
         "인증 코드가 올바르지 않거나 만료되었습니다. 새 코드를 요청해 주세요.";
+    private const string InvalidPasswordResetMessage =
+        "재설정 코드가 올바르지 않거나 만료되었습니다. 새 코드를 요청해 주세요.";
 
     public async Task<RegisterResponse> RegisterAsync(
         RegisterRequest request,
@@ -107,6 +110,71 @@ public sealed class AuthService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<FindIdResponse> FindIdAsync(
+        FindIdRequest request,
+        CancellationToken cancellationToken)
+    {
+        var username = request.Username.Trim();
+        var email = await dbContext.Users
+            .AsNoTracking()
+            .Where(x => x.Username == username && x.IsEmailVerified)
+            .Select(x => x.Email)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return new FindIdResponse(email is null ? null : MaskEmail(email));
+    }
+
+    public async Task StartPasswordResetAsync(
+        PasswordResetStartRequest request,
+        CancellationToken cancellationToken)
+    {
+        var email = NormalizeEmail(request.Email);
+        var userExists = await dbContext.Users
+            .AsNoTracking()
+            .AnyAsync(x => x.Email == email && x.IsEmailVerified, cancellationToken);
+
+        if (!userExists)
+        {
+            return;
+        }
+
+        await passwordRecoveryProvider.StartPasswordResetAsync(email, cancellationToken);
+    }
+
+    public async Task ConfirmPasswordResetAsync(
+        PasswordResetConfirmRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!PasswordPolicy.IsSatisfiedBy(request.NewPassword))
+        {
+            throw new ValidationException(PasswordPolicy.ErrorMessage);
+        }
+
+        var email = NormalizeEmail(request.Email);
+        var user = await dbContext.Users.SingleOrDefaultAsync(
+            x => x.Email == email && x.IsEmailVerified,
+            cancellationToken);
+
+        if (user is null)
+        {
+            throw new ValidationException(InvalidPasswordResetMessage);
+        }
+
+        if (passwordHasher.Verify(request.NewPassword, user.PasswordHash))
+        {
+            throw new ValidationException("새 비밀번호는 기존 비밀번호와 달라야 합니다.");
+        }
+
+        await passwordRecoveryProvider.ConfirmPasswordResetAsync(
+            email,
+            request.Code,
+            request.NewPassword,
+            cancellationToken);
+
+        user.PasswordHash = passwordHasher.Hash(request.NewPassword);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
     {
         var email = NormalizeEmail(request.Email);
@@ -141,6 +209,17 @@ public sealed class AuthService(
 
     private static UserResponse MapUser(User user) =>
         new(user.Id, user.Email, user.Username, user.IsEmailVerified, user.CreatedAt);
+
+    private static string MaskEmail(string email)
+    {
+        var separatorIndex = email.IndexOf('@');
+        if (separatorIndex <= 0 || separatorIndex == email.Length - 1)
+        {
+            return "***";
+        }
+
+        return $"{email[0]}***{email[separatorIndex..]}";
+    }
 
     private static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
 }

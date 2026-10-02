@@ -70,13 +70,75 @@ public sealed class CognitoEmailVerificationProviderTests
         Assert.Null(client.ResendRequest.SecretHash);
     }
 
+    [Fact]
+    public async Task StartPasswordReset_SendsExpectedCognitoRequest()
+    {
+        var client = new FakeCognitoClient();
+        var provider = new CognitoEmailVerificationProvider(client, new CognitoOptions
+        {
+            ClientId = "test-client-id",
+            ClientSecret = "test-client-secret"
+        });
+
+        await provider.StartPasswordResetAsync("user@example.com", CancellationToken.None);
+
+        Assert.NotNull(client.ForgotPasswordRequest);
+        Assert.Equal("test-client-id", client.ForgotPasswordRequest.ClientId);
+        Assert.Equal("user@example.com", client.ForgotPasswordRequest.Username);
+        Assert.False(string.IsNullOrWhiteSpace(client.ForgotPasswordRequest.SecretHash));
+    }
+
+    [Fact]
+    public async Task ConfirmPasswordReset_SendsCodeAndNewPassword()
+    {
+        var client = new FakeCognitoClient();
+        var provider = new CognitoEmailVerificationProvider(client, new CognitoOptions
+        {
+            ClientId = "test-client-id"
+        });
+
+        await provider.ConfirmPasswordResetAsync(
+            "user@example.com",
+            "123456",
+            "Changed-horse2!",
+            CancellationToken.None);
+
+        Assert.NotNull(client.ConfirmForgotPasswordRequest);
+        Assert.Equal("test-client-id", client.ConfirmForgotPasswordRequest.ClientId);
+        Assert.Equal("user@example.com", client.ConfirmForgotPasswordRequest.Username);
+        Assert.Equal("123456", client.ConfirmForgotPasswordRequest.ConfirmationCode);
+        Assert.Equal("Changed-horse2!", client.ConfirmForgotPasswordRequest.Password);
+    }
+
+    [Fact]
+    public async Task ConfirmPasswordReset_WhenCodeDoesNotMatch_ReturnsValidationError()
+    {
+        var client = new FakeCognitoClient
+        {
+            ConfirmForgotPasswordException = new CodeMismatchException("mismatch")
+        };
+        var provider = new CognitoEmailVerificationProvider(client, new CognitoOptions
+        {
+            ClientId = "test-client-id"
+        });
+
+        await Assert.ThrowsAsync<ValidationException>(() => provider.ConfirmPasswordResetAsync(
+            "user@example.com",
+            "999999",
+            "Changed-horse2!",
+            CancellationToken.None));
+    }
+
     private sealed class FakeCognitoClient()
         : AmazonCognitoIdentityProviderClient(new AnonymousAWSCredentials(), RegionEndpoint.USEast1)
     {
         public SignUpRequest? SignUpRequest { get; private set; }
         public ConfirmSignUpRequest? ConfirmRequest { get; private set; }
         public ResendConfirmationCodeRequest? ResendRequest { get; private set; }
+        public ForgotPasswordRequest? ForgotPasswordRequest { get; private set; }
+        public ConfirmForgotPasswordRequest? ConfirmForgotPasswordRequest { get; private set; }
         public Exception? ConfirmException { get; init; }
+        public Exception? ConfirmForgotPasswordException { get; init; }
 
         public override Task<SignUpResponse> SignUpAsync(
             SignUpRequest request,
@@ -113,6 +175,27 @@ public sealed class CognitoEmailVerificationProviderTests
         {
             ResendRequest = request;
             return Task.FromResult(new ResendConfirmationCodeResponse());
+        }
+
+        public override Task<ForgotPasswordResponse> ForgotPasswordAsync(
+            ForgotPasswordRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            ForgotPasswordRequest = request;
+            return Task.FromResult(new ForgotPasswordResponse());
+        }
+
+        public override Task<ConfirmForgotPasswordResponse> ConfirmForgotPasswordAsync(
+            ConfirmForgotPasswordRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (ConfirmForgotPasswordException is not null)
+            {
+                throw ConfirmForgotPasswordException;
+            }
+
+            ConfirmForgotPasswordRequest = request;
+            return Task.FromResult(new ConfirmForgotPasswordResponse());
         }
     }
 }

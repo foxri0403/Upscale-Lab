@@ -18,6 +18,19 @@ public sealed record VerifyEmailRequest(
 public sealed record ResendVerificationEmailRequest(
     [param: Required, EmailAddress, MaxLength(320)] string Email);
 
+public sealed record FindIdRequest(
+    [param: Required, MinLength(2), MaxLength(50)] string Username);
+
+public sealed record FindIdResponse(string? MaskedEmail);
+
+public sealed record PasswordResetStartRequest(
+    [param: Required, EmailAddress, MaxLength(320)] string Email);
+
+public sealed record PasswordResetConfirmRequest(
+    [param: Required, EmailAddress, MaxLength(320)] string Email,
+    [param: Required, RegularExpression("^[0-9]{6}$")] string Code,
+    [param: Required, PasswordPolicy] string NewPassword);
+
 public sealed record UserResponse(
     Guid Id,
     string Email,

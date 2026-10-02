@@ -25,7 +25,7 @@ class LiveLayerApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'LiveLayer',
+      title: 'Upscale Lab',
       theme: ThemeData(
         scaffoldBackgroundColor: Colors.white,
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF536DFE)),
@@ -64,7 +64,10 @@ class LiveLayerTextField extends StatelessWidget {
         prefixIcon: Icon(icon, color: const Color(0xFF6F7789)),
         filled: true,
         fillColor: const Color(0xFFFAFAFC),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 18,
+          vertical: 18,
+        ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: Color(0xFFE3E5EB)),
@@ -79,7 +82,11 @@ class LiveLayerTextField extends StatelessWidget {
 }
 
 class LiveLayerButton extends StatelessWidget {
-  const LiveLayerButton({super.key, required this.text, required this.onPressed});
+  const LiveLayerButton({
+    super.key,
+    required this.text,
+    required this.onPressed,
+  });
 
   final String text;
   final VoidCallback? onPressed;
@@ -95,9 +102,14 @@ class LiveLayerButton extends StatelessWidget {
           elevation: 0,
           backgroundColor: const Color(0xFF536DFE),
           foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
         ),
-        child: Text(text, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        child: Text(
+          text,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        ),
       ),
     );
   }
@@ -129,7 +141,9 @@ class _LoginPageState extends State<LoginPage> {
       await widget.apiClient.login(_email.text.trim(), _password.text);
       if (!mounted) return;
       await Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => ProjectListPage(apiClient: widget.apiClient)),
+        MaterialPageRoute(
+          builder: (_) => ProjectListPage(apiClient: widget.apiClient),
+        ),
       );
     } catch (error) {
       if (mounted) _message('로그인에 실패했습니다.\n$error');
@@ -139,7 +153,8 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   void _message(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -159,14 +174,22 @@ class _LoginPageState extends State<LoginPage> {
             children: [
               const Spacer(flex: 3),
               const Text(
-                'LiveLayer',
-                style: TextStyle(fontSize: 38, fontWeight: FontWeight.bold, letterSpacing: -1),
+                'Upscale Lab',
+                style: TextStyle(
+                  fontSize: 38,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -1,
+                ),
               ),
               const SizedBox(height: 14),
               const Text(
                 '당신의 이미지를,\n움직이는 배경화면으로',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, height: 1.5, color: Color(0xFF6F7789)),
+                style: TextStyle(
+                  fontSize: 16,
+                  height: 1.5,
+                  color: Color(0xFF6F7789),
+                ),
               ),
               const SizedBox(height: 55),
               LiveLayerTextField(
@@ -187,27 +210,347 @@ class _LoginPageState extends State<LoginPage> {
                 text: _busy ? '로그인 중...' : '로그인',
                 onPressed: _busy ? null : _login,
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text('계정이 없으신가요?', style: TextStyle(color: Color(0xFF777E8E))),
                   TextButton(
                     onPressed: _busy
                         ? null
                         : () => Navigator.of(context).push(
                               MaterialPageRoute(
-                                builder: (_) => SignUpPage(apiClient: widget.apiClient),
+                                builder: (_) =>
+                                    FindIdPage(apiClient: widget.apiClient),
+                              ),
+                            ),
+                    child: const Text('아이디 찾기'),
+                  ),
+                  const Text('|', style: TextStyle(color: Color(0xFFD0D3DB))),
+                  TextButton(
+                    onPressed: _busy
+                        ? null
+                        : () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => PasswordResetPage(
+                                  apiClient: widget.apiClient,
+                                ),
+                              ),
+                            ),
+                    child: const Text('비밀번호 재설정'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 2),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    '계정이 없으신가요?',
+                    style: TextStyle(color: Color(0xFF777E8E)),
+                  ),
+                  TextButton(
+                    onPressed: _busy
+                        ? null
+                        : () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    SignUpPage(apiClient: widget.apiClient),
                               ),
                             ),
                     child: const Text(
                       '회원가입하기',
-                      style: TextStyle(color: Color(0xFF536DFE), fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        color: Color(0xFF536DFE),
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
               ),
               const Spacer(flex: 4),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class FindIdPage extends StatefulWidget {
+  const FindIdPage({super.key, required this.apiClient});
+
+  final ApiClient apiClient;
+
+  @override
+  State<FindIdPage> createState() => _FindIdPageState();
+}
+
+class _FindIdPageState extends State<FindIdPage> {
+  final _username = TextEditingController();
+  bool _busy = false;
+  String? _result;
+
+  Future<void> _findId() async {
+    final username = _username.text.trim();
+    if (username.length < 2) {
+      _message('사용자 이름을 2자 이상 입력해주세요.');
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _result = null;
+    });
+    try {
+      final maskedEmail = await widget.apiClient.findId(username);
+      if (!mounted) return;
+      setState(() {
+        _result = maskedEmail == null
+            ? '일치하는 인증 완료 계정을 찾지 못했습니다.'
+            : '등록된 로그인 이메일은 $maskedEmail 입니다.';
+      });
+    } catch (error) {
+      if (mounted) _message('아이디를 찾지 못했습니다.\n$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _message(String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  void dispose() {
+    _username.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: const Text('아이디 찾기'),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '사용자 이름을 입력하면 가입할 때 사용한 이메일을 일부 가려서 알려드려요.',
+                style: TextStyle(
+                  fontSize: 15,
+                  height: 1.5,
+                  color: Color(0xFF6F7789),
+                ),
+              ),
+              const SizedBox(height: 30),
+              LiveLayerTextField(
+                controller: _username,
+                hintText: '사용자 이름',
+                icon: Icons.person_outline,
+              ),
+              const SizedBox(height: 20),
+              LiveLayerButton(
+                text: _busy ? '확인 중...' : '아이디 찾기',
+                onPressed: _busy ? null : _findId,
+              ),
+              if (_result != null) ...[
+                const SizedBox(height: 24),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3F5FF),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Text(
+                    _result!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF434A5B),
+                      height: 1.5,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class PasswordResetPage extends StatefulWidget {
+  const PasswordResetPage({super.key, required this.apiClient});
+
+  final ApiClient apiClient;
+
+  @override
+  State<PasswordResetPage> createState() => _PasswordResetPageState();
+}
+
+class _PasswordResetPageState extends State<PasswordResetPage> {
+  final _email = TextEditingController();
+  final _code = TextEditingController();
+  final _newPassword = TextEditingController();
+  final _passwordCheck = TextEditingController();
+  bool _codeSent = false;
+  bool _busy = false;
+
+  Future<void> _sendCode() async {
+    final email = _email.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      _message('올바른 이메일 주소를 입력해주세요.');
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      await widget.apiClient.startPasswordReset(email);
+      if (!mounted) return;
+      setState(() => _codeSent = true);
+      _message('일치하는 계정이 있다면 이메일로 재설정 코드를 보냈습니다.');
+    } catch (error) {
+      if (mounted) _message('재설정 코드를 요청하지 못했습니다.\n$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _resetPassword() async {
+    final code = _code.text.trim();
+    final password = _newPassword.text;
+    if (!RegExp(r'^\d{6}$').hasMatch(code)) {
+      _message('이메일로 받은 6자리 코드를 입력해주세요.');
+      return;
+    }
+    if (!_isValidPassword(password)) {
+      _message('비밀번호는 10자 이상이며 대문자, 숫자, 특수문자를 포함해야 합니다.');
+      return;
+    }
+    if (password != _passwordCheck.text) {
+      _message('새 비밀번호가 일치하지 않습니다.');
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      await widget.apiClient.confirmPasswordReset(
+        email: _email.text.trim(),
+        code: code,
+        newPassword: password,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('비밀번호를 변경했습니다. 새 비밀번호로 로그인해주세요.')),
+      );
+      Navigator.pop(context);
+    } catch (error) {
+      if (mounted) _message('비밀번호를 변경하지 못했습니다.\n$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  bool _isValidPassword(String password) {
+    return password.length >= 10 &&
+        RegExp('[A-Z]').hasMatch(password) &&
+        RegExp(r'\d').hasMatch(password) &&
+        RegExp(r'[^A-Za-z0-9\s]').hasMatch(password);
+  }
+
+  void _message(String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _code.dispose();
+    _newPassword.dispose();
+    _passwordCheck.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: const Text('비밀번호 재설정'),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 30),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '가입한 이메일로 6자리 재설정 코드를 보내드려요.',
+                style: TextStyle(
+                  fontSize: 15,
+                  height: 1.5,
+                  color: Color(0xFF6F7789),
+                ),
+              ),
+              const SizedBox(height: 26),
+              LiveLayerTextField(
+                controller: _email,
+                hintText: '이메일 주소',
+                icon: Icons.mail_outline,
+                keyboardType: TextInputType.emailAddress,
+              ),
+              const SizedBox(height: 16),
+              LiveLayerButton(
+                text:
+                    _busy ? '요청 중...' : (_codeSent ? '코드 다시 보내기' : '재설정 코드 받기'),
+                onPressed: _busy ? null : _sendCode,
+              ),
+              if (_codeSent) ...[
+                const SizedBox(height: 30),
+                LiveLayerTextField(
+                  controller: _code,
+                  hintText: '6자리 재설정 코드',
+                  icon: Icons.mark_email_read_outlined,
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 14),
+                LiveLayerTextField(
+                  controller: _newPassword,
+                  hintText: '새 비밀번호',
+                  icon: Icons.lock_reset_outlined,
+                  obscureText: true,
+                ),
+                const SizedBox(height: 8),
+                const Padding(
+                  padding: EdgeInsets.only(left: 5),
+                  child: Text(
+                    '10자 이상 · 대문자 · 숫자 · 특수문자를 포함해주세요.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF9299AA)),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                LiveLayerTextField(
+                  controller: _passwordCheck,
+                  hintText: '새 비밀번호 확인',
+                  icon: Icons.lock_outline,
+                  obscureText: true,
+                ),
+                const SizedBox(height: 22),
+                LiveLayerButton(
+                  text: _busy ? '변경 중...' : '비밀번호 변경',
+                  onPressed: _busy ? null : _resetPassword,
+                ),
+              ],
             ],
           ),
         ),
@@ -238,7 +581,10 @@ class _SignUpPageState extends State<SignUpPage> {
     final username = _username.text.trim();
     final password = _password.text;
 
-    if (email.isEmpty || username.isEmpty || password.isEmpty || _passwordCheck.text.isEmpty) {
+    if (email.isEmpty ||
+        username.isEmpty ||
+        password.isEmpty ||
+        _passwordCheck.text.isEmpty) {
       _message('모든 항목을 입력해주세요.');
       return;
     }
@@ -249,14 +595,16 @@ class _SignUpPageState extends State<SignUpPage> {
 
     setState(() => _busy = true);
     try {
-      await widget.apiClient.register(email: email, username: username, password: password);
+      await widget.apiClient.register(
+        email: email,
+        username: username,
+        password: password,
+      );
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => EmailVerificationPage(
-            apiClient: widget.apiClient,
-            email: email,
-          ),
+          builder: (_) =>
+              EmailVerificationPage(apiClient: widget.apiClient, email: email),
         ),
       );
     } catch (error) {
@@ -267,7 +615,8 @@ class _SignUpPageState extends State<SignUpPage> {
   }
 
   void _message(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -298,13 +647,21 @@ class _SignUpPageState extends State<SignUpPage> {
             children: [
               const SizedBox(height: 25),
               const Text(
-                'LiveLayer',
-                style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, letterSpacing: -1),
+                'Upscale Lab',
+                style: TextStyle(
+                  fontSize: 36,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -1,
+                ),
               ),
               const SizedBox(height: 12),
               const Text(
                 '계정을 생성하고\n나만의 Live2D 배경화면을 만들어보세요.',
-                style: TextStyle(fontSize: 15, height: 1.5, color: Color(0xFF6F7789)),
+                style: TextStyle(
+                  fontSize: 15,
+                  height: 1.5,
+                  color: Color(0xFF6F7789),
+                ),
               ),
               const SizedBox(height: 40),
               LiveLayerTextField(
@@ -350,12 +707,18 @@ class _SignUpPageState extends State<SignUpPage> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text('이미 계정이 있으신가요?', style: TextStyle(color: Color(0xFF777E8E))),
+                  const Text(
+                    '이미 계정이 있으신가요?',
+                    style: TextStyle(color: Color(0xFF777E8E)),
+                  ),
                   TextButton(
                     onPressed: _busy ? null : () => Navigator.pop(context),
                     child: const Text(
                       '로그인하기',
-                      style: TextStyle(color: Color(0xFF536DFE), fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        color: Color(0xFF536DFE),
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -402,7 +765,9 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
 
       // verify-email 성공 응답에 JWT가 있으므로 바로 홈으로 이동한다.
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => ProjectListPage(apiClient: widget.apiClient)),
+        MaterialPageRoute(
+          builder: (_) => ProjectListPage(apiClient: widget.apiClient),
+        ),
         (_) => false,
       );
     } catch (error) {
@@ -422,7 +787,8 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   }
 
   void _message(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -453,17 +819,31 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
           child: Column(
             children: [
               const SizedBox(height: 60),
-              const Icon(Icons.mail_outline_rounded, size: 75, color: Color(0xFF7C8497)),
+              const Icon(
+                Icons.mail_outline_rounded,
+                size: 75,
+                color: Color(0xFF7C8497),
+              ),
               const SizedBox(height: 25),
-              const Text('이메일 인증', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+              const Text(
+                '이메일 인증',
+                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 14),
               const Text(
                 '입력하신 이메일로 전송된\n인증 코드를 입력해주세요.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 15, height: 1.5, color: Color(0xFF747B8C)),
+                style: TextStyle(
+                  fontSize: 15,
+                  height: 1.5,
+                  color: Color(0xFF747B8C),
+                ),
               ),
               const SizedBox(height: 12),
-              Text(widget.email, style: const TextStyle(color: Color(0xFF536DFE))),
+              Text(
+                widget.email,
+                style: const TextStyle(color: Color(0xFF536DFE)),
+              ),
               const SizedBox(height: 35),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -478,7 +858,10 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
                       keyboardType: TextInputType.number,
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       maxLength: 1,
-                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w600,
+                      ),
                       onChanged: (value) {
                         if (value.isNotEmpty && index < 5) {
                           _focusNodes[index + 1].requestFocus();
@@ -490,11 +873,16 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
                         counterText: '',
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: Color(0xFFDCE0E9)),
+                          borderSide: const BorderSide(
+                            color: Color(0xFFDCE0E9),
+                          ),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: Color(0xFF536DFE), width: 1.5),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF536DFE),
+                            width: 1.5,
+                          ),
                         ),
                       ),
                     ),
@@ -534,7 +922,8 @@ class ProjectListPage extends StatefulWidget {
 }
 
 class _ProjectListPageState extends State<ProjectListPage> {
-  late Future<List<LiveLayerProject>> _projects = widget.apiClient.getProjects();
+  late Future<List<LiveLayerProject>> _projects =
+      widget.apiClient.getProjects();
   bool _creating = false;
   int _selectedIndex = 0;
 
@@ -546,18 +935,25 @@ class _ProjectListPageState extends State<ProjectListPage> {
 
     setState(() => _creating = true);
     try {
-      final decoded = await ui.decodeImageFromList(await picked.readAsBytes());
+      final bytes = await picked.readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final width = frame.image.width;
+      final height = frame.image.height;
+      frame.image.dispose();
+      codec.dispose();
       final project = await widget.apiClient.createProject(
         title: picked.name,
         filePath: picked.path,
-        width: decoded.width,
-        height: decoded.height,
+        width: width,
+        height: height,
       );
       await widget.apiClient.startProcessing(project.id);
       _reload();
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
       }
     } finally {
       if (mounted) setState(() => _creating = false);
@@ -570,13 +966,15 @@ class _ProjectListPageState extends State<ProjectListPage> {
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => PreviewPage(project: project, apiClient: widget.apiClient),
+          builder: (_) =>
+              PreviewPage(project: project, apiClient: widget.apiClient),
         ),
       );
       _reload();
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
       }
     }
   }
@@ -646,8 +1044,12 @@ class _ProjectListPageState extends State<ProjectListPage> {
             const Padding(
               padding: EdgeInsets.fromLTRB(22, 25, 22, 28),
               child: Text(
-                'LiveLayer',
-                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: -1),
+                'Upscale Lab',
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -1,
+                ),
               ),
             ),
             Expanded(child: content),
@@ -659,7 +1061,8 @@ class _ProjectListPageState extends State<ProjectListPage> {
         selectedIndex: _selectedIndex,
         backgroundColor: Colors.white,
         indicatorColor: const Color(0xFFE9EDFF),
-        onDestinationSelected: (index) => setState(() => _selectedIndex = index),
+        onDestinationSelected: (index) =>
+            setState(() => _selectedIndex = index),
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.home_outlined),
@@ -727,11 +1130,7 @@ class NewProjectCard extends StatelessWidget {
 }
 
 class ProjectCard extends StatelessWidget {
-  const ProjectCard({
-    super.key,
-    required this.project,
-    required this.onTap,
-  });
+  const ProjectCard({super.key, required this.project, required this.onTap});
 
   final LiveLayerProject project;
   final VoidCallback onTap;
@@ -754,7 +1153,11 @@ class ProjectCard extends StatelessWidget {
                   project.originalImageUrl,
                   fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) => const Center(
-                    child: Icon(Icons.image_outlined, size: 42, color: Color(0xFF9299AA)),
+                    child: Icon(
+                      Icons.image_outlined,
+                      size: 42,
+                      color: Color(0xFF9299AA),
+                    ),
                   ),
                 ),
               ),
@@ -780,9 +1183,12 @@ class ProjectCard extends StatelessWidget {
   }
 }
 
-
 class PreviewPage extends StatefulWidget {
-  const PreviewPage({super.key, required this.project, required this.apiClient});
+  const PreviewPage({
+    super.key,
+    required this.project,
+    required this.apiClient,
+  });
 
   final LiveLayerProject project;
   final ApiClient apiClient;
@@ -805,9 +1211,14 @@ class _PreviewPageState extends State<PreviewPage> {
 
   Future<void> _openWallpaperPicker() async {
     try {
-      await _wallpaperChannel.invokeMethod<void>('openWallpaperPicker', {'projectId': widget.project.id});
+      await _wallpaperChannel.invokeMethod<void>('openWallpaperPicker', {
+        'projectId': widget.project.id,
+      });
     } on PlatformException catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message ?? '$error')));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message ?? '$error')));
+      }
     }
   }
 
@@ -816,16 +1227,26 @@ class _PreviewPageState extends State<PreviewPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.project.title),
-        actions: [IconButton(onPressed: _openWallpaperPicker, icon: const Icon(Icons.wallpaper))],
+        actions: [
+          IconButton(
+            onPressed: _openWallpaperPicker,
+            icon: const Icon(Icons.wallpaper),
+          ),
+        ],
       ),
       body: Column(
         children: [
           Expanded(
             child: widget.project.layers.isEmpty
-                ? Center(child: Text('Processing status: ${widget.project.status}'))
+                ? Center(
+                    child: Text('Processing status: ${widget.project.status}'),
+                  )
                 : AspectRatio(
                     aspectRatio: 9 / 16,
-                    child: ParallaxPreview(layers: widget.project.layers, sensitivity: _sensitivity),
+                    child: ParallaxPreview(
+                      layers: widget.project.layers,
+                      sensitivity: _sensitivity,
+                    ),
                   ),
           ),
           ListTile(

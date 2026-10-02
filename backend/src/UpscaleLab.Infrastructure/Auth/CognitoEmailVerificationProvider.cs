@@ -10,13 +10,15 @@ namespace UpscaleLab.Infrastructure.Auth;
 
 public sealed class CognitoEmailVerificationProvider(
     IAmazonCognitoIdentityProvider cognito,
-    CognitoOptions options) : IEmailVerificationProvider
+    CognitoOptions options) : IEmailVerificationProvider, IPasswordRecoveryProvider
 {
     private static readonly TimeSpan VerificationCodeLifetime = TimeSpan.FromHours(24);
     private const string InvalidCodeMessage =
         "인증 코드가 올바르지 않거나 만료되었습니다. 새 코드를 요청해 주세요.";
     private const string DeliveryFailureMessage =
         "인증 이메일을 전송할 수 없습니다. 잠시 후 다시 시도해 주세요.";
+    private const string InvalidPasswordResetCodeMessage =
+        "재설정 코드가 올바르지 않거나 만료되었습니다. 새 코드를 요청해 주세요.";
 
     public async Task<DateTime> SignUpAsync(
         string email,
@@ -167,6 +169,112 @@ public sealed class CognitoEmailVerificationProvider(
         catch (CodeDeliveryFailureException)
         {
             throw new ServiceUnavailableException(DeliveryFailureMessage);
+        }
+        catch (LimitExceededException)
+        {
+            throw new ServiceUnavailableException(DeliveryFailureMessage);
+        }
+        catch (TooManyRequestsException)
+        {
+            throw new ServiceUnavailableException(DeliveryFailureMessage);
+        }
+        catch (InternalErrorException)
+        {
+            throw new ServiceUnavailableException(DeliveryFailureMessage);
+        }
+        catch (AmazonServiceException)
+        {
+            throw new ServiceUnavailableException(DeliveryFailureMessage);
+        }
+    }
+
+    public async Task StartPasswordResetAsync(
+        string email,
+        CancellationToken cancellationToken)
+    {
+        EnsureConfigured();
+
+        try
+        {
+            await cognito.ForgotPasswordAsync(new ForgotPasswordRequest
+            {
+                ClientId = options.ClientId,
+                SecretHash = CreateSecretHash(email),
+                Username = email
+            }, cancellationToken);
+        }
+        catch (UserNotFoundException)
+        {
+            // Keep the public endpoint account-enumeration safe.
+        }
+        catch (NotAuthorizedException)
+        {
+            // Keep the response indistinguishable for unavailable accounts.
+        }
+        catch (CodeDeliveryFailureException)
+        {
+            throw new ServiceUnavailableException(DeliveryFailureMessage);
+        }
+        catch (LimitExceededException)
+        {
+            throw new ServiceUnavailableException(DeliveryFailureMessage);
+        }
+        catch (TooManyRequestsException)
+        {
+            throw new ServiceUnavailableException(DeliveryFailureMessage);
+        }
+        catch (InternalErrorException)
+        {
+            throw new ServiceUnavailableException(DeliveryFailureMessage);
+        }
+        catch (AmazonServiceException)
+        {
+            throw new ServiceUnavailableException(DeliveryFailureMessage);
+        }
+    }
+
+    public async Task ConfirmPasswordResetAsync(
+        string email,
+        string code,
+        string newPassword,
+        CancellationToken cancellationToken)
+    {
+        EnsureConfigured();
+
+        try
+        {
+            await cognito.ConfirmForgotPasswordAsync(new ConfirmForgotPasswordRequest
+            {
+                ClientId = options.ClientId,
+                SecretHash = CreateSecretHash(email),
+                Username = email,
+                ConfirmationCode = code,
+                Password = newPassword
+            }, cancellationToken);
+        }
+        catch (CodeMismatchException)
+        {
+            throw new ValidationException(InvalidPasswordResetCodeMessage);
+        }
+        catch (ExpiredCodeException)
+        {
+            throw new ValidationException(InvalidPasswordResetCodeMessage);
+        }
+        catch (UserNotFoundException)
+        {
+            throw new ValidationException(InvalidPasswordResetCodeMessage);
+        }
+        catch (NotAuthorizedException)
+        {
+            throw new ValidationException(InvalidPasswordResetCodeMessage);
+        }
+        catch (TooManyFailedAttemptsException)
+        {
+            throw new ValidationException(InvalidPasswordResetCodeMessage);
+        }
+        catch (InvalidPasswordException)
+        {
+            throw new ValidationException(PasswordPolicy.ErrorMessage);
         }
         catch (LimitExceededException)
         {

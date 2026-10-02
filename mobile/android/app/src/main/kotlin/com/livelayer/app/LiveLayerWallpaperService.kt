@@ -70,7 +70,7 @@ class LiveLayerWallpaperService : WallpaperService() {
                 val projectId = getSharedPreferences("live_layer", MODE_PRIVATE)
                     .getString("project_id", "")
                     .orEmpty()
-                val label = if (projectId.isBlank()) "LiveLayer" else "LiveLayer • ${projectId.take(8)}"
+                val label = if (projectId.isBlank()) "Upscale Lab" else "Upscale Lab • ${projectId.take(8)}"
                 canvas.drawText(label, canvas.width / 2f, canvas.height * 0.78f, paint)
             } finally {
                 if (canvas != null) surfaceHolder.unlockCanvasAndPost(canvas)

@@ -4,7 +4,7 @@
     <uses-feature android:name="android.software.live_wallpaper" android:required="false" />
 
     <application
-        android:label="LiveLayer"
+        android:label="@string/app_name"
         android:icon="@android:drawable/sym_def_app_icon"
         android:theme="@style/LaunchTheme">
         <activity

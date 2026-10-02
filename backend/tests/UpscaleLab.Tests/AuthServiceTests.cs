@@ -130,6 +130,124 @@ public sealed class AuthServiceTests
     }
 
     [Fact]
+    public async Task FindId_ForVerifiedUser_ReturnsMaskedEmail()
+    {
+        await using var dbContext = CreateDbContext();
+        var (service, _) = CreateService(dbContext);
+        await service.RegisterAsync(
+            new RegisterRequest("user@example.com", "tester", ValidPassword),
+            CancellationToken.None);
+        await service.VerifyEmailAsync(
+            new VerifyEmailRequest("user@example.com", "000001"),
+            CancellationToken.None);
+
+        var result = await service.FindIdAsync(
+            new FindIdRequest(" tester "),
+            CancellationToken.None);
+
+        Assert.Equal("u***@example.com", result.MaskedEmail);
+    }
+
+    [Fact]
+    public async Task FindId_ForUnverifiedUser_DoesNotReturnEmail()
+    {
+        await using var dbContext = CreateDbContext();
+        var (service, _) = CreateService(dbContext);
+        await service.RegisterAsync(
+            new RegisterRequest("user@example.com", "tester", ValidPassword),
+            CancellationToken.None);
+
+        var result = await service.FindIdAsync(
+            new FindIdRequest("tester"),
+            CancellationToken.None);
+
+        Assert.Null(result.MaskedEmail);
+    }
+
+    [Fact]
+    public async Task StartPasswordReset_ForVerifiedUser_RequestsCognitoCode()
+    {
+        await using var dbContext = CreateDbContext();
+        var (service, provider) = CreateService(dbContext);
+        await service.RegisterAsync(
+            new RegisterRequest("user@example.com", "tester", ValidPassword),
+            CancellationToken.None);
+        await service.VerifyEmailAsync(
+            new VerifyEmailRequest("user@example.com", "000001"),
+            CancellationToken.None);
+
+        await service.StartPasswordResetAsync(
+            new PasswordResetStartRequest("USER@example.com"),
+            CancellationToken.None);
+
+        Assert.Equal("user@example.com", Assert.Single(provider.PasswordResetStarts));
+    }
+
+    [Fact]
+    public async Task StartPasswordReset_ForUnknownUser_DoesNotRevealAccount()
+    {
+        await using var dbContext = CreateDbContext();
+        var (service, provider) = CreateService(dbContext);
+
+        await service.StartPasswordResetAsync(
+            new PasswordResetStartRequest("missing@example.com"),
+            CancellationToken.None);
+
+        Assert.Empty(provider.PasswordResetStarts);
+    }
+
+    [Fact]
+    public async Task ConfirmPasswordReset_ReplacesStoredBcryptHash()
+    {
+        const string newPassword = "Changed-horse2!";
+        await using var dbContext = CreateDbContext();
+        var (service, provider) = CreateService(dbContext);
+        await service.RegisterAsync(
+            new RegisterRequest("user@example.com", "tester", ValidPassword),
+            CancellationToken.None);
+        await service.VerifyEmailAsync(
+            new VerifyEmailRequest("user@example.com", "000001"),
+            CancellationToken.None);
+        var before = (await dbContext.Users.SingleAsync()).UpdatedAt;
+
+        await service.ConfirmPasswordResetAsync(
+            new PasswordResetConfirmRequest("USER@example.com", "123456", newPassword),
+            CancellationToken.None);
+
+        var stored = await dbContext.Users.SingleAsync();
+        Assert.False(new PasswordHasher().Verify(ValidPassword, stored.PasswordHash));
+        Assert.True(new PasswordHasher().Verify(newPassword, stored.PasswordHash));
+        Assert.StartsWith("$2", stored.PasswordHash);
+        Assert.True(stored.UpdatedAt >= before);
+        Assert.Equal(
+            ("user@example.com", "123456", newPassword),
+            Assert.Single(provider.PasswordResetConfirmations));
+    }
+
+    [Fact]
+    public async Task ConfirmPasswordReset_WhenCognitoRejectsCode_DoesNotChangeStoredHash()
+    {
+        const string newPassword = "Changed-horse2!";
+        await using var dbContext = CreateDbContext();
+        var (service, provider) = CreateService(dbContext);
+        await service.RegisterAsync(
+            new RegisterRequest("user@example.com", "tester", ValidPassword),
+            CancellationToken.None);
+        await service.VerifyEmailAsync(
+            new VerifyEmailRequest("user@example.com", "000001"),
+            CancellationToken.None);
+        provider.PasswordResetConfirmationException = new ValidationException("invalid code");
+
+        await Assert.ThrowsAsync<ValidationException>(() => service.ConfirmPasswordResetAsync(
+            new PasswordResetConfirmRequest("user@example.com", "999999", newPassword),
+            CancellationToken.None));
+
+        var stored = await dbContext.Users.SingleAsync();
+        Assert.True(new PasswordHasher().Verify(ValidPassword, stored.PasswordHash));
+        Assert.False(new PasswordHasher().Verify(newPassword, stored.PasswordHash));
+    }
+
+    [Fact]
     public async Task Login_BeforeEmailVerification_IsRejected()
     {
         await using var dbContext = CreateDbContext();
@@ -190,6 +308,7 @@ public sealed class AuthServiceTests
             new PasswordHasher(),
             new FakeJwtTokenService(),
             provider,
+            provider,
             options);
         return (service, provider);
     }
@@ -208,12 +327,16 @@ public sealed class AuthServiceTests
             ("test-token", DateTime.UtcNow.AddHours(1));
     }
 
-    private sealed class FakeEmailVerificationProvider : IEmailVerificationProvider
+    private sealed class FakeEmailVerificationProvider
+        : IEmailVerificationProvider, IPasswordRecoveryProvider
     {
         public List<(string Email, string Password)> SignUps { get; } = [];
         public List<(string Email, string Code)> Confirmations { get; } = [];
         public List<string> Resends { get; } = [];
+        public List<string> PasswordResetStarts { get; } = [];
+        public List<(string Email, string Code, string NewPassword)> PasswordResetConfirmations { get; } = [];
         public Exception? ConfirmationException { get; set; }
+        public Exception? PasswordResetConfirmationException { get; set; }
 
         public Task<DateTime> SignUpAsync(
             string email,
@@ -241,6 +364,27 @@ public sealed class AuthServiceTests
         public Task ResendConfirmationCodeAsync(string email, CancellationToken cancellationToken)
         {
             Resends.Add(email);
+            return Task.CompletedTask;
+        }
+
+        public Task StartPasswordResetAsync(string email, CancellationToken cancellationToken)
+        {
+            PasswordResetStarts.Add(email);
+            return Task.CompletedTask;
+        }
+
+        public Task ConfirmPasswordResetAsync(
+            string email,
+            string code,
+            string newPassword,
+            CancellationToken cancellationToken)
+        {
+            if (PasswordResetConfirmationException is not null)
+            {
+                throw PasswordResetConfirmationException;
+            }
+
+            PasswordResetConfirmations.Add((email, code, newPassword));
             return Task.CompletedTask;
         }
     }

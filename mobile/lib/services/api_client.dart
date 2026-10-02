@@ -11,9 +11,9 @@ class ApiClient {
   String? _accessToken;
 
   Map<String, String> get _headers => {
-        'content-type': 'application/json',
-        if (_accessToken != null) 'authorization': 'Bearer $_accessToken',
-      };
+    'content-type': 'application/json',
+    if (_accessToken != null) 'authorization': 'Bearer $_accessToken',
+  };
 
   Future<void> login(String email, String password) async {
     final response = await http.post(
@@ -22,7 +22,9 @@ class ApiClient {
       body: jsonEncode({'email': email, 'password': password}),
     );
     _ensureSuccess(response);
-    _accessToken = (jsonDecode(response.body) as Map<String, dynamic>)['accessToken'] as String;
+    _accessToken =
+        (jsonDecode(response.body) as Map<String, dynamic>)['accessToken']
+            as String;
   }
 
   // 회원가입: 성공하면 Cognito가 이메일로 6자리 인증 코드를 전송한다.
@@ -55,7 +57,8 @@ class ApiClient {
     );
     _ensureSuccess(response);
     _accessToken =
-        (jsonDecode(response.body) as Map<String, dynamic>)['accessToken'] as String;
+        (jsonDecode(response.body) as Map<String, dynamic>)['accessToken']
+            as String;
   }
 
   // Cognito 이메일 인증 코드 재전송.
@@ -68,8 +71,50 @@ class ApiClient {
     _ensureSuccess(response);
   }
 
+  // 사용자 이름과 일치하는 인증 완료 계정의 마스킹된 이메일을 반환한다.
+  Future<String?> findId(String username) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/auth/find-id'),
+      headers: _headers,
+      body: jsonEncode({'username': username}),
+    );
+    _ensureSuccess(response);
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return body['maskedEmail'] as String?;
+  }
+
+  // 계정 존재 여부와 관계없이 서버는 동일한 응답을 반환한다.
+  Future<void> startPasswordReset(String email) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/auth/forgot-password'),
+      headers: _headers,
+      body: jsonEncode({'email': email}),
+    );
+    _ensureSuccess(response);
+  }
+
+  Future<void> confirmPasswordReset({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/auth/reset-password'),
+      headers: _headers,
+      body: jsonEncode({
+        'email': email,
+        'code': code,
+        'newPassword': newPassword,
+      }),
+    );
+    _ensureSuccess(response);
+  }
+
   Future<List<LiveLayerProject>> getProjects() async {
-    final response = await http.get(Uri.parse('$baseUrl/api/projects'), headers: _headers);
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/projects'),
+      headers: _headers,
+    );
     _ensureSuccess(response);
     return (jsonDecode(response.body) as List<dynamic>)
         .map((item) => LiveLayerProject.fromJson(item as Map<String, dynamic>))
@@ -77,9 +122,14 @@ class ApiClient {
   }
 
   Future<LiveLayerProject> getProject(String id) async {
-    final response = await http.get(Uri.parse('$baseUrl/api/projects/$id'), headers: _headers);
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/projects/$id'),
+      headers: _headers,
+    );
     _ensureSuccess(response);
-    return LiveLayerProject.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    return LiveLayerProject.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
   }
 
   Future<LiveLayerProject> createProject({
@@ -88,18 +138,23 @@ class ApiClient {
     required int width,
     required int height,
   }) async {
-    final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/api/projects'))
-      ..headers.addAll({if (_accessToken != null) 'authorization': 'Bearer $_accessToken'})
-      ..fields.addAll({
-        'title': title,
-        'originalWidth': '$width',
-        'originalHeight': '$height',
-      })
-      ..files.add(await http.MultipartFile.fromPath('file', filePath));
+    final request =
+        http.MultipartRequest('POST', Uri.parse('$baseUrl/api/projects'))
+          ..headers.addAll({
+            if (_accessToken != null) 'authorization': 'Bearer $_accessToken',
+          })
+          ..fields.addAll({
+            'title': title,
+            'originalWidth': '$width',
+            'originalHeight': '$height',
+          })
+          ..files.add(await http.MultipartFile.fromPath('file', filePath));
     final streamed = await request.send();
     final response = await http.Response.fromStream(streamed);
     _ensureSuccess(response);
-    return LiveLayerProject.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    return LiveLayerProject.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
   }
 
   Future<void> startProcessing(String projectId) async {
@@ -111,14 +166,20 @@ class ApiClient {
   }
 
   Future<double> getSensorSensitivity() async {
-    final response = await http.get(Uri.parse('$baseUrl/api/settings'), headers: _headers);
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/settings'),
+      headers: _headers,
+    );
     _ensureSuccess(response);
     final settings = jsonDecode(response.body) as Map<String, dynamic>;
     return (settings['sensorSensitivity'] as num?)?.toDouble() ?? 1;
   }
 
   Future<void> updateSensorSensitivity(double sensitivity) async {
-    final current = await http.get(Uri.parse('$baseUrl/api/settings'), headers: _headers);
+    final current = await http.get(
+      Uri.parse('$baseUrl/api/settings'),
+      headers: _headers,
+    );
     _ensureSuccess(current);
     final settings = jsonDecode(current.body) as Map<String, dynamic>;
     final response = await http.put(

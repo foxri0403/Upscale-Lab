@@ -1,6 +1,6 @@
 # 인증 API 연동 가이드
 
-이 문서는 Windows(WPF)와 Android(Flutter) 클라이언트에서 회원가입, 이메일 인증 및 로그인 API를 연동하기 위한 계약을 설명합니다. JSON 필드명은 camelCase입니다.
+이 문서는 Windows(WPF)와 Android(Flutter) 클라이언트에서 회원가입, 이메일 인증, 로그인, 아이디 찾기 및 비밀번호 재설정 API를 연동하기 위한 계약을 설명합니다. JSON 필드명은 camelCase입니다.
 
 ## 인증 흐름
 
@@ -9,6 +9,8 @@
 3. 클라이언트가 이메일과 코드를 `POST /api/auth/verify-email`로 제출합니다.
 4. 인증 성공 응답의 JWT를 저장하고 인증이 필요한 API에 사용합니다.
 5. 코드가 오지 않으면 `POST /api/auth/resend-verification`으로 재전송을 요청합니다.
+6. 로그인 이메일을 잊은 사용자는 사용자 이름으로 `POST /api/auth/find-id`를 호출합니다.
+7. 비밀번호를 잊은 사용자는 `POST /api/auth/forgot-password`로 코드를 요청하고 `POST /api/auth/reset-password`로 새 비밀번호를 설정합니다.
 
 이메일 인증 전에는 로그인할 수 없습니다. Cognito 인증 코드는 24시간 동안 유효하며, API의 재전송 요청은 60초 간격으로 제한됩니다. 잘못된 코드 입력 제한과 추가 요청 제한은 Cognito 정책을 따릅니다.
 
@@ -113,6 +115,66 @@ Authorization: Bearer <accessToken>
 ```
 
 JWT 기본 만료 시간은 60분입니다. Refresh token은 아직 제공하지 않습니다.
+
+## 아이디 찾기
+
+현재 로그인 아이디는 이메일입니다. 사용자가 가입할 때 설정한 사용자 이름을 제출하면 인증이 완료된 계정의 이메일을 마스킹해서 반환합니다.
+
+`POST /api/auth/find-id`
+
+```json
+{
+  "username": "tester"
+}
+```
+
+일치하는 계정이 있으면 `200 OK`를 반환합니다.
+
+```json
+{
+  "maskedEmail": "u***@example.com"
+}
+```
+
+인증 완료 계정이 없으면 `maskedEmail`은 `null`입니다. 이메일 원문은 반환하지 않습니다.
+
+## 비밀번호 재설정 코드 요청
+
+`POST /api/auth/forgot-password`
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+계정 존재 여부가 노출되지 않도록 일치 여부와 관계없이 `202 Accepted`를 반환합니다.
+
+```json
+{
+  "message": "일치하는 계정이 있다면 등록된 이메일로 재설정 코드를 전송했습니다."
+}
+```
+
+## 새 비밀번호 설정
+
+`POST /api/auth/reset-password`
+
+```json
+{
+  "email": "user@example.com",
+  "code": "123456",
+  "newPassword": "New-correct-horse2!"
+}
+```
+
+성공 시 `200 OK`를 반환합니다. 서버는 먼저 Cognito에서 코드와 새 비밀번호를 확인한 뒤, 애플리케이션 DB의 기존 해시를 새 BCrypt 해시로 교체합니다. 비밀번호 원문이나 복호화 가능한 값은 저장하지 않습니다. 새 비밀번호는 기존 비밀번호와 달라야 하며 회원가입과 동일한 정책을 따릅니다.
+
+```json
+{
+  "message": "비밀번호가 변경되었습니다."
+}
+```
 
 ## 현재 사용자 확인
 

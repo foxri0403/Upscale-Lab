@@ -1,4 +1,4 @@
-# LiveLayer
+# Upscale Lab
 
 기존 Upscale Lab의 ASP.NET Core 8 백엔드, PostgreSQL 스키마, 인증, S3 이미지 저장소와 갤러리를 보존하면서 AI 레이어 분해 기반 2.5D 라이브 배경화면 서비스로 확장한 저장소입니다. 이미지 바이너리는 S3에, 사용자·프로젝트·레이어 메타데이터는 PostgreSQL(RDS)에 저장합니다.
 

@@ -1,4 +1,4 @@
-# LiveLayer mobile client
+# Upscale Lab mobile client
 
 This Flutter client supports JWT login, project upload, asynchronous processing start, project status display, a sensor-filtered layer preview, sensitivity control, and an Android live-wallpaper picker backed by `WallpaperService`.
 

@@ -98,6 +98,7 @@ builder.Services.AddSingleton<IAmazonCognitoIdentityProvider>(_ =>
 builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IEmailVerificationProvider, CognitoEmailVerificationProvider>();
+builder.Services.AddScoped<IPasswordRecoveryProvider, CognitoEmailVerificationProvider>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IDeviceService, DeviceService>();
 builder.Services.AddScoped<IUserSettingService, UserSettingService>();
