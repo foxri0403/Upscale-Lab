@@ -67,4 +67,17 @@ class LiveLayer {
       movementY: number('movementY'),
     );
   }
+
+  Map<String, dynamic> toWallpaperJson() => {
+        'id': id,
+        'imageUrl': imageUrl,
+        'layerOrder': layerOrder,
+        'depth': depth,
+        'positionX': positionX,
+        'positionY': positionY,
+        'rotation': rotation,
+        'scale': scale,
+        'movementX': movementX,
+        'movementY': movementY,
+      };
 }

@@ -1321,7 +1321,7 @@ class NewProjectCard extends StatelessWidget {
               const Icon(Icons.add, size: 52, color: Color(0xFF58647D)),
             const SizedBox(height: 18),
             Text(
-              creating ? '생성 중...' : '새 작품 만들기',
+              creating ? '업로드 중...' : '이미지 업로드',
               style: const TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w500,
@@ -1406,6 +1406,9 @@ class PreviewPage extends StatefulWidget {
 class _PreviewPageState extends State<PreviewPage> {
   static const _wallpaperChannel = MethodChannel('live_layer/wallpaper');
   double _sensitivity = 1;
+  bool _downloading = false;
+  bool _applyingStatic = false;
+  bool _applyingLive = false;
 
   @override
   void initState() {
@@ -1415,17 +1418,63 @@ class _PreviewPageState extends State<PreviewPage> {
     });
   }
 
-  Future<void> _openWallpaperPicker() async {
+  Future<void> _downloadOriginal() async {
+    setState(() => _downloading = true);
     try {
-      await _wallpaperChannel.invokeMethod<void>('openWallpaperPicker', {
+      await _wallpaperChannel.invokeMethod<int>('downloadImage', {
+        'url': widget.project.originalImageUrl,
+        'fileName': widget.project.title,
+      });
+      _message('다운로드를 시작했습니다. 완료되면 알림으로 알려드려요.');
+    } on PlatformException catch (error) {
+      _message(error.message ?? '$error');
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
+  }
+
+  Future<void> _applyStaticWallpaper() async {
+    setState(() => _applyingStatic = true);
+    try {
+      await _wallpaperChannel.invokeMethod<void>('applyStaticWallpaper', {
+        'url': widget.project.originalImageUrl,
+      });
+      _message('원본 이미지를 홈 화면 배경화면으로 적용했습니다.');
+    } on PlatformException catch (error) {
+      _message(error.message ?? '$error');
+    } finally {
+      if (mounted) setState(() => _applyingStatic = false);
+    }
+  }
+
+  Future<void> _applyLiveWallpaper() async {
+    if (widget.project.layers.isEmpty) {
+      _message('레이어 처리가 완료된 뒤 라이브 배경화면을 적용할 수 있습니다.');
+      return;
+    }
+
+    setState(() => _applyingLive = true);
+    try {
+      await _wallpaperChannel.invokeMethod<void>('prepareLiveWallpaper', {
         'projectId': widget.project.id,
+        'title': widget.project.title,
+        'originalUrl': widget.project.originalImageUrl,
+        'sensitivity': _sensitivity,
+        'layers': widget.project.layers
+            .map((layer) => layer.toWallpaperJson())
+            .toList(),
       });
     } on PlatformException catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(error.message ?? '$error')));
-      }
+      _message(error.message ?? '$error');
+    } finally {
+      if (mounted) setState(() => _applyingLive = false);
     }
+  }
+
+  void _message(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -1433,19 +1482,13 @@ class _PreviewPageState extends State<PreviewPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.project.title),
-        actions: [
-          IconButton(
-            onPressed: _openWallpaperPicker,
-            icon: const Icon(Icons.wallpaper),
-          ),
-        ],
       ),
       body: Column(
         children: [
           Expanded(
             child: widget.project.layers.isEmpty
                 ? Center(
-                    child: Text('Processing status: ${widget.project.status}'),
+                    child: Text('처리 상태: ${widget.project.status}'),
                   )
                 : AspectRatio(
                     aspectRatio: 9 / 16,
@@ -1456,7 +1499,7 @@ class _PreviewPageState extends State<PreviewPage> {
                   ),
           ),
           ListTile(
-            title: const Text('Sensor sensitivity'),
+            title: const Text('센서 반응 감도'),
             subtitle: Slider(
               value: _sensitivity,
               min: 0,
@@ -1464,6 +1507,46 @@ class _PreviewPageState extends State<PreviewPage> {
               divisions: 20,
               onChanged: (value) => setState(() => _sensitivity = value),
               onChangeEnd: widget.apiClient.updateSensorSensitivity,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _applyingLive ? null : _applyLiveWallpaper,
+                icon: _applyingLive
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.wallpaper),
+                label: Text(
+                  _applyingLive ? '레이어 다운로드 중...' : '라이브 배경화면 적용',
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _downloading ? null : _downloadOriginal,
+                    icon: const Icon(Icons.download_outlined),
+                    label: Text(_downloading ? '준비 중...' : '원본 다운로드'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _applyingStatic ? null : _applyStaticWallpaper,
+                    icon: const Icon(Icons.phone_android),
+                    label: Text(_applyingStatic ? '적용 중...' : '원본 바로 적용'),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
