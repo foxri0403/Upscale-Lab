@@ -1421,13 +1421,19 @@ class _PreviewPageState extends State<PreviewPage> {
   Future<void> _downloadOriginal() async {
     setState(() => _downloading = true);
     try {
+      // Project image URLs are short-lived S3 URLs. Refresh immediately before
+      // handing the URL to Android so a preview left open does not download an
+      // expired link.
+      final project = await widget.apiClient.getProject(widget.project.id);
       await _wallpaperChannel.invokeMethod<int>('downloadImage', {
-        'url': widget.project.originalImageUrl,
-        'fileName': widget.project.title,
+        'url': project.originalImageUrl,
+        'fileName': project.title,
       });
       _message('다운로드를 시작했습니다. 완료되면 알림으로 알려드려요.');
     } on PlatformException catch (error) {
       _message(error.message ?? '$error');
+    } catch (error) {
+      _message('다운로드 URL을 가져오지 못했습니다.\n$error');
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
@@ -1436,36 +1442,40 @@ class _PreviewPageState extends State<PreviewPage> {
   Future<void> _applyStaticWallpaper() async {
     setState(() => _applyingStatic = true);
     try {
+      final project = await widget.apiClient.getProject(widget.project.id);
       await _wallpaperChannel.invokeMethod<void>('applyStaticWallpaper', {
-        'url': widget.project.originalImageUrl,
+        'url': project.originalImageUrl,
       });
       _message('원본 이미지를 홈 화면 배경화면으로 적용했습니다.');
     } on PlatformException catch (error) {
       _message(error.message ?? '$error');
+    } catch (error) {
+      _message('배경화면 URL을 가져오지 못했습니다.\n$error');
     } finally {
       if (mounted) setState(() => _applyingStatic = false);
     }
   }
 
   Future<void> _applyLiveWallpaper() async {
-    if (widget.project.layers.isEmpty) {
-      _message('레이어 처리가 완료된 뒤 라이브 배경화면을 적용할 수 있습니다.');
-      return;
-    }
-
     setState(() => _applyingLive = true);
     try {
+      final project = await widget.apiClient.getProject(widget.project.id);
+      if (project.layers.isEmpty) {
+        _message('레이어 처리가 완료된 뒤 라이브 배경화면을 적용할 수 있습니다.');
+        return;
+      }
       await _wallpaperChannel.invokeMethod<void>('prepareLiveWallpaper', {
-        'projectId': widget.project.id,
-        'title': widget.project.title,
-        'originalUrl': widget.project.originalImageUrl,
+        'projectId': project.id,
+        'title': project.title,
+        'originalUrl': project.originalImageUrl,
         'sensitivity': _sensitivity,
-        'layers': widget.project.layers
-            .map((layer) => layer.toWallpaperJson())
-            .toList(),
+        'layers':
+            project.layers.map((layer) => layer.toWallpaperJson()).toList(),
       });
     } on PlatformException catch (error) {
       _message(error.message ?? '$error');
+    } catch (error) {
+      _message('라이브 배경화면 파일을 가져오지 못했습니다.\n$error');
     } finally {
       if (mounted) setState(() => _applyingLive = false);
     }

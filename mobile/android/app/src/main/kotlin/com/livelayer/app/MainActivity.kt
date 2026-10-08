@@ -108,7 +108,10 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        val fileName = ensureImageExtension(sanitizeFileName(requestedFileName.orEmpty()))
+        val fileName = ensureImageExtension(
+            sanitizeFileName(requestedFileName.orEmpty()),
+            url,
+        )
         if (
             Build.VERSION.SDK_INT in Build.VERSION_CODES.M..Build.VERSION_CODES.P &&
             checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
@@ -138,7 +141,7 @@ class MainActivity : FlutterActivity() {
             val request = DownloadManager.Request(Uri.parse(url))
                 .setTitle(fileName)
                 .setDescription("Upscale Lab 이미지 다운로드")
-                .setMimeType("image/*")
+                .setMimeType(imageMimeType(fileName))
                 .setNotificationVisibility(
                     DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED,
                 )
@@ -318,12 +321,28 @@ class MainActivity : FlutterActivity() {
         return sanitized.ifBlank { "upscale-lab" }.take(120)
     }
 
-    private fun ensureImageExtension(value: String): String {
+    private fun ensureImageExtension(value: String, url: String): String {
         val extension = value.substringAfterLast('.', "").lowercase()
-        return if (extension in setOf("jpg", "jpeg", "png", "webp")) value else "$value.jpg"
+        if (extension in IMAGE_EXTENSIONS) return value
+
+        val urlExtension = runCatching {
+            Uri.parse(url).lastPathSegment
+                ?.substringAfterLast('.', "")
+                ?.lowercase()
+                ?.takeIf { it in IMAGE_EXTENSIONS }
+        }.getOrNull()
+        return "$value.${urlExtension ?: "jpg"}"
     }
+
+    private fun imageMimeType(fileName: String): String =
+        when (fileName.substringAfterLast('.', "").lowercase()) {
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            else -> "image/jpeg"
+        }
 
     private companion object {
         const val DOWNLOAD_PERMISSION_REQUEST = 4101
+        val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
     }
 }
