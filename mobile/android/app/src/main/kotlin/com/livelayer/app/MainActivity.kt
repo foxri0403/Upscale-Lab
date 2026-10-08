@@ -36,6 +36,28 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "live_layer/config")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getApiBaseUrl" -> result.success(
+                        getSharedPreferences(CONFIG_PREFERENCES, MODE_PRIVATE)
+                            .getString(API_BASE_URL_KEY, null),
+                    )
+                    "setApiBaseUrl" -> {
+                        val url = call.argument<String>("url")?.trim()
+                        if (url.isNullOrBlank()) {
+                            result.error("invalid_api_url", "서버 주소가 비어 있습니다.", null)
+                        } else {
+                            getSharedPreferences(CONFIG_PREFERENCES, MODE_PRIVATE)
+                                .edit()
+                                .putString(API_BASE_URL_KEY, url)
+                                .apply()
+                            result.success(null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "live_layer/wallpaper")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -343,6 +365,8 @@ class MainActivity : FlutterActivity() {
 
     private companion object {
         const val DOWNLOAD_PERMISSION_REQUEST = 4101
+        const val CONFIG_PREFERENCES = "live_layer_config"
+        const val API_BASE_URL_KEY = "api_base_url"
         val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
     }
 }

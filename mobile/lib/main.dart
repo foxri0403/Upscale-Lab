@@ -8,12 +8,27 @@ import 'models/live_layer_models.dart';
 import 'services/api_client.dart';
 import 'widgets/parallax_preview.dart';
 
-void main() {
+const _configChannel = MethodChannel('live_layer/config');
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   const apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'http://10.0.2.2:5080',
   );
-  runApp(LiveLayerApp(apiClient: ApiClient(baseUrl: apiBaseUrl)));
+  var effectiveApiBaseUrl = apiBaseUrl;
+  try {
+    final savedApiBaseUrl =
+        await _configChannel.invokeMethod<String>('getApiBaseUrl');
+    if (savedApiBaseUrl != null && savedApiBaseUrl.trim().isNotEmpty) {
+      effectiveApiBaseUrl = savedApiBaseUrl;
+    }
+  } on PlatformException {
+    // Use the build-time default when native settings are unavailable.
+  } on MissingPluginException {
+    // Non-Android builds can continue with the build-time default.
+  }
+  runApp(LiveLayerApp(apiClient: ApiClient(baseUrl: effectiveApiBaseUrl)));
 }
 
 bool _meetsPasswordPolicy(String password) {
@@ -158,6 +173,71 @@ class _LoginPageState extends State<LoginPage> {
   final _password = TextEditingController();
   bool _busy = false;
   bool _showPassword = false;
+
+  Future<void> _configureServer() async {
+    final controller = TextEditingController(text: widget.apiClient.baseUrl);
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('서버 주소 설정'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'AWS 배포 후 HTTPS API 주소를 입력하세요.',
+              style: TextStyle(color: Color(0xFF6F7789)),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'API URL',
+                hintText: 'https://api.example.com',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('저장'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null) return;
+
+    final uri = Uri.tryParse(value);
+    if (uri == null ||
+        !const {'http', 'https'}.contains(uri.scheme) ||
+        uri.host.isEmpty) {
+      _message('http:// 또는 https://로 시작하는 올바른 주소를 입력해주세요.');
+      return;
+    }
+
+    final normalized = value.replaceFirst(RegExp(r'/+$'), '');
+    try {
+      await _configChannel.invokeMethod<void>('setApiBaseUrl', {
+        'url': normalized,
+      });
+      widget.apiClient.updateBaseUrl(normalized);
+      _message('서버 주소를 $normalized(으)로 저장했습니다.');
+    } on PlatformException catch (error) {
+      _message(error.message ?? '서버 주소를 저장하지 못했습니다.');
+    } on MissingPluginException {
+      widget.apiClient.updateBaseUrl(normalized);
+      _message('현재 실행 중인 앱에 서버 주소를 적용했습니다.');
+    }
+  }
 
   Future<void> _login() async {
     if (_identifier.text.trim().isEmpty || _password.text.isEmpty) {
@@ -305,6 +385,11 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                 ],
+              ),
+              TextButton.icon(
+                onPressed: _busy ? null : _configureServer,
+                icon: const Icon(Icons.dns_outlined, size: 18),
+                label: const Text('서버 주소 설정'),
               ),
               const Spacer(flex: 4),
             ],

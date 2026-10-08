@@ -5,10 +5,20 @@ import 'package:http/http.dart' as http;
 import '../models/live_layer_models.dart';
 
 class ApiClient {
-  ApiClient({required this.baseUrl});
+  ApiClient({required String baseUrl}) : _baseUrl = _normalize(baseUrl);
 
-  final String baseUrl;
+  String _baseUrl;
   String? _accessToken;
+
+  String get baseUrl => _baseUrl;
+
+  void updateBaseUrl(String value) {
+    _baseUrl = _normalize(value);
+    _accessToken = null;
+  }
+
+  static String _normalize(String value) =>
+      value.trim().replaceFirst(RegExp(r'/+$'), '');
 
   Map<String, String> get _headers => {
         'content-type': 'application/json',

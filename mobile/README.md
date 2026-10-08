@@ -15,6 +15,8 @@ flutter run --dart-define=API_BASE_URL=http://YOUR_API_HOST:5080
 
 The emulator default in `main.dart` is `http://10.0.2.2:5080`. A physical device must use a reachable HTTPS API URL.
 
+The login screen includes **서버 주소 설정**. Team test builds persist the selected API URL in Android app preferences, so the same APK can switch from a local server to the final AWS HTTPS endpoint without rebuilding. Changing the server logs out the current session.
+
 On the project preview screen, **원본 다운로드** saves the source through Android's download manager and **원본 바로 적용** sets it as the home-screen wallpaper. **라이브 배경화면 적용** downloads the current processed layers into app-private persistent storage before opening Android's required live-wallpaper confirmation screen. Once confirmed, the wallpaper renders those cached layers offline and applies the saved sensor sensitivity.
 
 Download and wallpaper actions refresh the project first because the S3 image links are short-lived. Android preserves the original JPEG, PNG, or WebP extension when it saves the image.
