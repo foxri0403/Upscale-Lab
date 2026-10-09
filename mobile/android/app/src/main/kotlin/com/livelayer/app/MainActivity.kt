@@ -358,15 +358,32 @@ class MainActivity : FlutterActivity() {
 
     private fun imageMimeType(fileName: String): String =
         when (fileName.substringAfterLast('.', "").lowercase()) {
+            "jpg", "jpeg", "jpe" -> "image/jpeg"
             "png" -> "image/png"
             "webp" -> "image/webp"
-            else -> "image/jpeg"
+            "gif" -> "image/gif"
+            "bmp", "dib" -> "image/bmp"
+            "tif", "tiff" -> "image/tiff"
+            "heic" -> "image/heic"
+            "heics" -> "image/heic-sequence"
+            "heif", "hif" -> "image/heif"
+            "heifs" -> "image/heif-sequence"
+            "avif" -> "image/avif"
+            "dng" -> "image/x-adobe-dng"
+            "jp2" -> "image/jp2"
+            "jpx" -> "image/jpx"
+            "wbmp" -> "image/vnd.wap.wbmp"
+            else -> "application/octet-stream"
         }
 
     private companion object {
         const val DOWNLOAD_PERMISSION_REQUEST = 4101
         const val CONFIG_PREFERENCES = "live_layer_config"
         const val API_BASE_URL_KEY = "api_base_url"
-        val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
+        val IMAGE_EXTENSIONS = setOf(
+            "jpg", "jpeg", "jpe", "png", "webp", "gif", "bmp", "dib",
+            "tif", "tiff", "heic", "heics", "heif", "heifs", "hif",
+            "avif", "dng", "jp2", "jpx", "wbmp",
+        )
     }
 }

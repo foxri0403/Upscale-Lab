@@ -19,4 +19,4 @@ The login screen includes **서버 주소 설정**. Team test builds persist the
 
 On the project preview screen, **원본 다운로드** saves the source through Android's download manager and **원본 바로 적용** sets it as the home-screen wallpaper. **라이브 배경화면 적용** downloads the current processed layers into app-private persistent storage before opening Android's required live-wallpaper confirmation screen. Once confirmed, the wallpaper renders those cached layers offline and applies the saved sensor sensitivity.
 
-Download and wallpaper actions refresh the project first because the S3 image links are short-lived. Android preserves the original JPEG, PNG, or WebP extension when it saves the image.
+Download and wallpaper actions refresh the project first because the S3 image links are short-lived. Android preserves the original extension and MIME type for the mobile image formats accepted by the backend, including HEIC/HEIF and AVIF.
