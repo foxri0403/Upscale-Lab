@@ -11,13 +11,6 @@ namespace UpscaleLab.Api.Controllers;
 [Route("api/images")]
 public sealed class ImagesController(IImageService imageService) : ControllerBase
 {
-    private static readonly HashSet<string> AllowedContentTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "image/jpeg",
-        "image/png",
-        "image/webp"
-    };
-
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<ImageResponse>>> GetAll(CancellationToken cancellationToken)
     {
@@ -42,9 +35,12 @@ public sealed class ImagesController(IImageService imageService) : ControllerBas
             return ValidationProblem("빈 파일은 업로드할 수 없습니다.");
         }
 
-        if (!AllowedContentTypes.Contains(form.File.ContentType))
+        if (!ImageFormatPolicy.TryResolveContentType(
+                form.File.FileName,
+                form.File.ContentType,
+                out var contentType))
         {
-            ModelState.AddModelError(nameof(form.File), "JPEG, PNG, WebP 이미지만 업로드할 수 있습니다.");
+            ModelState.AddModelError(nameof(form.File), ImageFormatPolicy.SupportedFormatsMessage);
             return ValidationProblem(ModelState);
         }
 
@@ -52,7 +48,7 @@ public sealed class ImagesController(IImageService imageService) : ControllerBas
         var command = new ImageUploadCommand(
             stream,
             form.File.FileName,
-            form.File.ContentType,
+            contentType,
             form.OriginalWidth,
             form.OriginalHeight);
         var response = await imageService.UploadAsync(User.GetRequiredUserId(), command, cancellationToken);

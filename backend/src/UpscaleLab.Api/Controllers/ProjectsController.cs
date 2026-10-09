@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using UpscaleLab.Api.Authentication;
 using UpscaleLab.Api.Models;
+using UpscaleLab.Application.Images;
 using UpscaleLab.Application.Processing;
 using UpscaleLab.Application.Projects;
 
@@ -14,13 +15,6 @@ public sealed class ProjectsController(
     IProjectService projectService,
     IProjectProcessingService processingService) : ControllerBase
 {
-    private static readonly HashSet<string> AllowedContentTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "image/jpeg",
-        "image/png",
-        "image/webp"
-    };
-
     [HttpPost]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(25 * 1024 * 1024)]
@@ -33,9 +27,12 @@ public sealed class ProjectsController(
             return ValidationProblem("빈 파일은 업로드할 수 없습니다.");
         }
 
-        if (!AllowedContentTypes.Contains(form.File.ContentType))
+        if (!ImageFormatPolicy.TryResolveContentType(
+                form.File.FileName,
+                form.File.ContentType,
+                out var contentType))
         {
-            ModelState.AddModelError(nameof(form.File), "JPEG, PNG, WebP 이미지만 업로드할 수 있습니다.");
+            ModelState.AddModelError(nameof(form.File), ImageFormatPolicy.SupportedFormatsMessage);
             return ValidationProblem(ModelState);
         }
 
@@ -45,7 +42,7 @@ public sealed class ProjectsController(
             new CreateProjectCommand(
                 stream,
                 form.File.FileName,
-                form.File.ContentType,
+                contentType,
                 form.Title,
                 form.OriginalWidth,
                 form.OriginalHeight),

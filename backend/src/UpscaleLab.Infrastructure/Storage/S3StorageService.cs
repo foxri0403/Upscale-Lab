@@ -17,7 +17,7 @@ public sealed class S3StorageService(IAmazonS3 s3Client, S3StorageOptions option
 
         var request = new PutObjectRequest
         {
-            BucketName = options.BucketName,
+            BucketName = options.S3BucketName,
             Key = objectKey,
             InputStream = content,
             ContentType = contentType,
@@ -25,19 +25,19 @@ public sealed class S3StorageService(IAmazonS3 s3Client, S3StorageOptions option
         };
 
         await s3Client.PutObjectAsync(request, cancellationToken);
-        return new StoredObject(objectKey, $"s3://{options.BucketName}/{objectKey}");
+        return new StoredObject(objectKey, $"s3://{options.S3BucketName}/{objectKey}");
     }
 
     public async Task DeleteAsync(string objectKey, CancellationToken cancellationToken)
     {
         EnsureConfigured();
-        await s3Client.DeleteObjectAsync(options.BucketName, objectKey, cancellationToken);
+        await s3Client.DeleteObjectAsync(options.S3BucketName, objectKey, cancellationToken);
     }
 
     public async Task DownloadAsync(string objectKey, Stream destination, CancellationToken cancellationToken)
     {
         EnsureConfigured();
-        using var response = await s3Client.GetObjectAsync(options.BucketName, objectKey, cancellationToken);
+        using var response = await s3Client.GetObjectAsync(options.S3BucketName, objectKey, cancellationToken);
         await response.ResponseStream.CopyToAsync(destination, cancellationToken);
     }
 
@@ -46,7 +46,7 @@ public sealed class S3StorageService(IAmazonS3 s3Client, S3StorageOptions option
         EnsureConfigured();
         return s3Client.GetPreSignedURL(new GetPreSignedUrlRequest
         {
-            BucketName = options.BucketName,
+            BucketName = options.S3BucketName,
             Key = objectKey,
             Expires = DateTime.UtcNow.Add(lifetime),
             Verb = HttpVerb.GET
@@ -55,7 +55,7 @@ public sealed class S3StorageService(IAmazonS3 s3Client, S3StorageOptions option
 
     private void EnsureConfigured()
     {
-        if (string.IsNullOrWhiteSpace(options.BucketName))
+        if (string.IsNullOrWhiteSpace(options.S3BucketName))
         {
             throw new ConfigurationException("AWS:S3BucketName 설정이 필요합니다.");
         }
