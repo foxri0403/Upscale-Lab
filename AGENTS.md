@@ -62,6 +62,16 @@ These are expected to come from local user secrets, environment variables, or a 
 - When adding tests, use the existing in-memory EF Core patterns already present in [backend/tests/UpscaleLab.Tests/AuthServiceTests.cs](backend/tests/UpscaleLab.Tests/AuthServiceTests.cs).
 - Validate the relevant backend behavior with the smallest focused test or build command before considering the change complete.
 
+## Mobile versioning
+
+- Use semantic version numbers in `major.minor.patch` form for every new APK release.
+- Increment `major` for a large feature or major product update.
+- Increment `minor` for a smaller feature update.
+- Increment `patch` for bug fixes only.
+- Reset the less-significant components when incrementing a higher component (for example, `0.3.4` → `0.4.0` or `1.0.0`).
+- Increment the Android build number after every newly generated APK, independently of the semantic version component selected.
+- Keep the APK filename and mobile documentation synchronized with the version in `mobile/pubspec.yaml`.
+
 ## References
 
 - [README.md](README.md)
