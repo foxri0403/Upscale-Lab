@@ -2,7 +2,7 @@
 
 This Flutter client supports JWT login, explicit local/cloud image storage, project status display, original-image download, one-tap static wallpaper application, a sensor-filtered layer preview, and an Android live wallpaper backed by locally cached project layers and `WallpaperService`.
 
-Installable APK deliverables use the `Upscale_Lab-<version>-.apk` naming convention. The current app version is `0.2.0` with Android build number `3`.
+Installable APK deliverables use the `Upscale_Lab-<version>-.apk` naming convention. The current app version is `0.2.1` with Android build number `4`.
 
 ## Run
 

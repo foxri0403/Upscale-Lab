@@ -158,6 +158,69 @@ class LiveLayerButton extends StatelessWidget {
   }
 }
 
+class _ServerAddressDialog extends StatefulWidget {
+  const _ServerAddressDialog({required this.initialValue});
+
+  final String initialValue;
+
+  @override
+  State<_ServerAddressDialog> createState() => _ServerAddressDialogState();
+}
+
+class _ServerAddressDialogState extends State<_ServerAddressDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('서버 주소 설정'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'AWS 배포 후 HTTPS API 주소를 입력하세요.',
+            style: TextStyle(color: Color(0xFF6F7789)),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _controller,
+            keyboardType: TextInputType.url,
+            autocorrect: false,
+            decoration: const InputDecoration(
+              labelText: 'API URL',
+              hintText: 'https://api.example.com',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: const Text('저장'),
+        ),
+      ],
+    );
+  }
+}
+
 // 로그인 UI는 이전에 확정한 디자인을 유지하고 실제 /api/auth/login만 연결한다.
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key, required this.apiClient});
@@ -175,46 +238,13 @@ class _LoginPageState extends State<LoginPage> {
   bool _showPassword = false;
 
   Future<void> _configureServer() async {
-    final controller = TextEditingController(text: widget.apiClient.baseUrl);
     final value = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('서버 주소 설정'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'AWS 배포 후 HTTPS API 주소를 입력하세요.',
-              style: TextStyle(color: Color(0xFF6F7789)),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.url,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: 'API URL',
-                hintText: 'https://api.example.com',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('저장'),
-          ),
-        ],
+      builder: (_) => _ServerAddressDialog(
+        initialValue: widget.apiClient.baseUrl,
       ),
     );
-    controller.dispose();
-    if (value == null) return;
+    if (!mounted || value == null) return;
 
     final uri = Uri.tryParse(value);
     if (uri == null ||
@@ -229,11 +259,15 @@ class _LoginPageState extends State<LoginPage> {
       await _configChannel.invokeMethod<void>('setApiBaseUrl', {
         'url': normalized,
       });
+      if (!mounted) return;
       widget.apiClient.updateBaseUrl(normalized);
       _message('서버 주소를 $normalized(으)로 저장했습니다.');
     } on PlatformException catch (error) {
-      _message(error.message ?? '서버 주소를 저장하지 못했습니다.');
+      if (mounted) {
+        _message(error.message ?? '서버 주소를 저장하지 못했습니다.');
+      }
     } on MissingPluginException {
+      if (!mounted) return;
       widget.apiClient.updateBaseUrl(normalized);
       _message('현재 실행 중인 앱에 서버 주소를 적용했습니다.');
     }
@@ -1291,8 +1325,7 @@ class _ProjectListPageState extends State<ProjectListPage> {
                                 : '${item.label} (준비 중)',
                           ),
                           selected: mode == item,
-                          onSelected: (_) =>
-                              setModalState(() => mode = item),
+                          onSelected: (_) => setModalState(() => mode = item),
                         ),
                       )
                       .toList(),
