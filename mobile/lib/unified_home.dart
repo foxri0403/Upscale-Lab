@@ -79,7 +79,8 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
       codec.dispose();
 
       if (!mounted) return;
-      final options = await Navigator.of(context).push<ImageRegistrationOptions>(
+      final options =
+          await Navigator.of(context).push<ImageRegistrationOptions>(
         MaterialPageRoute(
           builder: (_) => ImageFeaturePage(
             filePath: picked.path,
@@ -187,6 +188,100 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
     }
   }
 
+  Future<void> _editTag(LocalImageItem image) async {
+    if (_busyIds.contains(image.id)) return;
+    final selectedTag = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: SizedBox(
+          height: 460,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(22, 4, 22, 12),
+                child: Text(
+                  '태그 수정',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: galleryTags.length,
+                  itemBuilder: (context, index) {
+                    final tag = galleryTags[index];
+                    return ListTile(
+                      title: Text(tag),
+                      trailing: image.tag == tag
+                          ? const Icon(Icons.check, color: Color(0xFF4658D6))
+                          : null,
+                      onTap: () => Navigator.pop(context, tag),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selectedTag == null || selectedTag == image.tag || !mounted) return;
+
+    setState(() => _busyIds.add(image.id));
+    try {
+      if (image.isShared) {
+        await widget.apiClient.updateGalleryTag(
+          postId: image.galleryPostId!,
+          tag: selectedTag,
+        );
+      }
+      await _localImageStore.updateTag(id: image.id, tag: selectedTag);
+      if (!mounted) return;
+      setState(() => _galleryRevision++);
+      _reload();
+      _message(
+          image.isShared ? '로컬 이미지와 공유 게시물의 태그를 수정했습니다.' : '이미지 태그를 수정했습니다.');
+    } catch (error) {
+      _message('태그를 수정하지 못했습니다.\n$error');
+    } finally {
+      if (mounted) setState(() => _busyIds.remove(image.id));
+    }
+  }
+
+  Future<void> _removeWallpaper(LocalImageItem image) async {
+    if (_busyIds.contains(image.id)) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('홈 배경화면 제거'),
+        content:
+            const Text('현재 Android 홈 배경화면만 기본 배경으로 되돌릴까요? 등록된 이미지는 삭제되지 않습니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('배경화면 제거'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _busyIds.add(image.id));
+    try {
+      await _wallpaperChannel.invokeMethod<void>('clearHomeWallpaper');
+      _message('홈 배경화면을 제거했습니다. 등록된 이미지는 유지됩니다.');
+    } on PlatformException catch (error) {
+      _message(error.message ?? '$error');
+    } finally {
+      if (mounted) setState(() => _busyIds.remove(image.id));
+    }
+  }
+
   Future<void> _delete(LocalImageItem image) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -288,6 +383,8 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
                         ),
                         onShare: () => _share(image),
                         onUnshare: () => _unshare(image),
+                        onEditTag: () => _editTag(image),
+                        onRemoveWallpaper: () => _removeWallpaper(image),
                         onDelete: () => _delete(image),
                       );
                     },
@@ -402,6 +499,8 @@ class _LocalImageCard extends StatelessWidget {
     required this.onTap,
     required this.onShare,
     required this.onUnshare,
+    required this.onEditTag,
+    required this.onRemoveWallpaper,
     required this.onDelete,
   });
 
@@ -410,6 +509,8 @@ class _LocalImageCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onShare;
   final VoidCallback onUnshare;
+  final VoidCallback onEditTag;
+  final VoidCallback onRemoveWallpaper;
   final VoidCallback onDelete;
 
   @override
@@ -445,6 +546,9 @@ class _LocalImageCard extends StatelessWidget {
                           onSelected: (value) {
                             if (value == 'share') onShare();
                             if (value == 'unshare') onUnshare();
+                            if (value == 'remove_wallpaper') {
+                              onRemoveWallpaper();
+                            }
                             if (value == 'delete') onDelete();
                           },
                           itemBuilder: (_) => [
@@ -458,6 +562,10 @@ class _LocalImageCard extends StatelessWidget {
                                 value: 'share',
                                 child: Text('공유'),
                               ),
+                            const PopupMenuItem(
+                              value: 'remove_wallpaper',
+                              child: Text('홈 배경화면에서 제거'),
+                            ),
                             const PopupMenuItem(
                               value: 'delete',
                               child: Text('삭제'),
@@ -488,11 +596,38 @@ class _LocalImageCard extends StatelessWidget {
               style: const TextStyle(fontSize: 12, color: Color(0xFF9299AA)),
             ),
             const SizedBox(height: 3),
-            Text(
-              image.tag,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: Color(0xFF6F7789)),
+            InkWell(
+              borderRadius: BorderRadius.circular(6),
+              onTap: busy ? null : onEditTag,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.sell_outlined,
+                      size: 13,
+                      color: Color(0xFF6F7789),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        image.tag,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF6F7789),
+                        ),
+                      ),
+                    ),
+                    const Icon(
+                      Icons.edit_outlined,
+                      size: 12,
+                      color: Color(0xFF9299AA),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         ),
@@ -542,7 +677,7 @@ class _GalleryExplorePageState extends State<GalleryExplorePage> {
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _search(),
               decoration: InputDecoration(
-                hintText: '이름, 작성자, 태그 검색',
+                hintText: '이미지 이름 검색',
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: IconButton(
                   tooltip: '검색',
@@ -605,7 +740,9 @@ class _GalleryExplorePageState extends State<GalleryExplorePage> {
                       physics: const AlwaysScrollableScrollPhysics(),
                       children: [
                         const SizedBox(height: 100),
-                        Center(child: Text('공유 이미지를 불러오지 못했습니다.\n${snapshot.error}')),
+                        Center(
+                            child:
+                                Text('공유 이미지를 불러오지 못했습니다.\n${snapshot.error}')),
                       ],
                     ),
                   );

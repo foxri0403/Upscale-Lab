@@ -2,7 +2,7 @@
 
 This Flutter client supports JWT login with optional secure auto-login, local-first image registration, explicit cloud sharing, per-image share/delete actions, static wallpaper previews, a sensor-filtered layer preview, and an Android live wallpaper backed by locally cached project layers and `WallpaperService`.
 
-Installable APK deliverables use the `Upscale_Lab-<version>-.apk` naming convention. The current app version is `0.4.0` with Android build number `7`.
+Installable APK deliverables use the `Upscale_Lab-<version>-.apk` naming convention. The current app version is `0.5.0` with Android build number `8`.
 
 Before distributing an APK, verify it with Android `apksigner`; an unsigned release APK cannot be installed. Existing team builds use the local Android debug certificate, so test updates must use that same certificate until a production signing key and secure release configuration are provided.
 
@@ -21,7 +21,7 @@ The emulator default in `main.dart` is `http://10.0.2.2:5080`. A physical device
 
 The login screen includes **서버 주소 설정**. Team test builds persist the selected API URL in Android app preferences, so the same APK can switch from a local server to the final AWS HTTPS endpoint without rebuilding. Changing the server logs out the current session.
 
-The home screen uses one local-first library. Registering an image copies it into app-private persistent storage and never calls an upload API. The registration screen pre-fills the original filename, lets the user edit it, and stores one searchable genre tag. Each image card has settings for **공유**, **공유 취소**, and **삭제**. Sharing is the only action that uploads the image to S3, creates its server project, and publishes the gallery item. Sharing cancellation removes the public gallery post and cloud project while preserving the local copy. The Explore tab lists public cloud posts and supports text search and tag filtering.
+The home screen uses one local-first library. Registering an image copies it into app-private persistent storage and never calls an upload API. The registration screen pre-fills the original filename, lets the user edit it, and stores one searchable genre tag. Tapping the tag on an image card edits it locally and also updates its owned gallery post when shared. Each image card has settings for **공유**, **공유 취소**, **홈 배경화면에서 제거**, and **삭제**. Wallpaper removal restores Android's default home wallpaper without deleting the registered image. Sharing is the only action that uploads the image to S3, creates its server project, and publishes the gallery item. Sharing cancellation removes the public gallery post and cloud project while preserving the local copy. The Explore tab lists public cloud posts, searches image titles only, and applies exact tag filtering in both the API and client.
 
 After image selection, the app opens the original/upscaling/2.5D feature screen and then a full-screen wallpaper preview. The user can apply the wallpaper or finish without applying; completion persists the image and immediately adds it to the home screen. Upscaling and 2.5D conversion remain visibly marked as not implemented, so those choices currently preview and store the original without implying that a conversion happened.
 

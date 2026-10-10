@@ -89,6 +89,7 @@ class MainActivity : FlutterActivity() {
                         call.argument<String>("sourcePath"),
                         result,
                     )
+                    "clearHomeWallpaper" -> clearHomeWallpaper(result)
                     "prepareLiveWallpaper" -> prepareLiveWallpaper(
                         call.arguments as? Map<*, *>,
                         result,
@@ -128,6 +129,10 @@ class MainActivity : FlutterActivity() {
                     )
                     "markLocalImageUnshared" -> markLocalImageUnshared(
                         call.argument<String>("id"),
+                        result,
+                    )
+                    "updateLocalImageTag" -> updateLocalImageTag(
+                        call.arguments as? Map<*, *>,
                         result,
                     )
                     "deleteLocalImage" -> deleteLocalImage(
@@ -388,6 +393,28 @@ class MainActivity : FlutterActivity() {
         result.error("local_image_not_found", "로컬 이미지를 찾을 수 없습니다.", null)
     }
 
+    private fun updateLocalImageTag(arguments: Map<*, *>?, result: MethodChannel.Result) {
+        val id = arguments?.get("id") as? String
+        val tag = (arguments?.get("tag") as? String)?.trim()
+        if (id.isNullOrBlank() || tag.isNullOrBlank()) {
+            result.error("invalid_local_image", "수정할 태그 정보가 올바르지 않습니다.", null)
+            return
+        }
+        synchronized(localImagesLock) {
+            val items = readLocalImagesJson()
+            for (index in 0 until items.length()) {
+                val item = items.getJSONObject(index)
+                if (item.optString("id") == id) {
+                    item.put("tag", tag)
+                    writeLocalImagesJson(items)
+                    result.success(null)
+                    return
+                }
+            }
+        }
+        result.error("local_image_not_found", "로컬 이미지를 찾을 수 없습니다.", null)
+    }
+
     private fun deleteLocalImage(id: String?, result: MethodChannel.Result) {
         if (id.isNullOrBlank()) {
             result.error("invalid_local_image", "삭제할 이미지가 없습니다.", null)
@@ -612,6 +639,31 @@ class MainActivity : FlutterActivity() {
             } catch (error: Exception) {
                 runOnUiThread {
                     result.error("wallpaper_failed", "배경화면을 적용하지 못했습니다.", error.message)
+                }
+            }
+        }
+    }
+
+    private fun clearHomeWallpaper(result: MethodChannel.Result) {
+        ioExecutor.execute {
+            try {
+                val manager = WallpaperManager.getInstance(applicationContext)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    manager.clear(WallpaperManager.FLAG_SYSTEM)
+                } else {
+                    manager.clear()
+                }
+
+                val persistent = File(File(filesDir, APPLIED_WALLPAPER_DIRECTORY), "current.img")
+                check(!persistent.exists() || persistent.delete()) { "보관된 배경화면 파일을 삭제할 수 없습니다." }
+                getSharedPreferences("live_layer", MODE_PRIVATE)
+                    .edit()
+                    .remove("static_wallpaper_path")
+                    .commit()
+                runOnUiThread { result.success(null) }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    result.error("wallpaper_clear_failed", "홈 배경화면을 제거하지 못했습니다.", error.message)
                 }
             }
         }

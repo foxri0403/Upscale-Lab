@@ -25,11 +25,7 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         if (!string.IsNullOrWhiteSpace(search))
         {
             var normalizedSearch = search.Trim().ToLower();
-            query = query.Where(x =>
-                x.Title.ToLower().Contains(normalizedSearch) ||
-                (x.Description != null && x.Description.ToLower().Contains(normalizedSearch)) ||
-                x.Tag.ToLower().Contains(normalizedSearch) ||
-                x.User.Username.ToLower().Contains(normalizedSearch));
+            query = query.Where(x => x.Title.ToLower().Contains(normalizedSearch));
         }
 
         if (!string.IsNullOrWhiteSpace(tag))
@@ -101,6 +97,28 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         await dbContext.SaveChangesAsync(cancellationToken);
 
         post = await BaseQuery().SingleAsync(x => x.Id == post.Id, cancellationToken);
+        return MapPost(post, userId);
+    }
+
+    public async Task<GalleryPostResponse> UpdateTagAsync(
+        Guid userId,
+        Guid postId,
+        UpdateGalleryPostTagRequest request,
+        CancellationToken cancellationToken)
+    {
+        var post = await dbContext.GalleryPosts.SingleOrDefaultAsync(
+            x => x.Id == postId,
+            cancellationToken) ?? throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
+
+        if (post.UserId != userId)
+        {
+            throw new ForbiddenException("본인의 게시글만 수정할 수 있습니다.");
+        }
+
+        post.Tag = GalleryTagCatalog.Normalize(request.Tag);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        post = await BaseQuery().SingleAsync(x => x.Id == postId, cancellationToken);
         return MapPost(post, userId);
     }
 

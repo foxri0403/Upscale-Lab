@@ -38,6 +38,20 @@ public sealed class GalleryController(IGalleryService galleryService) : Controll
     }
 
     [Authorize]
+    [HttpPatch("{id:guid}/tag")]
+    public async Task<ActionResult<GalleryPostResponse>> UpdateTag(
+        Guid id,
+        UpdateGalleryPostTagRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await galleryService.UpdateTagAsync(
+            User.GetRequiredUserId(),
+            id,
+            request,
+            cancellationToken));
+    }
+
+    [Authorize]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {

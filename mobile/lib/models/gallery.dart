@@ -34,6 +34,14 @@ class GalleryPostItem {
   final String tag;
   final DateTime createdAt;
 
+  bool matches({String? search, String? selectedTag}) {
+    if (selectedTag != null && tag != selectedTag) return false;
+    final normalizedSearch = search?.trim().toLowerCase();
+    return normalizedSearch == null ||
+        normalizedSearch.isEmpty ||
+        title.toLowerCase().contains(normalizedSearch);
+  }
+
   factory GalleryPostItem.fromJson(Map<String, dynamic> json) =>
       GalleryPostItem(
         id: json['id'] as String,

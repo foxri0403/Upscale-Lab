@@ -49,6 +49,49 @@ public sealed class GalleryServiceTests
         Assert.Equal("Deep Space", post.Title);
         Assert.Equal("SF", post.Tag);
         Assert.Equal("https://example.test/space.png", post.ImageUrl);
+
+        var usernameMatches = await service.GetAllAsync(
+            null,
+            "space_artist",
+            null,
+            CancellationToken.None);
+        Assert.Empty(usernameMatches);
+    }
+
+    [Fact]
+    public async Task UpdateTag_ChangesOwnedPostOnly()
+    {
+        await using var dbContext = CreateDbContext();
+        var user = new User
+        {
+            Email = "owner@example.com",
+            Username = "owner",
+            PasswordHash = "hash"
+        };
+        var post = new GalleryPost
+        {
+            User = user,
+            Image = CreateImage(user, "car.png"),
+            Title = "My Car",
+            Tag = "자동차",
+            IsPublic = true
+        };
+        dbContext.GalleryPosts.Add(post);
+        await dbContext.SaveChangesAsync();
+        var service = new GalleryService(dbContext, new FakeStorageService());
+
+        var updated = await service.UpdateTagAsync(
+            user.Id,
+            post.Id,
+            new UpdateGalleryPostTagRequest("레트로"),
+            CancellationToken.None);
+
+        Assert.Equal("레트로", updated.Tag);
+        await Assert.ThrowsAsync<ForbiddenException>(() => service.UpdateTagAsync(
+            Guid.NewGuid(),
+            post.Id,
+            new UpdateGalleryPostTagRequest("SF"),
+            CancellationToken.None));
     }
 
     [Fact]

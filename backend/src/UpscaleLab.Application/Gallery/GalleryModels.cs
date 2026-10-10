@@ -10,6 +10,9 @@ public sealed record CreateGalleryPostRequest(
     bool IsPublic = true,
     [param: MaxLength(50)] string? Tag = null);
 
+public sealed record UpdateGalleryPostTagRequest(
+    [param: Required, MaxLength(50)] string Tag);
+
 public sealed record GalleryPostResponse(
     Guid Id,
     Guid ImageId,

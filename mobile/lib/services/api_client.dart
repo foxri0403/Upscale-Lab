@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-import '../models/live_layer_models.dart';
 import '../models/gallery.dart';
+import '../models/live_layer_models.dart';
 
 class ApiClient {
   ApiClient({required String baseUrl}) : _baseUrl = _normalize(baseUrl);
@@ -229,9 +229,21 @@ class ApiClient {
     );
     _ensureSuccess(response);
     return (jsonDecode(response.body) as List<dynamic>)
-        .map((item) =>
-            GalleryPostItem.fromJson(item as Map<String, dynamic>))
+        .map((item) => GalleryPostItem.fromJson(item as Map<String, dynamic>))
+        .where((post) => post.matches(search: search, selectedTag: tag))
         .toList();
+  }
+
+  Future<void> updateGalleryTag({
+    required String postId,
+    required String tag,
+  }) async {
+    final response = await http.patch(
+      Uri.parse('$baseUrl/api/gallery/$postId/tag'),
+      headers: _headers,
+      body: jsonEncode({'tag': tag}),
+    );
+    _ensureSuccess(response);
   }
 
   Future<void> deleteGalleryPost(String id) async {

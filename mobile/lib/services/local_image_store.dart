@@ -47,6 +47,13 @@ class LocalImageStore {
     return _channel.invokeMethod<void>('markLocalImageUnshared', {'id': id});
   }
 
+  Future<void> updateTag({required String id, required String tag}) {
+    return _channel.invokeMethod<void>('updateLocalImageTag', {
+      'id': id,
+      'tag': tag,
+    });
+  }
+
   Future<void> markShared({
     required String id,
     required String cloudProjectId,
