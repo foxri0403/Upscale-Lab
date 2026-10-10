@@ -2,7 +2,7 @@
 
 This Flutter client supports JWT login with optional secure auto-login, local-first image registration, explicit cloud sharing, per-image share/delete actions, static wallpaper previews, a sensor-filtered layer preview, and an Android live wallpaper backed by locally cached project layers and `WallpaperService`.
 
-Installable APK deliverables use the `Upscale_Lab-<version>-.apk` naming convention. The current app version is `0.5.0` with Android build number `8`.
+Installable APK deliverables use the `Upscale_Lab-<version>-.apk` naming convention. The current app version is `0.4.1` with Android build number `8`.
 
 Before distributing an APK, verify it with Android `apksigner`; an unsigned release APK cannot be installed. Existing team builds use the local Android debug certificate, so test updates must use that same certificate until a production signing key and secure release configuration are provided.
 
