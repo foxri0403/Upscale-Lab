@@ -12,6 +12,10 @@ class ApiClient {
 
   String get baseUrl => _baseUrl;
 
+  void restoreSession(AuthSession session) {
+    _accessToken = session.accessToken;
+  }
+
   void updateBaseUrl(String value) {
     _baseUrl = _normalize(value);
     _accessToken = null;
@@ -25,7 +29,7 @@ class ApiClient {
         if (_accessToken != null) 'authorization': 'Bearer $_accessToken',
       };
 
-  Future<void> login(String identifier, String password) async {
+  Future<AuthSession> login(String identifier, String password) async {
     final response = await http.post(
       Uri.parse('$baseUrl/api/auth/login'),
       headers: _headers,
@@ -34,8 +38,19 @@ class ApiClient {
       body: jsonEncode({'email': identifier, 'password': password}),
     );
     _ensureSuccess(response);
-    _accessToken = (jsonDecode(response.body)
-        as Map<String, dynamic>)['accessToken'] as String;
+    final session = AuthSession.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+    _accessToken = session.accessToken;
+    return session;
+  }
+
+  Future<void> validateSession() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/auth/me'),
+      headers: _headers,
+    );
+    _ensureSuccess(response);
   }
 
   void logout() {
@@ -179,6 +194,40 @@ class ApiClient {
     _ensureSuccess(response);
   }
 
+  Future<String> shareProject({
+    required String projectId,
+    required String title,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/gallery'),
+      headers: _headers,
+      body: jsonEncode({
+        'projectId': projectId,
+        'title': title,
+        'description': 'Upscale Lab 모바일 앱에서 공유했습니다.',
+        'isPublic': true,
+      }),
+    );
+    _ensureSuccess(response);
+    return (jsonDecode(response.body) as Map<String, dynamic>)['id'] as String;
+  }
+
+  Future<void> deleteGalleryPost(String id) async {
+    final response = await http.delete(
+      Uri.parse('$baseUrl/api/gallery/$id'),
+      headers: _headers,
+    );
+    if (response.statusCode != 404) _ensureSuccess(response);
+  }
+
+  Future<void> deleteProject(String id) async {
+    final response = await http.delete(
+      Uri.parse('$baseUrl/api/projects/$id'),
+      headers: _headers,
+    );
+    if (response.statusCode != 404) _ensureSuccess(response);
+  }
+
   Future<double> getSensorSensitivity() async {
     final response = await http.get(
       Uri.parse('$baseUrl/api/settings'),
@@ -214,6 +263,18 @@ class ApiClient {
       throw ApiException(response.statusCode, response.body);
     }
   }
+}
+
+class AuthSession {
+  const AuthSession({required this.accessToken, required this.expiresAt});
+
+  final String accessToken;
+  final DateTime expiresAt;
+
+  factory AuthSession.fromJson(Map<String, dynamic> json) => AuthSession(
+        accessToken: json['accessToken'] as String,
+        expiresAt: DateTime.parse(json['expiresAt'] as String).toUtc(),
+      );
 }
 
 class ApiException implements Exception {

@@ -24,6 +24,11 @@ import java.io.FilterInputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -80,6 +85,10 @@ class MainActivity : FlutterActivity() {
                         call.argument<String>("url"),
                         result,
                     )
+                    "applyLocalStaticWallpaper" -> applyLocalStaticWallpaper(
+                        call.argument<String>("sourcePath"),
+                        result,
+                    )
                     "prepareLiveWallpaper" -> prepareLiveWallpaper(
                         call.arguments as? Map<*, *>,
                         result,
@@ -106,6 +115,19 @@ class MainActivity : FlutterActivity() {
                     "saveImageToGallery" -> enqueueLocalImageSave(
                         call.argument<String>("sourcePath"),
                         call.argument<String>("fileName"),
+                        result,
+                    )
+                    "listLocalImages" -> result.success(readLocalImages())
+                    "importLocalImage" -> importLocalImage(
+                        call.arguments as? Map<*, *>,
+                        result,
+                    )
+                    "markLocalImageShared" -> markLocalImageShared(
+                        call.arguments as? Map<*, *>,
+                        result,
+                    )
+                    "deleteLocalImage" -> deleteLocalImage(
+                        call.argument<String>("id"),
                         result,
                     )
                     else -> result.notImplemented()
@@ -249,6 +271,166 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun importLocalImage(arguments: Map<*, *>?, result: MethodChannel.Result) {
+        val sourcePath = arguments?.get("sourcePath") as? String
+        val requestedFileName = arguments?.get("fileName") as? String
+        val width = (arguments?.get("width") as? Number)?.toInt()
+        val height = (arguments?.get("height") as? Number)?.toInt()
+        val mode = arguments?.get("mode") as? String ?: "original"
+        if (sourcePath.isNullOrBlank() || width == null || height == null) {
+            result.error("invalid_local_image", "로컬 이미지 정보가 올바르지 않습니다.", null)
+            return
+        }
+
+        ioExecutor.execute {
+            try {
+                val source = File(sourcePath)
+                check(source.isFile) { "선택한 이미지 파일을 찾을 수 없습니다." }
+                val id = UUID.randomUUID().toString()
+                val directory = File(filesDir, LOCAL_IMAGES_DIRECTORY)
+                check(directory.exists() || directory.mkdirs()) { "로컬 이미지 폴더를 만들 수 없습니다." }
+                val safeName = ensureImageExtension(
+                    sanitizeFileName(requestedFileName.orEmpty()),
+                    source.toURI().toString(),
+                )
+                val extension = safeName.substringAfterLast('.', "jpg")
+                val destination = File(directory, "$id.$extension")
+                source.inputStream().use { input ->
+                    FileOutputStream(destination).use { output -> input.copyTo(output) }
+                }
+
+                val item = JSONObject()
+                    .put("id", id)
+                    .put("title", safeName)
+                    .put("path", destination.absolutePath)
+                    .put("width", width)
+                    .put("height", height)
+                    .put("mode", mode)
+                    .put("createdAt", utcTimestamp())
+                    .put("cloudProjectId", JSONObject.NULL)
+                    .put("galleryPostId", JSONObject.NULL)
+                synchronized(localImagesLock) {
+                    val items = readLocalImagesJson()
+                    items.put(item)
+                    writeLocalImagesJson(items)
+                }
+                runOnUiThread { result.success(jsonObjectToMap(item)) }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    result.error(
+                        "local_import_failed",
+                        "이미지를 로컬에 등록하지 못했습니다.",
+                        error.message,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun readLocalImages(): List<Map<String, Any?>> = synchronized(localImagesLock) {
+        val items = readLocalImagesJson()
+        buildList {
+            for (index in items.length() - 1 downTo 0) {
+                add(jsonObjectToMap(items.getJSONObject(index)))
+            }
+        }
+    }
+
+    private fun markLocalImageShared(arguments: Map<*, *>?, result: MethodChannel.Result) {
+        val id = arguments?.get("id") as? String
+        val cloudProjectId = arguments?.get("cloudProjectId") as? String
+        val galleryPostId = arguments?.get("galleryPostId") as? String
+        if (id.isNullOrBlank() || cloudProjectId.isNullOrBlank() || galleryPostId.isNullOrBlank()) {
+            result.error("invalid_share", "공유 정보가 올바르지 않습니다.", null)
+            return
+        }
+        synchronized(localImagesLock) {
+            val items = readLocalImagesJson()
+            for (index in 0 until items.length()) {
+                val item = items.getJSONObject(index)
+                if (item.optString("id") == id) {
+                    item.put("cloudProjectId", cloudProjectId)
+                    item.put("galleryPostId", galleryPostId)
+                    writeLocalImagesJson(items)
+                    result.success(null)
+                    return
+                }
+            }
+        }
+        result.error("local_image_not_found", "로컬 이미지를 찾을 수 없습니다.", null)
+    }
+
+    private fun deleteLocalImage(id: String?, result: MethodChannel.Result) {
+        if (id.isNullOrBlank()) {
+            result.error("invalid_local_image", "삭제할 이미지가 없습니다.", null)
+            return
+        }
+        ioExecutor.execute {
+            try {
+                synchronized(localImagesLock) {
+                    val items = readLocalImagesJson()
+                    val remaining = JSONArray()
+                    var found = false
+                    for (index in 0 until items.length()) {
+                        val item = items.getJSONObject(index)
+                        if (item.optString("id") == id) {
+                            found = true
+                            val file = File(item.optString("path"))
+                            check(!file.exists() || file.delete()) { "로컬 이미지 파일을 삭제할 수 없습니다." }
+                        } else {
+                            remaining.put(item)
+                        }
+                    }
+                    check(found) { "로컬 이미지를 찾을 수 없습니다." }
+                    writeLocalImagesJson(remaining)
+                }
+                runOnUiThread { result.success(null) }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    result.error("local_delete_failed", "로컬 이미지를 삭제하지 못했습니다.", error.message)
+                }
+            }
+        }
+    }
+
+    private fun readLocalImagesJson(): JSONArray {
+        val value = getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE)
+            .getString(LOCAL_IMAGES_KEY, "[]") ?: "[]"
+        return runCatching { JSONArray(value) }.getOrElse { JSONArray() }
+    }
+
+    private fun writeLocalImagesJson(items: JSONArray) {
+        getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE)
+            .edit()
+            .putString(LOCAL_IMAGES_KEY, items.toString())
+            .commit()
+    }
+
+    private fun jsonObjectToMap(item: JSONObject): Map<String, Any?> = mapOf(
+        "id" to item.getString("id"),
+        "title" to item.getString("title"),
+        "path" to item.getString("path"),
+        "width" to item.getInt("width"),
+        "height" to item.getInt("height"),
+        "mode" to item.optString("mode", "original"),
+        "createdAt" to item.getString("createdAt"),
+        "cloudProjectId" to if (item.isNull("cloudProjectId")) {
+            null
+        } else {
+            item.optString("cloudProjectId").takeIf { it.isNotBlank() }
+        },
+        "galleryPostId" to if (item.isNull("galleryPostId")) {
+            null
+        } else {
+            item.optString("galleryPostId").takeIf { it.isNotBlank() }
+        },
+    )
+
+    private fun utcTimestamp(): String = SimpleDateFormat(
+        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+        Locale.US,
+    ).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
+
     private fun saveWithMediaStore(source: File, fileName: String): Uri {
         val resolver = applicationContext.contentResolver
         val values = ContentValues().apply {
@@ -357,6 +539,46 @@ class MainActivity : FlutterActivity() {
                         manager.setStream(input)
                     }
                 }
+                runOnUiThread { result.success(null) }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    result.error("wallpaper_failed", "배경화면을 적용하지 못했습니다.", error.message)
+                }
+            }
+        }
+    }
+
+    private fun applyLocalStaticWallpaper(sourcePath: String?, result: MethodChannel.Result) {
+        if (sourcePath.isNullOrBlank()) {
+            result.error("invalid_source", "배경화면 이미지가 없습니다.", null)
+            return
+        }
+        ioExecutor.execute {
+            try {
+                val source = File(sourcePath)
+                check(source.isFile) { "배경화면 이미지 파일을 찾을 수 없습니다." }
+                val directory = File(filesDir, APPLIED_WALLPAPER_DIRECTORY)
+                check(directory.exists() || directory.mkdirs()) { "배경화면 저장 폴더를 만들 수 없습니다." }
+                val persistent = File(directory, "current.img")
+                val temporary = File(directory, "current.img.part")
+                source.inputStream().use { input ->
+                    FileOutputStream(temporary).use { output -> input.copyTo(output) }
+                }
+                if (persistent.exists()) check(persistent.delete()) { "기존 배경화면 파일을 교체할 수 없습니다." }
+                check(temporary.renameTo(persistent)) { "배경화면 파일을 보관할 수 없습니다." }
+
+                persistent.inputStream().use { input ->
+                    val manager = WallpaperManager.getInstance(applicationContext)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        manager.setStream(input, null, true, WallpaperManager.FLAG_SYSTEM)
+                    } else {
+                        manager.setStream(input)
+                    }
+                }
+                getSharedPreferences("live_layer", MODE_PRIVATE)
+                    .edit()
+                    .putString("static_wallpaper_path", persistent.absolutePath)
+                    .commit()
                 runOnUiThread { result.success(null) }
             } catch (error: Exception) {
                 runOnUiThread {
@@ -540,9 +762,14 @@ class MainActivity : FlutterActivity() {
         }
 
     private companion object {
+        val localImagesLock = Any()
         const val DOWNLOAD_PERMISSION_REQUEST = 4101
         const val CONFIG_PREFERENCES = "live_layer_config"
         const val API_BASE_URL_KEY = "api_base_url"
+        const val LOCAL_IMAGES_PREFERENCES = "local_images"
+        const val LOCAL_IMAGES_KEY = "items"
+        const val LOCAL_IMAGES_DIRECTORY = "local_images"
+        const val APPLIED_WALLPAPER_DIRECTORY = "applied_wallpaper"
         val IMAGE_EXTENSIONS = setOf(
             "jpg", "jpeg", "jpe", "png", "webp", "gif", "bmp", "dib",
             "tif", "tiff", "heic", "heics", "heif", "heifs", "hif",

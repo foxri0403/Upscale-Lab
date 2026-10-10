@@ -6,9 +6,28 @@ import 'package:image_picker/image_picker.dart';
 
 import 'models/live_layer_models.dart';
 import 'services/api_client.dart';
+import 'services/auth_session_store.dart';
+import 'unified_home.dart';
 import 'widgets/parallax_preview.dart';
 
 const _configChannel = MethodChannel('live_layer/config');
+final _authSessionStore = AuthSessionStore();
+
+Future<void> _logoutToLogin(BuildContext context, ApiClient apiClient) async {
+  apiClient.logout();
+  try {
+    await _authSessionStore.clear();
+  } on PlatformException {
+    // Logging out of the in-memory session must not be blocked by storage.
+  } on MissingPluginException {
+    // Secure storage is not available on every development target.
+  }
+  if (!context.mounted) return;
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute(builder: (_) => LoginPage(apiClient: apiClient)),
+    (_) => false,
+  );
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,7 +47,37 @@ Future<void> main() async {
   } on MissingPluginException {
     // Non-Android builds can continue with the build-time default.
   }
-  runApp(LiveLayerApp(apiClient: ApiClient(baseUrl: effectiveApiBaseUrl)));
+  final apiClient = ApiClient(baseUrl: effectiveApiBaseUrl);
+  var isAutoLoggedIn = false;
+  try {
+    final savedSession = await _authSessionStore.read();
+    if (savedSession != null) {
+      apiClient.restoreSession(savedSession);
+      try {
+        await apiClient.validateSession();
+        isAutoLoggedIn = true;
+      } on ApiException catch (error) {
+        if (error.statusCode == 401) {
+          apiClient.logout();
+          await _authSessionStore.clear();
+        } else {
+          isAutoLoggedIn = true;
+        }
+      } catch (_) {
+        // An unexpired saved session still opens the local library offline.
+        isAutoLoggedIn = true;
+      }
+    }
+  } catch (_) {
+    apiClient.logout();
+    await _authSessionStore.clear();
+  }
+  runApp(
+    LiveLayerApp(
+      apiClient: apiClient,
+      isAutoLoggedIn: isAutoLoggedIn,
+    ),
+  );
 }
 
 bool _meetsPasswordPolicy(String password) {
@@ -43,9 +92,14 @@ bool _isValidEmail(String email) =>
     RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
 
 class LiveLayerApp extends StatelessWidget {
-  const LiveLayerApp({super.key, required this.apiClient});
+  const LiveLayerApp({
+    super.key,
+    required this.apiClient,
+    this.isAutoLoggedIn = false,
+  });
 
   final ApiClient apiClient;
+  final bool isAutoLoggedIn;
 
   @override
   Widget build(BuildContext context) {
@@ -56,7 +110,12 @@ class LiveLayerApp extends StatelessWidget {
         scaffoldBackgroundColor: Colors.white,
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF536DFE)),
       ),
-      home: LoginPage(apiClient: apiClient),
+      home: isAutoLoggedIn
+          ? UnifiedHomePage(
+              apiClient: apiClient,
+              onLogout: (context) => _logoutToLogin(context, apiClient),
+            )
+          : LoginPage(apiClient: apiClient),
     );
   }
 }
@@ -236,6 +295,7 @@ class _LoginPageState extends State<LoginPage> {
   final _password = TextEditingController();
   bool _busy = false;
   bool _showPassword = false;
+  bool _autoLogin = false;
 
   Future<void> _configureServer() async {
     final value = await showDialog<String>(
@@ -259,8 +319,15 @@ class _LoginPageState extends State<LoginPage> {
       await _configChannel.invokeMethod<void>('setApiBaseUrl', {
         'url': normalized,
       });
-      if (!mounted) return;
       widget.apiClient.updateBaseUrl(normalized);
+      try {
+        await _authSessionStore.clear();
+      } on MissingPluginException {
+        // Secure storage is unavailable in non-device tests and desktop runs.
+      } on PlatformException {
+        // The in-memory session was already cleared by updateBaseUrl.
+      }
+      if (!mounted) return;
       _message('서버 주소를 $normalized(으)로 저장했습니다.');
     } on PlatformException catch (error) {
       if (mounted) {
@@ -281,11 +348,20 @@ class _LoginPageState extends State<LoginPage> {
 
     setState(() => _busy = true);
     try {
-      await widget.apiClient.login(_identifier.text.trim(), _password.text);
+      final session =
+          await widget.apiClient.login(_identifier.text.trim(), _password.text);
+      if (_autoLogin) {
+        await _authSessionStore.save(session);
+      } else {
+        await _authSessionStore.clear();
+      }
       if (!mounted) return;
       await Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => ProjectListPage(apiClient: widget.apiClient),
+          builder: (_) => UnifiedHomePage(
+            apiClient: widget.apiClient,
+            onLogout: (context) => _logoutToLogin(context, widget.apiClient),
+          ),
         ),
       );
     } catch (error) {
@@ -358,7 +434,19 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 8),
+              CheckboxListTile(
+                value: _autoLogin,
+                onChanged: _busy
+                    ? null
+                    : (value) => setState(() => _autoLogin = value ?? false),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                dense: true,
+                title: const Text('자동 로그인'),
+                subtitle: const Text('앱을 다시 열어도 로그인 상태를 유지합니다.'),
+              ),
+              const SizedBox(height: 12),
               LiveLayerButton(
                 text: _busy ? '로그인 중...' : '로그인',
                 onPressed: _busy ? null : _login,
@@ -1067,7 +1155,10 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
       // verify-email 성공 응답에 JWT가 있으므로 바로 홈으로 이동한다.
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
-          builder: (_) => ProjectListPage(apiClient: widget.apiClient),
+          builder: (_) => UnifiedHomePage(
+            apiClient: widget.apiClient,
+            onLogout: (context) => _logoutToLogin(context, widget.apiClient),
+          ),
         ),
         (_) => false,
       );
