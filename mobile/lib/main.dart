@@ -1177,8 +1177,26 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   }
 }
 
-// 기존 ProjectListPage의 실제 getProjects/createProject/open 기능은 유지하고
-// 화면만 확정한 2열 홈 UI로 바꾼다.
+// 로컬 저장은 Android 사진으로, 클라우드 저장은 API 프로젝트로 분리한다.
+enum _StorageDestination { local, cloud }
+
+enum _CreationMode { original, upscale, depth25d }
+
+class _CreationOptions {
+  const _CreationOptions({required this.destination, required this.mode});
+
+  final _StorageDestination destination;
+  final _CreationMode mode;
+}
+
+extension on _CreationMode {
+  String get label => switch (this) {
+        _CreationMode.original => '원본 이미지',
+        _CreationMode.upscale => '업스케일링',
+        _CreationMode.depth25d => '2.5D 변환',
+      };
+}
+
 class ProjectListPage extends StatefulWidget {
   const ProjectListPage({super.key, required this.apiClient});
 
@@ -1189,10 +1207,13 @@ class ProjectListPage extends StatefulWidget {
 }
 
 class _ProjectListPageState extends State<ProjectListPage> {
+  static const _storageChannel = MethodChannel('live_layer/storage');
+
   late Future<List<LiveLayerProject>> _projects =
       widget.apiClient.getProjects();
   bool _creating = false;
   int _selectedIndex = 0;
+  _StorageDestination _selectedStorage = _StorageDestination.cloud;
 
   void _reload() => setState(() => _projects = widget.apiClient.getProjects());
 
@@ -1220,12 +1241,139 @@ class _ProjectListPageState extends State<ProjectListPage> {
     );
   }
 
-  Future<void> _createProject() async {
+  Future<_CreationOptions?> _chooseCreationOptions(
+    _StorageDestination initialDestination,
+  ) async {
+    var destination = initialDestination;
+    var mode = _CreationMode.original;
+    return showModalBottomSheet<_CreationOptions>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              22,
+              4,
+              22,
+              22 + MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '이미지 작업 선택',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  '업스케일링과 2.5D 변환 엔진은 아직 연결되지 않아 '
+                  '현재는 원본 파일을 선택한 위치에 저장합니다.',
+                  style: TextStyle(color: Color(0xFF6F7789), height: 1.45),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  '기능',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _CreationMode.values
+                      .map(
+                        (item) => ChoiceChip(
+                          label: Text(
+                            item == _CreationMode.original
+                                ? item.label
+                                : '${item.label} (준비 중)',
+                          ),
+                          selected: mode == item,
+                          onSelected: (_) =>
+                              setModalState(() => mode = item),
+                        ),
+                      )
+                      .toList(),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  '저장 위치',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 10),
+                SegmentedButton<_StorageDestination>(
+                  segments: const [
+                    ButtonSegment(
+                      value: _StorageDestination.local,
+                      icon: Icon(Icons.photo_library_outlined),
+                      label: Text('로컬(사진)'),
+                    ),
+                    ButtonSegment(
+                      value: _StorageDestination.cloud,
+                      icon: Icon(Icons.cloud_outlined),
+                      label: Text('클라우드'),
+                    ),
+                  ],
+                  selected: {destination},
+                  onSelectionChanged: (value) => setModalState(
+                    () => destination = value.single,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  destination == _StorageDestination.local
+                      ? '서버로 전송하지 않고 기기의 Pictures/Upscale Lab에 저장합니다.'
+                      : '원본을 서버 저장소와 클라우드 DB에 업로드합니다.',
+                  style: const TextStyle(
+                    color: Color(0xFF6F7789),
+                    fontSize: 13,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 22),
+                LiveLayerButton(
+                  text: destination == _StorageDestination.local
+                      ? '사진에 저장'
+                      : '클라우드에 업로드',
+                  onPressed: () => Navigator.pop(
+                    context,
+                    _CreationOptions(destination: destination, mode: mode),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _createProject(_StorageDestination initialDestination) async {
     final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
     if (picked == null) return;
 
+    if (!mounted) return;
+    final options = await _chooseCreationOptions(initialDestination);
+    if (options == null || !mounted) return;
+
     setState(() => _creating = true);
     try {
+      if (options.destination == _StorageDestination.local) {
+        await _storageChannel.invokeMethod<String>('saveImageToGallery', {
+          'sourcePath': picked.path,
+          'fileName': picked.name,
+        });
+        if (!mounted) return;
+        setState(() => _selectedStorage = _StorageDestination.local);
+        _message(
+          '${options.mode.label} 원본을 기기 사진에 저장했습니다. '
+          '서버로는 전송하지 않았습니다.',
+        );
+        return;
+      }
+
       final bytes = await picked.readAsBytes();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
@@ -1233,22 +1381,32 @@ class _ProjectListPageState extends State<ProjectListPage> {
       final height = frame.image.height;
       frame.image.dispose();
       codec.dispose();
-      final project = await widget.apiClient.createProject(
+      await widget.apiClient.createProject(
         title: picked.name,
         filePath: picked.path,
         width: width,
         height: height,
       );
-      await widget.apiClient.startProcessing(project.id);
+      if (!mounted) return;
+      setState(() => _selectedStorage = _StorageDestination.cloud);
       _reload();
+      _message(
+        '${options.mode.label} 원본을 클라우드에 업로드했습니다. '
+        '변환 처리는 자동으로 시작하지 않습니다.',
+      );
+    } on PlatformException catch (error) {
+      _message(error.message ?? '$error');
     } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$error')));
-      }
+      _message('$error');
     } finally {
       if (mounted) setState(() => _creating = false);
     }
+  }
+
+  void _message(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _open(LiveLayerProject summary) async {
@@ -1270,7 +1428,7 @@ class _ProjectListPageState extends State<ProjectListPage> {
     }
   }
 
-  Widget _home() {
+  Widget _cloudProjects() {
     return FutureBuilder<List<LiveLayerProject>>(
       future: _projects,
       builder: (context, snapshot) {
@@ -1299,9 +1457,12 @@ class _ProjectListPageState extends State<ProjectListPage> {
             itemCount: projects.length + 1,
             itemBuilder: (context, index) {
               if (index == 0) {
-                return NewProjectCard(
+                return _NewProjectCard(
                   creating: _creating,
-                  onTap: _creating ? null : _createProject,
+                  destination: _StorageDestination.cloud,
+                  onTap: _creating
+                      ? null
+                      : () => _createProject(_StorageDestination.cloud),
                 );
               }
               final project = projects[index - 1];
@@ -1310,6 +1471,82 @@ class _ProjectListPageState extends State<ProjectListPage> {
           ),
         );
       },
+    );
+  }
+
+  Widget _localProjects() {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
+      children: [
+        SizedBox(
+          height: 280,
+          child: _NewProjectCard(
+            creating: _creating,
+            destination: _StorageDestination.local,
+            onTap: _creating
+                ? null
+                : () => _createProject(_StorageDestination.local),
+          ),
+        ),
+        const SizedBox(height: 22),
+        const Card(
+          elevation: 0,
+          color: Color(0xFFF7F8FC),
+          child: Padding(
+            padding: EdgeInsets.all(18),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.privacy_tip_outlined, color: Color(0xFF536DFE)),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '로컬 이미지는 서버와 클라우드 DB에 기록되지 않습니다. '
+                    '저장된 파일은 기기의 사진 앱에서 확인하고 관리할 수 있습니다.',
+                    style: TextStyle(color: Color(0xFF58647D), height: 1.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _home() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(22, 0, 22, 20),
+          child: SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<_StorageDestination>(
+              segments: const [
+                ButtonSegment(
+                  value: _StorageDestination.local,
+                  icon: Icon(Icons.photo_library_outlined),
+                  label: Text('로컬'),
+                ),
+                ButtonSegment(
+                  value: _StorageDestination.cloud,
+                  icon: Icon(Icons.cloud_outlined),
+                  label: Text('클라우드'),
+                ),
+              ],
+              selected: {_selectedStorage},
+              onSelectionChanged: (value) =>
+                  setState(() => _selectedStorage = value.single),
+            ),
+          ),
+        ),
+        Expanded(
+          child: _selectedStorage == _StorageDestination.local
+              ? _localProjects()
+              : _cloudProjects(),
+        ),
+      ],
     );
   }
 
@@ -1376,14 +1613,15 @@ class _ProjectListPageState extends State<ProjectListPage> {
   }
 }
 
-class NewProjectCard extends StatelessWidget {
-  const NewProjectCard({
-    super.key,
+class _NewProjectCard extends StatelessWidget {
+  const _NewProjectCard({
     required this.creating,
+    required this.destination,
     required this.onTap,
   });
 
   final bool creating;
+  final _StorageDestination destination;
   final VoidCallback? onTap;
 
   @override
@@ -1406,7 +1644,11 @@ class NewProjectCard extends StatelessWidget {
               const Icon(Icons.add, size: 52, color: Color(0xFF58647D)),
             const SizedBox(height: 18),
             Text(
-              creating ? '업로드 중...' : '이미지 업로드',
+              creating
+                  ? '저장 중...'
+                  : destination == _StorageDestination.local
+                      ? '이미지를 사진에 저장'
+                      : '이미지를 클라우드에 업로드',
               style: const TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w500,

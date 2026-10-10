@@ -4,12 +4,15 @@ import android.Manifest
 import android.app.DownloadManager
 import android.app.WallpaperManager
 import android.content.ComponentName
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -31,8 +34,15 @@ class MainActivity : FlutterActivity() {
         val result: MethodChannel.Result,
     )
 
+    private data class PendingLocalSave(
+        val sourcePath: String,
+        val fileName: String,
+        val result: MethodChannel.Result,
+    )
+
     private val ioExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var pendingDownload: PendingDownload? = null
+    private var pendingLocalSave: PendingLocalSave? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -90,11 +100,24 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "live_layer/storage")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "saveImageToGallery" -> enqueueLocalImageSave(
+                        call.argument<String>("sourcePath"),
+                        call.argument<String>("fileName"),
+                        result,
+                    )
+                    else -> result.notImplemented()
+                }
+            }
     }
 
     override fun onDestroy() {
         pendingDownload?.result?.error("cancelled", "다운로드 요청이 취소되었습니다.", null)
         pendingDownload = null
+        pendingLocalSave?.result?.error("cancelled", "로컬 저장 요청이 취소되었습니다.", null)
+        pendingLocalSave = null
         ioExecutor.shutdownNow()
         super.onDestroy()
     }
@@ -107,12 +130,19 @@ class MainActivity : FlutterActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != DOWNLOAD_PERMISSION_REQUEST) return
 
-        val pending = pendingDownload ?: return
-        pendingDownload = null
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            startImageDownload(pending.url, pending.fileName, pending.result)
+            pendingDownload?.also { pending ->
+                pendingDownload = null
+                startImageDownload(pending.url, pending.fileName, pending.result)
+            } ?: pendingLocalSave?.also { pending ->
+                pendingLocalSave = null
+                startLocalImageSave(pending.sourcePath, pending.fileName, pending.result)
+            }
         } else {
-            pending.result.error(
+            val result = pendingDownload?.result ?: pendingLocalSave?.result ?: return
+            pendingDownload = null
+            pendingLocalSave = null
+            result.error(
                 "storage_permission_denied",
                 "사진 폴더에 저장하려면 저장소 권한이 필요합니다.",
                 null,
@@ -139,7 +169,7 @@ class MainActivity : FlutterActivity() {
             checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
             PackageManager.PERMISSION_GRANTED
         ) {
-            if (pendingDownload != null) {
+            if (pendingDownload != null || pendingLocalSave != null) {
                 result.error("download_busy", "다른 다운로드 권한 요청이 진행 중입니다.", null)
                 return
             }
@@ -152,6 +182,139 @@ class MainActivity : FlutterActivity() {
         }
 
         startImageDownload(url, fileName, result)
+    }
+
+    private fun enqueueLocalImageSave(
+        sourcePath: String?,
+        requestedFileName: String?,
+        result: MethodChannel.Result,
+    ) {
+        if (sourcePath.isNullOrBlank()) {
+            result.error("invalid_source", "저장할 이미지 파일이 없습니다.", null)
+            return
+        }
+        val source = File(sourcePath)
+        if (!source.isFile) {
+            result.error("source_not_found", "선택한 이미지 파일을 찾을 수 없습니다.", null)
+            return
+        }
+
+        val fileName = ensureImageExtension(
+            sanitizeFileName(requestedFileName.orEmpty()),
+            source.toURI().toString(),
+        )
+        if (
+            Build.VERSION.SDK_INT in Build.VERSION_CODES.M..Build.VERSION_CODES.P &&
+            checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            if (pendingDownload != null || pendingLocalSave != null) {
+                result.error("save_busy", "다른 저장소 권한 요청이 진행 중입니다.", null)
+                return
+            }
+            pendingLocalSave = PendingLocalSave(sourcePath, fileName, result)
+            requestPermissions(
+                arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                DOWNLOAD_PERMISSION_REQUEST,
+            )
+            return
+        }
+
+        startLocalImageSave(sourcePath, fileName, result)
+    }
+
+    private fun startLocalImageSave(
+        sourcePath: String,
+        fileName: String,
+        result: MethodChannel.Result,
+    ) {
+        ioExecutor.execute {
+            try {
+                val source = File(sourcePath)
+                val savedUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    saveWithMediaStore(source, fileName)
+                } else {
+                    saveToLegacyPictures(source, fileName)
+                }
+                runOnUiThread { result.success(savedUri.toString()) }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    result.error(
+                        "local_save_failed",
+                        "이미지를 기기 사진에 저장하지 못했습니다.",
+                        error.message,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun saveWithMediaStore(source: File, fileName: String): Uri {
+        val resolver = applicationContext.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+            put(MediaStore.Images.Media.MIME_TYPE, imageMimeType(fileName))
+            put(
+                MediaStore.Images.Media.RELATIVE_PATH,
+                "${Environment.DIRECTORY_PICTURES}/Upscale Lab",
+            )
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            ?: error("사진 저장 위치를 만들 수 없습니다.")
+
+        try {
+            resolver.openOutputStream(uri, "w").use { output ->
+                checkNotNull(output) { "사진 저장 스트림을 열 수 없습니다." }
+                source.inputStream().use { input -> input.copyTo(output) }
+            }
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            return uri
+        } catch (error: Exception) {
+            resolver.delete(uri, null, null)
+            throw error
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun saveToLegacyPictures(source: File, fileName: String): Uri {
+        val directory = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+            "Upscale Lab",
+        )
+        check(directory.exists() || directory.mkdirs()) { "사진 폴더를 만들 수 없습니다." }
+        val destination = uniqueFile(directory, fileName)
+        source.inputStream().use { input ->
+            FileOutputStream(destination).use { output -> input.copyTo(output) }
+        }
+        MediaScannerConnection.scanFile(
+            applicationContext,
+            arrayOf(destination.absolutePath),
+            arrayOf(imageMimeType(destination.name)),
+            null,
+        )
+        return Uri.fromFile(destination)
+    }
+
+    private fun uniqueFile(directory: File, fileName: String): File {
+        val direct = File(directory, fileName)
+        if (!direct.exists()) return direct
+
+        val extension = fileName.substringAfterLast('.', "")
+        val baseName = if (extension.isEmpty()) fileName else fileName.dropLast(extension.length + 1)
+        var suffix = 1
+        while (true) {
+            val candidateName = if (extension.isEmpty()) {
+                "$baseName ($suffix)"
+            } else {
+                "$baseName ($suffix).$extension"
+            }
+            val candidate = File(directory, candidateName)
+            if (!candidate.exists()) return candidate
+            suffix += 1
+        }
     }
 
     private fun startImageDownload(
