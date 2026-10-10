@@ -71,6 +71,8 @@ These are expected to come from local user secrets, environment variables, or a 
 - Reset the less-significant components when incrementing a higher component (for example, `0.3.4` → `0.4.0` or `1.0.0`).
 - Increment the Android build number after every newly generated APK, independently of the semantic version component selected.
 - Keep the APK filename and mobile documentation synchronized with the version in `mobile/pubspec.yaml`.
+- Verify every generated APK with Android `apksigner` before delivery; never deliver an unsigned release APK.
+- Existing team APKs are signed with the current development machine's Android debug certificate. Preserve that certificate for upgrade-compatible test APKs until an explicit production signing configuration is supplied.
 
 ## References
 
