@@ -106,12 +106,14 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         var post = modelBuilder.Entity<GalleryPost>();
         post.ToTable("gallery_posts");
         post.Property(x => x.Title).HasMaxLength(160).IsRequired();
+        post.Property(x => x.Tag).HasMaxLength(50).HasDefaultValue("장르 설정되지 않음").IsRequired();
         post.Property(x => x.Description).HasMaxLength(2000);
         post.Property(x => x.IsPublic).HasDefaultValue(true);
         post.HasIndex(x => x.CreatedAt);
         post.HasOne(x => x.User).WithMany(x => x.GalleryPosts).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         post.HasOne(x => x.Image).WithMany(x => x.GalleryPosts).HasForeignKey(x => x.ImageId).OnDelete(DeleteBehavior.Cascade);
         post.HasIndex(x => new { x.IsPublic, x.CreatedAt });
+        post.HasIndex(x => new { x.Tag, x.CreatedAt });
         post.HasOne(x => x.Project).WithMany(x => x.GalleryPosts).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.SetNull);
 
         var comment = modelBuilder.Entity<Comment>();

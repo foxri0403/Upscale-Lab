@@ -6,6 +6,7 @@ class LocalImageItem {
     required this.width,
     required this.height,
     required this.mode,
+    required this.tag,
     required this.createdAt,
     this.cloudProjectId,
     this.galleryPostId,
@@ -17,6 +18,7 @@ class LocalImageItem {
   final int width;
   final int height;
   final String mode;
+  final String tag;
   final DateTime createdAt;
   final String? cloudProjectId;
   final String? galleryPostId;
@@ -31,6 +33,7 @@ class LocalImageItem {
       width: (map['width']! as num).toInt(),
       height: (map['height']! as num).toInt(),
       mode: map['mode']! as String,
+      tag: map['tag'] as String? ?? '장르 설정되지 않음',
       createdAt: DateTime.parse(map['createdAt']! as String),
       cloudProjectId: map['cloudProjectId'] as String?,
       galleryPostId: map['galleryPostId'] as String?,

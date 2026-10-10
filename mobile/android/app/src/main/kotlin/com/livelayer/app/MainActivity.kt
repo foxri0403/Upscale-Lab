@@ -126,6 +126,10 @@ class MainActivity : FlutterActivity() {
                         call.arguments as? Map<*, *>,
                         result,
                     )
+                    "markLocalImageUnshared" -> markLocalImageUnshared(
+                        call.argument<String>("id"),
+                        result,
+                    )
                     "deleteLocalImage" -> deleteLocalImage(
                         call.argument<String>("id"),
                         result,
@@ -274,10 +278,12 @@ class MainActivity : FlutterActivity() {
     private fun importLocalImage(arguments: Map<*, *>?, result: MethodChannel.Result) {
         val sourcePath = arguments?.get("sourcePath") as? String
         val requestedFileName = arguments?.get("fileName") as? String
+        val requestedTitle = (arguments?.get("title") as? String)?.trim()
+        val tag = (arguments?.get("tag") as? String)?.trim().orEmpty()
         val width = (arguments?.get("width") as? Number)?.toInt()
         val height = (arguments?.get("height") as? Number)?.toInt()
         val mode = arguments?.get("mode") as? String ?: "original"
-        if (sourcePath.isNullOrBlank() || width == null || height == null) {
+        if (sourcePath.isNullOrBlank() || requestedTitle.isNullOrBlank() || width == null || height == null) {
             result.error("invalid_local_image", "로컬 이미지 정보가 올바르지 않습니다.", null)
             return
         }
@@ -301,7 +307,8 @@ class MainActivity : FlutterActivity() {
 
                 val item = JSONObject()
                     .put("id", id)
-                    .put("title", safeName)
+                    .put("title", requestedTitle.take(160))
+                    .put("tag", tag.ifBlank { "장르 설정되지 않음" })
                     .put("path", destination.absolutePath)
                     .put("width", width)
                     .put("height", height)
@@ -351,6 +358,27 @@ class MainActivity : FlutterActivity() {
                 if (item.optString("id") == id) {
                     item.put("cloudProjectId", cloudProjectId)
                     item.put("galleryPostId", galleryPostId)
+                    writeLocalImagesJson(items)
+                    result.success(null)
+                    return
+                }
+            }
+        }
+        result.error("local_image_not_found", "로컬 이미지를 찾을 수 없습니다.", null)
+    }
+
+    private fun markLocalImageUnshared(id: String?, result: MethodChannel.Result) {
+        if (id.isNullOrBlank()) {
+            result.error("invalid_local_image", "공유를 취소할 이미지가 없습니다.", null)
+            return
+        }
+        synchronized(localImagesLock) {
+            val items = readLocalImagesJson()
+            for (index in 0 until items.length()) {
+                val item = items.getJSONObject(index)
+                if (item.optString("id") == id) {
+                    item.put("cloudProjectId", JSONObject.NULL)
+                    item.put("galleryPostId", JSONObject.NULL)
                     writeLocalImagesJson(items)
                     result.success(null)
                     return
@@ -413,6 +441,7 @@ class MainActivity : FlutterActivity() {
         "width" to item.getInt("width"),
         "height" to item.getInt("height"),
         "mode" to item.optString("mode", "original"),
+        "tag" to item.optString("tag", "장르 설정되지 않음"),
         "createdAt" to item.getString("createdAt"),
         "cloudProjectId" to if (item.isNull("cloudProjectId")) {
             null

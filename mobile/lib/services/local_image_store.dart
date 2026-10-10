@@ -21,6 +21,8 @@ class LocalImageStore {
   Future<LocalImageItem> import({
     required String sourcePath,
     required String fileName,
+    required String title,
+    required String tag,
     required int width,
     required int height,
     required String mode,
@@ -30,6 +32,8 @@ class LocalImageStore {
       {
         'sourcePath': sourcePath,
         'fileName': fileName,
+        'title': title,
+        'tag': tag,
         'width': width,
         'height': height,
         'mode': mode,
@@ -37,6 +41,10 @@ class LocalImageStore {
     );
     if (value == null) throw StateError('로컬 이미지 정보를 받지 못했습니다.');
     return LocalImageItem.fromPlatformMap(value);
+  }
+
+  Future<void> markUnshared(String id) {
+    return _channel.invokeMethod<void>('markLocalImageUnshared', {'id': id});
   }
 
   Future<void> markShared({

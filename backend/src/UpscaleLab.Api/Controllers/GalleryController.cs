@@ -12,9 +12,12 @@ public sealed class GalleryController(IGalleryService galleryService) : Controll
 {
     [AllowAnonymous]
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<GalleryPostResponse>>> GetAll(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<GalleryPostResponse>>> GetAll(
+        [FromQuery] string? search,
+        [FromQuery] string? tag,
+        CancellationToken cancellationToken)
     {
-        return Ok(await galleryService.GetAllAsync(User.GetOptionalUserId(), cancellationToken));
+        return Ok(await galleryService.GetAllAsync(User.GetOptionalUserId(), search, tag, cancellationToken));
     }
 
     [AllowAnonymous]

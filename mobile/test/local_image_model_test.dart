@@ -27,6 +27,7 @@ void main() {
     });
 
     expect(local.isShared, isFalse);
+    expect(local.tag, '장르 설정되지 않음');
     expect(shared.isShared, isTrue);
   });
 }

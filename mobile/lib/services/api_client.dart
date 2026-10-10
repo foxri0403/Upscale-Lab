@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/live_layer_models.dart';
+import '../models/gallery.dart';
 
 class ApiClient {
   ApiClient({required String baseUrl}) : _baseUrl = _normalize(baseUrl);
@@ -197,6 +198,7 @@ class ApiClient {
   Future<String> shareProject({
     required String projectId,
     required String title,
+    required String tag,
   }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/api/gallery'),
@@ -206,10 +208,30 @@ class ApiClient {
         'title': title,
         'description': 'Upscale Lab 모바일 앱에서 공유했습니다.',
         'isPublic': true,
+        'tag': tag,
       }),
     );
     _ensureSuccess(response);
     return (jsonDecode(response.body) as Map<String, dynamic>)['id'] as String;
+  }
+
+  Future<List<GalleryPostItem>> getGallery({
+    String? search,
+    String? tag,
+  }) async {
+    final parameters = <String, String>{
+      if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+      if (tag != null && tag.isNotEmpty) 'tag': tag,
+    };
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/gallery').replace(queryParameters: parameters),
+      headers: _headers,
+    );
+    _ensureSuccess(response);
+    return (jsonDecode(response.body) as List<dynamic>)
+        .map((item) =>
+            GalleryPostItem.fromJson(item as Map<String, dynamic>))
+        .toList();
   }
 
   Future<void> deleteGalleryPost(String id) async {

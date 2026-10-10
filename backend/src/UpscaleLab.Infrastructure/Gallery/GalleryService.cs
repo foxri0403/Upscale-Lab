@@ -14,11 +14,31 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
 
     public async Task<IReadOnlyList<GalleryPostResponse>> GetAllAsync(
         Guid? currentUserId,
+        string? search,
+        string? tag,
         CancellationToken cancellationToken)
     {
-        var posts = await BaseQuery()
+        var query = BaseQuery()
             .AsNoTracking()
-            .Where(x => x.IsPublic)
+            .Where(x => x.IsPublic);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var normalizedSearch = search.Trim().ToLower();
+            query = query.Where(x =>
+                x.Title.ToLower().Contains(normalizedSearch) ||
+                (x.Description != null && x.Description.ToLower().Contains(normalizedSearch)) ||
+                x.Tag.ToLower().Contains(normalizedSearch) ||
+                x.User.Username.ToLower().Contains(normalizedSearch));
+        }
+
+        if (!string.IsNullOrWhiteSpace(tag))
+        {
+            var normalizedTag = GalleryTagCatalog.Normalize(tag);
+            query = query.Where(x => x.Tag == normalizedTag);
+        }
+
+        var posts = await query
             .OrderByDescending(x => x.CreatedAt)
             .Take(100)
             .ToListAsync(cancellationToken);
@@ -72,6 +92,7 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
             ImageId = image.Id,
             ProjectId = project?.Id,
             Title = request.Title.Trim(),
+            Tag = GalleryTagCatalog.Normalize(request.Tag),
             Description = request.Description?.Trim(),
             IsPublic = request.IsPublic
         };
@@ -196,21 +217,22 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         .Include(x => x.Comments)
             .ThenInclude(x => x.User);
 
-    private static GalleryPostResponse MapPost(GalleryPost post, Guid? currentUserId) => new(
+    private GalleryPostResponse MapPost(GalleryPost post, Guid? currentUserId) => new(
         post.Id,
         post.ImageId,
         post.UserId,
         post.User.Username,
         post.Title,
         post.Description,
-        post.Image.OriginalUrl,
+        storageService.CreateDownloadUrl(post.Image.OriginalObjectKey, DownloadLifetime),
         post.Likes.Count,
         post.Comments.Count,
         post.DownloadCount,
         post.CreatedAt,
         currentUserId.HasValue && post.Likes.Any(x => x.UserId == currentUserId.Value),
         post.ProjectId,
-        post.IsPublic);
+        post.IsPublic,
+        post.Tag);
 
     private static void EnsureAccessible(GalleryPost post, Guid? currentUserId)
     {

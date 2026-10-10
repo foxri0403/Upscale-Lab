@@ -7,7 +7,8 @@ public sealed record CreateGalleryPostRequest(
     [param: Required, MaxLength(160)] string Title,
     [param: MaxLength(2000)] string? Description,
     Guid? ProjectId = null,
-    bool IsPublic = true);
+    bool IsPublic = true,
+    [param: MaxLength(50)] string? Tag = null);
 
 public sealed record GalleryPostResponse(
     Guid Id,
@@ -23,7 +24,8 @@ public sealed record GalleryPostResponse(
     DateTime CreatedAt,
     bool IsLikedByCurrentUser,
     Guid? ProjectId,
-    bool IsPublic);
+    bool IsPublic,
+    string Tag);
 
 public sealed record GalleryPostDetailResponse(
     GalleryPostResponse Post,
