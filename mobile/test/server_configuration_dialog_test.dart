@@ -19,6 +19,8 @@ void main() {
     final apiClient = ApiClient(baseUrl: 'https://old.example.com');
 
     await tester.pumpWidget(LiveLayerApp(apiClient: apiClient));
+    await tester.ensureVisible(find.text('서버 주소 설정'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('서버 주소 설정'));
     await tester.pumpAndSettle();
 

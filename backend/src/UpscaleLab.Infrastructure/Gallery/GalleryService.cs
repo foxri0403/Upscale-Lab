@@ -208,6 +208,23 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<DownloadUrlResponse> CreatePreviewUrlAsync(
+        Guid postId,
+        Guid? currentUserId,
+        CancellationToken cancellationToken)
+    {
+        var post = await dbContext.GalleryPosts
+            .AsNoTracking()
+            .Include(x => x.Image)
+            .SingleOrDefaultAsync(x => x.Id == postId, cancellationToken)
+            ?? throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
+
+        EnsureAccessible(post, currentUserId);
+        return new DownloadUrlResponse(
+            storageService.CreateDownloadUrl(post.Image.OriginalObjectKey, DownloadLifetime),
+            DateTime.UtcNow.Add(DownloadLifetime));
+    }
+
     public async Task<DownloadUrlResponse> CreateDownloadUrlAsync(
         Guid postId,
         Guid? currentUserId,

@@ -157,7 +157,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('공유 취소'),
-        content: const Text('탐색 화면과 클라우드에서 공유 사본을 삭제할까요? 로컬 이미지는 유지됩니다.'),
+        content: const Text('검색 화면과 클라우드에서 공유 사본을 삭제할까요? 로컬 이미지는 유지됩니다.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -226,17 +226,19 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
         ),
       ),
     );
-    if (selectedTag == null || selectedTag == image.tag || !mounted) return;
+    if (selectedTag == null || !mounted) return;
+    if (selectedTag == image.tag && !image.isShared) return;
 
     setState(() => _busyIds.add(image.id));
     try {
+      var confirmedTag = selectedTag;
       if (image.isShared) {
-        await widget.apiClient.updateGalleryTag(
+        confirmedTag = await widget.apiClient.updateGalleryTag(
           postId: image.galleryPostId!,
           tag: selectedTag,
         );
       }
-      await _localImageStore.updateTag(id: image.id, tag: selectedTag);
+      await _localImageStore.updateTag(id: image.id, tag: confirmedTag);
       if (!mounted) return;
       setState(() => _galleryRevision++);
       _reload();
@@ -411,7 +413,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
   @override
   Widget build(BuildContext context) {
     final content = switch (_selectedIndex) {
-      1 => GalleryExplorePage(
+      1 => GallerySearchPage(
           key: ValueKey(_galleryRevision),
           apiClient: widget.apiClient,
         ),
@@ -447,7 +449,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
         }),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), label: '홈'),
-          NavigationDestination(icon: Icon(Icons.search), label: '탐색'),
+          NavigationDestination(icon: Icon(Icons.search), label: '검색'),
           NavigationDestination(
               icon: Icon(Icons.settings_outlined), label: '설정'),
         ],
@@ -634,16 +636,16 @@ class _LocalImageCard extends StatelessWidget {
       );
 }
 
-class GalleryExplorePage extends StatefulWidget {
-  const GalleryExplorePage({super.key, required this.apiClient});
+class GallerySearchPage extends StatefulWidget {
+  const GallerySearchPage({super.key, required this.apiClient});
 
   final ApiClient apiClient;
 
   @override
-  State<GalleryExplorePage> createState() => _GalleryExplorePageState();
+  State<GallerySearchPage> createState() => _GallerySearchPageState();
 }
 
-class _GalleryExplorePageState extends State<GalleryExplorePage> {
+class _GallerySearchPageState extends State<GallerySearchPage> {
   final _searchController = TextEditingController();
   String? _selectedTag;
   late Future<List<GalleryPostItem>> _posts = _load();
@@ -773,8 +775,11 @@ class _GalleryExplorePageState extends State<GalleryExplorePage> {
                       childAspectRatio: 0.72,
                     ),
                     itemCount: posts.length,
-                    itemBuilder: (context, index) =>
-                        _GalleryPostCard(post: posts[index]),
+                    itemBuilder: (context, index) => _GalleryPostCard(
+                      key: ValueKey(posts[index].id),
+                      post: posts[index],
+                      apiClient: widget.apiClient,
+                    ),
                   ),
                 );
               },
@@ -784,10 +789,50 @@ class _GalleryExplorePageState extends State<GalleryExplorePage> {
       );
 }
 
-class _GalleryPostCard extends StatelessWidget {
-  const _GalleryPostCard({required this.post});
+class _GalleryPostCard extends StatefulWidget {
+  const _GalleryPostCard(
+      {super.key, required this.post, required this.apiClient});
 
   final GalleryPostItem post;
+  final ApiClient apiClient;
+
+  @override
+  State<_GalleryPostCard> createState() => _GalleryPostCardState();
+}
+
+class _GalleryPostCardState extends State<_GalleryPostCard> {
+  late Future<String> _imageUrl = _initialImageUrl();
+
+  Future<String> _initialImageUrl() {
+    final uri = Uri.tryParse(widget.post.imageUrl);
+    if (uri != null &&
+        uri.hasAuthority &&
+        (uri.scheme == 'https' || uri.scheme == 'http')) {
+      return Future.value(widget.post.imageUrl);
+    }
+    return widget.apiClient.getGalleryImageUrl(widget.post.id);
+  }
+
+  @override
+  void didUpdateWidget(covariant _GalleryPostCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.post.imageUrl != widget.post.imageUrl) {
+      _imageUrl = _initialImageUrl();
+    }
+  }
+
+  Widget _imageError() => ColoredBox(
+        color: const Color(0xFFF3F4F7),
+        child: Center(
+          child: TextButton.icon(
+            onPressed: () => setState(() {
+              _imageUrl = widget.apiClient.getGalleryImageUrl(widget.post.id);
+            }),
+            icon: const Icon(Icons.refresh),
+            label: const Text('다시 불러오기'),
+          ),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) => Column(
@@ -797,27 +842,33 @@ class _GalleryPostCard extends StatelessWidget {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(16),
               child: SizedBox.expand(
-                child: Image.network(
-                  post.imageUrl,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const ColoredBox(
-                    color: Color(0xFFF3F4F7),
-                    child: Icon(Icons.broken_image_outlined, size: 42),
-                  ),
+                child: FutureBuilder<String>(
+                  future: _imageUrl,
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) return _imageError();
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    return Image.network(
+                      snapshot.data!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _imageError(),
+                    );
+                  },
                 ),
               ),
             ),
           ),
           const SizedBox(height: 9),
           Text(
-            post.title,
+            widget.post.title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 3),
           Text(
-            '${post.username} · ${post.tag}',
+            '${widget.post.username} · ${widget.post.tag}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 12, color: Color(0xFF6F7789)),

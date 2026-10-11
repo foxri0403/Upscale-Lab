@@ -87,6 +87,14 @@ public sealed class GalleryController(IGalleryService galleryService) : Controll
     }
 
     [AllowAnonymous]
+    [HttpGet("{id:guid}/preview-url")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<ActionResult<DownloadUrlResponse>> PreviewUrl(Guid id, CancellationToken cancellationToken)
+    {
+        return Ok(await galleryService.CreatePreviewUrlAsync(id, User.GetOptionalUserId(), cancellationToken));
+    }
+
+    [AllowAnonymous]
     [HttpPost("{id:guid}/download-url")]
     public async Task<ActionResult<DownloadUrlResponse>> CreateDownloadUrl(
         Guid id,

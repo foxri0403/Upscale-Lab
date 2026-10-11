@@ -10,6 +10,7 @@ public interface IGalleryService
         string? tag,
         CancellationToken cancellationToken);
     Task<GalleryPostDetailResponse> GetAsync(Guid postId, Guid? currentUserId, CancellationToken cancellationToken);
+    Task<DownloadUrlResponse> CreatePreviewUrlAsync(Guid postId, Guid? currentUserId, CancellationToken cancellationToken);
     Task<GalleryPostResponse> CreateAsync(Guid userId, CreateGalleryPostRequest request, CancellationToken cancellationToken);
     Task<GalleryPostResponse> UpdateTagAsync(
         Guid userId,

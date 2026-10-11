@@ -212,7 +212,10 @@ class ApiClient {
       }),
     );
     _ensureSuccess(response);
-    return (jsonDecode(response.body) as Map<String, dynamic>)['id'] as String;
+    final post =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    _confirmedGalleryTag(post, tag);
+    return post['id'] as String;
   }
 
   Future<List<GalleryPostItem>> getGallery({
@@ -228,13 +231,13 @@ class ApiClient {
       headers: _headers,
     );
     _ensureSuccess(response);
-    return (jsonDecode(response.body) as List<dynamic>)
+    return (jsonDecode(utf8.decode(response.bodyBytes)) as List<dynamic>)
         .map((item) => GalleryPostItem.fromJson(item as Map<String, dynamic>))
         .where((post) => post.matches(search: search, selectedTag: tag))
         .toList();
   }
 
-  Future<void> updateGalleryTag({
+  Future<String> updateGalleryTag({
     required String postId,
     required String tag,
   }) async {
@@ -243,7 +246,40 @@ class ApiClient {
       headers: _headers,
       body: jsonEncode({'tag': tag}),
     );
+    if (response.statusCode == 404 || response.statusCode == 405) {
+      throw StateError('공유 태그를 수정할 수 없습니다. 서버 업데이트가 필요한지 관리자에게 문의해주세요.');
+    }
     _ensureSuccess(response);
+    final post =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    if (post['id'] != postId) {
+      throw StateError('수정한 공유 게시물 정보를 확인하지 못했습니다.');
+    }
+    return _confirmedGalleryTag(post, tag);
+  }
+
+  String _confirmedGalleryTag(Map<String, dynamic> post, String requestedTag) {
+    final tag = post['tag'];
+    if (tag is! String || tag != requestedTag.trim()) {
+      throw StateError('공유 태그가 저장되지 않았습니다. 서버 업데이트가 필요한지 관리자에게 문의해주세요.');
+    }
+    return tag;
+  }
+
+  Future<String> getGalleryImageUrl(String postId) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/gallery/$postId/preview-url'),
+      headers: _headers,
+    );
+    _ensureSuccess(response);
+    final body =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    final url = body['url'] as String;
+    final uri = Uri.parse(url);
+    if (!uri.hasAuthority || (uri.scheme != 'https' && uri.scheme != 'http')) {
+      throw StateError('이미지 주소를 불러오지 못했습니다.');
+    }
+    return url;
   }
 
   Future<void> deleteGalleryPost(String id) async {

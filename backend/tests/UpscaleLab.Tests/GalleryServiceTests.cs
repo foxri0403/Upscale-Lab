@@ -87,11 +87,44 @@ public sealed class GalleryServiceTests
             CancellationToken.None);
 
         Assert.Equal("레트로", updated.Tag);
+        dbContext.ChangeTracker.Clear();
+        var filtered = await service.GetAllAsync(null, null, "레트로", CancellationToken.None);
+        Assert.Equal(post.Id, Assert.Single(filtered).Id);
+        Assert.Empty(await service.GetAllAsync(null, null, "자동차", CancellationToken.None));
         await Assert.ThrowsAsync<ForbiddenException>(() => service.UpdateTagAsync(
             Guid.NewGuid(),
             post.Id,
             new UpdateGalleryPostTagRequest("SF"),
             CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task PreviewUrl_PresignsPrivateStorageWithoutCountingADownload()
+    {
+        await using var dbContext = CreateDbContext();
+        var user = new User { Email = "artist@example.com", Username = "artist", PasswordHash = "hash" };
+        var post = new GalleryPost
+        {
+            User = user, Image = CreateImage(user, "cat.png"), Title = "Cat", IsPublic = true
+        };
+        dbContext.GalleryPosts.Add(post);
+        await dbContext.SaveChangesAsync();
+        var service = new GalleryService(dbContext, new FakeStorageService());
+
+        var preview = await service.CreatePreviewUrlAsync(post.Id, null, CancellationToken.None);
+
+        Assert.Equal("https://example.test/cat.png", preview.Url);
+        Assert.True(preview.ExpiresAt > DateTime.UtcNow);
+        Assert.Equal(0, (await dbContext.GalleryPosts.SingleAsync()).DownloadCount);
+
+        post.IsPublic = false;
+        await dbContext.SaveChangesAsync();
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            service.CreatePreviewUrlAsync(post.Id, null, CancellationToken.None));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            service.CreatePreviewUrlAsync(post.Id, Guid.NewGuid(), CancellationToken.None));
+        Assert.Equal("https://example.test/cat.png",
+            (await service.CreatePreviewUrlAsync(post.Id, user.Id, CancellationToken.None)).Url);
     }
 
     [Fact]
