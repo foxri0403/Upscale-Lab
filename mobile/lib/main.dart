@@ -28,6 +28,12 @@ Future<void> _logoutToLogin(BuildContext context, ApiClient apiClient) async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Keep the Android status bar; request that the bottom navigation bar stays
+  // hidden until a system-edge swipe. New Android versions may override this.
+  await SystemChrome.setEnabledSystemUIMode(
+    SystemUiMode.manual,
+    overlays: [SystemUiOverlay.top],
+  );
   const apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'http://10.0.2.2:5080',
@@ -383,12 +389,22 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28),
-          child: Column(
-            children: [
-              const Spacer(flex: 3),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+            final topGap = keyboardOpen ? 16.0 : (constraints.maxHeight * 0.12).clamp(24.0, 100.0).toDouble();
+            return SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight, maxWidth: 440),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+              SizedBox(height: topGap),
               const Text(
                 'Upscale Lab',
                 style: TextStyle(
@@ -510,9 +526,13 @@ class _LoginPageState extends State<LoginPage> {
                 icon: const Icon(Icons.dns_outlined, size: 18),
                 label: const Text('서버 주소 설정'),
               ),
-              const Spacer(flex: 4),
-            ],
-          ),
+              SizedBox(height: keyboardOpen ? 24 : 36),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -982,8 +1002,11 @@ class _SignUpPageState extends State<SignUpPage> {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 28),
-          child: Column(
+          padding: const EdgeInsets.fromLTRB(28, 0, 28, 48),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 25),
@@ -1110,6 +1133,8 @@ class _SignUpPageState extends State<SignUpPage> {
                 ],
               ),
             ],
+              ),
+            ),
           ),
         ),
       ),
@@ -1403,21 +1428,29 @@ class _PreviewPageState extends State<PreviewPage> {
       appBar: AppBar(
         title: Text(widget.project.title),
       ),
-      body: Column(
-        children: [
+      body: SafeArea(
+        child: Column(
+          children: [
           Expanded(
             child: widget.project.layers.isEmpty
-                ? Center(
-                    child: Text('처리 상태: ${widget.project.status}'),
-                  )
-                : AspectRatio(
-                    aspectRatio: 9 / 16,
-                    child: ParallaxPreview(
-                      layers: widget.project.layers,
-                      sensitivity: _sensitivity,
+                ? Center(child: Text('처리 상태: ${widget.project.status}'))
+                : Center(
+                    child: AspectRatio(
+                      aspectRatio: 9 / 16,
+                      child: ParallaxPreview(
+                        layers: widget.project.layers,
+                        sensitivity: _sensitivity,
+                      ),
                     ),
                   ),
           ),
+          Flexible(
+            fit: FlexFit.loose,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.only(bottom: 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
           ListTile(
             title: const Text('센서 반응 감도'),
             subtitle: Slider(
@@ -1434,6 +1467,11 @@ class _PreviewPageState extends State<PreviewPage> {
             child: SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF536DFE),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(48),
+                ),
                 onPressed: _applyingLive ? null : _applyLiveWallpaper,
                 icon: _applyingLive
                     ? const SizedBox.square(
@@ -1453,6 +1491,11 @@ class _PreviewPageState extends State<PreviewPage> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF536DFE),
+                      side: const BorderSide(color: Color(0xFF536DFE)),
+                      minimumSize: const Size.fromHeight(48),
+                    ),
                     onPressed: _downloading ? null : _downloadOriginal,
                     icon: const Icon(Icons.download_outlined),
                     label: Text(_downloading ? '준비 중...' : '원본 다운로드'),
@@ -1461,6 +1504,11 @@ class _PreviewPageState extends State<PreviewPage> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF536DFE),
+                      side: const BorderSide(color: Color(0xFF536DFE)),
+                      minimumSize: const Size.fromHeight(48),
+                    ),
                     onPressed: _applyingStatic ? null : _applyStaticWallpaper,
                     icon: const Icon(Icons.phone_android),
                     label: Text(_applyingStatic ? '적용 중...' : '원본 바로 적용'),
@@ -1469,7 +1517,12 @@ class _PreviewPageState extends State<PreviewPage> {
               ],
             ),
           ),
-        ],
+                ],
+              ),
+            ),
+          ),
+          ],
+        ),
       ),
     );
   }
