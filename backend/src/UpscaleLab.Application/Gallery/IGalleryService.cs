@@ -8,7 +8,8 @@ public interface IGalleryService
         Guid? currentUserId,
         string? search,
         string? tag,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        string[]? tags = null);
     Task<GalleryPostDetailResponse> GetAsync(Guid postId, Guid? currentUserId, CancellationToken cancellationToken);
     Task<DownloadUrlResponse> CreatePreviewUrlAsync(Guid postId, Guid? currentUserId, CancellationToken cancellationToken);
     Task<GalleryPostResponse> CreateAsync(Guid userId, CreateGalleryPostRequest request, CancellationToken cancellationToken);

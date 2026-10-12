@@ -7,24 +7,29 @@ import 'package:live_layer/models/gallery.dart';
 import 'package:live_layer/services/api_client.dart';
 import 'package:live_layer/unified_home.dart';
 
+const apiScope = 'https://api.example.test\naccount-a';
+
 class _GalleryApi extends ApiClient {
   _GalleryApi() : super(baseUrl: 'https://api.example.test');
 
-  final tagResult = Completer<String>();
+  final tagResult = Completer<List<String>>();
   final requestedTags = <String>[];
   int previewRequests = 0;
 
   @override
-  Future<String> updateGalleryTag(
-      {required String postId, required String tag}) {
+  String get storageScope => apiScope;
+
+  @override
+  Future<List<String>> updateGalleryTags(
+      {required String postId, required List<String> tags}) {
     expect(postId, 'post-id');
-    requestedTags.add(tag);
+    requestedTags.addAll(tags);
     return tagResult.future;
   }
 
   @override
   Future<List<GalleryPostItem>> getGallery(
-          {String? search, String? tag}) async =>
+          {String? search, String? tag, List<String>? tags}) async =>
       [
         GalleryPostItem(
           id: 'post-id',
@@ -69,7 +74,9 @@ void main() {
         if (call.method == 'updateLocalImageTag') {
           final arguments = call.arguments as Map;
           expect(arguments['id'], 'local-id');
-          image['tag'] = arguments['tag'];
+          image['tag'] = (arguments['tags'] as List).first;
+          image['tags'] = arguments['tags'];
+          expect(arguments['scope'], apiScope);
           localWrites++;
           return null;
         }
@@ -85,13 +92,16 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text(originalTag));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ListTile, '동물'));
+      if (originalTag != '동물') {
+        await tester.tap(find.widgetWithText(CheckboxListTile, '동물'));
+      }
+      await tester.tap(find.text('태그 저장'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(api.requestedTags, ['동물']);
       expect(localWrites, 0);
-      api.tagResult.complete('동물');
+      api.tagResult.complete(['동물']);
       await tester.pumpAndSettle();
 
       expect(localWrites, 1);
@@ -110,7 +120,7 @@ void main() {
 
     expect(api.previewRequests, 1);
     final image = tester.widget<Image>(find.byType(Image));
-    expect((image.image as NetworkImage).url,
+    expect(((image.image as ResizeImage).imageProvider as NetworkImage).url,
         'https://images.example.test/cat.png');
     // Widget tests reject real network image requests; exercise the retry button.
     await tester.tap(find.text('다시 불러오기'));

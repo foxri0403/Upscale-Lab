@@ -11,13 +11,25 @@ namespace UpscaleLab.Api.Controllers;
 public sealed class GalleryController(IGalleryService galleryService) : ControllerBase
 {
     [AllowAnonymous]
+    [HttpGet("{id:guid}/thumbnail")]
+    public async Task<IActionResult> Thumbnail(Guid id,
+        [FromServices] IGalleryThumbnailService thumbnails, CancellationToken cancellationToken)
+    {
+        var bytes = await thumbnails.GetAsync(id, User.GetOptionalUserId(), cancellationToken);
+        if (bytes is null) return Redirect((await galleryService.CreatePreviewUrlAsync(
+            id, User.GetOptionalUserId(), cancellationToken)).Url);
+        Response.Headers.CacheControl = "private, max-age=300";
+        return File(bytes, "image/jpeg");
+    }
+    [AllowAnonymous]
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<GalleryPostResponse>>> GetAll(
         [FromQuery] string? search,
         [FromQuery] string? tag,
+        [FromQuery] string[]? tags,
         CancellationToken cancellationToken)
     {
-        return Ok(await galleryService.GetAllAsync(User.GetOptionalUserId(), search, tag, cancellationToken));
+        return Ok(await galleryService.GetAllAsync(User.GetOptionalUserId(), search, tag, cancellationToken, tags));
     }
 
     [AllowAnonymous]

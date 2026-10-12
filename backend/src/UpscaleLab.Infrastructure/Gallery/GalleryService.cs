@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Linq.Expressions;
 using UpscaleLab.Application.Common;
 using UpscaleLab.Application.Gallery;
 using UpscaleLab.Application.Images;
@@ -16,9 +17,10 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         Guid? currentUserId,
         string? search,
         string? tag,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string[]? tags = null)
     {
-        var query = BaseQuery()
+        var query = dbContext.GalleryPosts
             .AsNoTracking()
             .Where(x => x.IsPublic);
 
@@ -28,18 +30,40 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
             query = query.Where(x => x.Title.ToLower().Contains(normalizedSearch));
         }
 
-        if (!string.IsNullOrWhiteSpace(tag))
+        if (tags is { Length: > 0 } || !string.IsNullOrWhiteSpace(tag))
         {
-            var normalizedTag = GalleryTagCatalog.Normalize(tag);
-            query = query.Where(x => x.Tag == normalizedTag);
+            var selected = tags is { Length: > 0 }
+                ? tags.Select(GalleryTagCatalog.Normalize).Distinct().ToArray()
+                : [GalleryTagCatalog.Normalize(tag)];
+            var parameter = Expression.Parameter(typeof(GalleryPost), "post");
+            Expression matches = Expression.Constant(false);
+            foreach (var selectedTag in selected)
+            {
+                var contains = Expression.Call(typeof(Enumerable), nameof(Enumerable.Contains), [typeof(string)],
+                    Expression.Property(parameter, nameof(GalleryPost.Tags)), Expression.Constant(selectedTag));
+                var legacy = Expression.AndAlso(
+                    Expression.Equal(Expression.ArrayLength(Expression.Property(parameter, nameof(GalleryPost.Tags))), Expression.Constant(0)),
+                    Expression.Equal(Expression.Property(parameter, nameof(GalleryPost.Tag)), Expression.Constant(selectedTag)));
+                matches = Expression.OrElse(matches, Expression.OrElse(contains, legacy));
+            }
+            query = query.Where(Expression.Lambda<Func<GalleryPost, bool>>(matches, parameter));
         }
 
         var posts = await query
             .OrderByDescending(x => x.CreatedAt)
             .Take(100)
+            .Select(x => new GalleryPostResponse(
+                x.Id, x.ImageId, x.UserId, x.User.Username, x.Title, x.Description,
+                x.Image.OriginalObjectKey, x.Likes.Count, x.Comments.Count, x.DownloadCount,
+                x.CreatedAt, currentUserId.HasValue && x.Likes.Any(l => l.UserId == currentUserId),
+                x.ProjectId, x.IsPublic, x.Tag, x.Tags, null))
             .ToListAsync(cancellationToken);
 
-        return posts.Select(x => MapPost(x, currentUserId)).ToList();
+        return posts.Select(x => x with {
+            ImageUrl = storageService.CreateDownloadUrl(x.ImageUrl, DownloadLifetime),
+            Tags = x.Tags.Count == 0 ? [x.Tag] : x.Tags,
+            ThumbnailUrl = $"/api/gallery/{x.Id}/thumbnail"
+        }).ToList();
     }
 
     public async Task<GalleryPostDetailResponse> GetAsync(
@@ -88,11 +112,12 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
             ImageId = image.Id,
             ProjectId = project?.Id,
             Title = request.Title.Trim(),
-            Tag = GalleryTagCatalog.Normalize(request.Tag),
+            Tags = GalleryTagCatalog.NormalizeMany(request.Tags, request.Tag),
             Description = request.Description?.Trim(),
             IsPublic = request.IsPublic
         };
 
+        post.Tag = post.Tags[0];
         dbContext.GalleryPosts.Add(post);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -115,7 +140,8 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
             throw new ForbiddenException("본인의 게시글만 수정할 수 있습니다.");
         }
 
-        post.Tag = GalleryTagCatalog.Normalize(request.Tag);
+        post.Tags = GalleryTagCatalog.NormalizeMany(request.Tags, request.Tag);
+        post.Tag = post.Tags[0];
         await dbContext.SaveChangesAsync(cancellationToken);
 
         post = await BaseQuery().SingleAsync(x => x.Id == postId, cancellationToken);
@@ -267,7 +293,9 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         currentUserId.HasValue && post.Likes.Any(x => x.UserId == currentUserId.Value),
         post.ProjectId,
         post.IsPublic,
-        post.Tag);
+        post.Tag,
+        post.Tags.Length == 0 ? [post.Tag] : post.Tags,
+        $"/api/gallery/{post.Id}/thumbnail");
 
     private static void EnsureAccessible(GalleryPost post, Guid? currentUserId)
     {

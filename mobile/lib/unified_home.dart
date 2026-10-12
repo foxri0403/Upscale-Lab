@@ -10,20 +10,36 @@ import 'models/local_image.dart';
 import 'services/api_client.dart';
 import 'services/local_image_store.dart';
 
-const _localImageStore = LocalImageStore();
 const _wallpaperChannel = MethodChannel('live_layer/wallpaper');
 
 enum ImageCreationMode { original, upscale, depth25d }
 
+List<String> _normalizedTags(Set<String> selected) => selected.isEmpty
+    ? [unspecifiedGalleryTag]
+    : galleryTags.where(selected.contains).toList();
+
+void _toggleTag(Set<String> selected, String tag, bool checked) {
+  if (!checked) {
+    selected.remove(tag);
+    return;
+  }
+  if (tag == unspecifiedGalleryTag) {
+    selected.clear();
+  } else {
+    selected.remove(unspecifiedGalleryTag);
+  }
+  selected.add(tag);
+}
+
 class ImageRegistrationOptions {
   const ImageRegistrationOptions({
     required this.title,
-    required this.tag,
+    required this.tags,
     required this.mode,
   });
 
   final String title;
-  final String tag;
+  final List<String> tags;
   final ImageCreationMode mode;
 }
 
@@ -50,6 +66,8 @@ class UnifiedHomePage extends StatefulWidget {
 }
 
 class _UnifiedHomePageState extends State<UnifiedHomePage> {
+  late final _localImageStore =
+      LocalImageStore(scope: widget.apiClient.storageScope);
   late Future<List<LocalImageItem>> _images = _localImageStore.getAll();
   final Set<String> _busyIds = {};
   bool _creating = false;
@@ -94,7 +112,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
         sourcePath: picked.path,
         fileName: picked.name,
         title: options.title,
-        tag: options.tag,
+        tags: options.tags,
         width: width,
         height: height,
         mode: options.mode.name,
@@ -126,7 +144,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
       final postId = await widget.apiClient.shareProject(
         projectId: project.id,
         title: image.title,
-        tag: image.tag,
+        tags: image.tags,
       );
       await _localImageStore.markShared(
         id: image.id,
@@ -190,55 +208,65 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
 
   Future<void> _editTag(LocalImageItem image) async {
     if (_busyIds.contains(image.id)) return;
-    final selectedTag = await showModalBottomSheet<String>(
+    final selected = image.tags.toSet();
+    final selectedTags = await showModalBottomSheet<List<String>>(
       context: context,
       showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: SizedBox(
-          height: 460,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(22, 4, 22, 12),
-                child: Text(
-                  '태그 수정',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+      builder: (context) => StatefulBuilder(
+          builder: (context, updateSheet) => SafeArea(
+                child: SizedBox(
+                  height: 460,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(22, 4, 22, 12),
+                        child: Text(
+                          '태그 수정',
+                          style: TextStyle(
+                              fontSize: 20, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: galleryTags.length,
+                          itemBuilder: (context, index) {
+                            final tag = galleryTags[index];
+                            return CheckboxListTile(
+                              title: Text(tag),
+                              value: selected.contains(tag),
+                              onChanged: (checked) => updateSheet(() {
+                                _toggleTag(selected, tag, checked == true);
+                              }),
+                            );
+                          },
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: FilledButton(
+                          onPressed: () =>
+                              Navigator.pop(context, _normalizedTags(selected)),
+                          child: const Text('태그 저장'),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: galleryTags.length,
-                  itemBuilder: (context, index) {
-                    final tag = galleryTags[index];
-                    return ListTile(
-                      title: Text(tag),
-                      trailing: image.tag == tag
-                          ? const Icon(Icons.check, color: Color(0xFF4658D6))
-                          : null,
-                      onTap: () => Navigator.pop(context, tag),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+              )),
     );
-    if (selectedTag == null || !mounted) return;
-    if (selectedTag == image.tag && !image.isShared) return;
+    if (selectedTags == null || !mounted) return;
 
     setState(() => _busyIds.add(image.id));
     try {
-      var confirmedTag = selectedTag;
+      var confirmedTags = selectedTags;
       if (image.isShared) {
-        confirmedTag = await widget.apiClient.updateGalleryTag(
+        confirmedTags = await widget.apiClient.updateGalleryTags(
           postId: image.galleryPostId!,
-          tag: selectedTag,
+          tags: selectedTags,
         );
       }
-      await _localImageStore.updateTag(id: image.id, tag: confirmedTag);
+      await _localImageStore.updateTags(id: image.id, tags: confirmedTags);
       if (!mounted) return;
       setState(() => _galleryRevision++);
       _reload();
@@ -416,6 +444,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
       1 => GallerySearchPage(
           key: ValueKey(_galleryRevision),
           apiClient: widget.apiClient,
+          onImported: _reload,
         ),
       2 => _settings(),
       _ => _home(),
@@ -613,7 +642,7 @@ class _LocalImageCard extends StatelessWidget {
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
-                        image.tag,
+                        image.tags.join(' · '),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -637,9 +666,11 @@ class _LocalImageCard extends StatelessWidget {
 }
 
 class GallerySearchPage extends StatefulWidget {
-  const GallerySearchPage({super.key, required this.apiClient});
+  const GallerySearchPage(
+      {super.key, required this.apiClient, this.onImported});
 
   final ApiClient apiClient;
+  final VoidCallback? onImported;
 
   @override
   State<GallerySearchPage> createState() => _GallerySearchPageState();
@@ -647,12 +678,12 @@ class GallerySearchPage extends StatefulWidget {
 
 class _GallerySearchPageState extends State<GallerySearchPage> {
   final _searchController = TextEditingController();
-  String? _selectedTag;
+  final Set<String> _selectedTags = {};
   late Future<List<GalleryPostItem>> _posts = _load();
 
   Future<List<GalleryPostItem>> _load() => widget.apiClient.getGallery(
         search: _searchController.text,
-        tag: _selectedTag,
+        tags: _selectedTags.toList(),
       );
 
   Future<void> _refresh() async {
@@ -700,10 +731,10 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(
                     label: const Text('전체'),
-                    selected: _selectedTag == null,
+                    selected: _selectedTags.isEmpty,
                     onSelected: (_) {
                       setState(() {
-                        _selectedTag = null;
+                        _selectedTags.clear();
                         _posts = _load();
                       });
                     },
@@ -712,12 +743,16 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
                 ...galleryTags.map(
                   (tag) => Padding(
                     padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
+                    child: FilterChip(
                       label: Text(tag),
-                      selected: _selectedTag == tag,
-                      onSelected: (_) {
+                      selected: _selectedTags.contains(tag),
+                      onSelected: (checked) {
                         setState(() {
-                          _selectedTag = tag;
+                          if (checked) {
+                            _selectedTags.add(tag);
+                          } else {
+                            _selectedTags.remove(tag);
+                          }
                           _posts = _load();
                         });
                       },
@@ -779,6 +814,7 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
                       key: ValueKey(posts[index].id),
                       post: posts[index],
                       apiClient: widget.apiClient,
+                      onImported: widget.onImported,
                     ),
                   ),
                 );
@@ -791,10 +827,14 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
 
 class _GalleryPostCard extends StatefulWidget {
   const _GalleryPostCard(
-      {super.key, required this.post, required this.apiClient});
+      {super.key,
+      required this.post,
+      required this.apiClient,
+      this.onImported});
 
   final GalleryPostItem post;
   final ApiClient apiClient;
+  final VoidCallback? onImported;
 
   @override
   State<_GalleryPostCard> createState() => _GalleryPostCardState();
@@ -802,8 +842,15 @@ class _GalleryPostCard extends StatefulWidget {
 
 class _GalleryPostCardState extends State<_GalleryPostCard> {
   late Future<String> _imageUrl = _initialImageUrl();
+  bool _importing = false;
 
   Future<String> _initialImageUrl() {
+    final thumbnail = widget.post.thumbnailUrl;
+    if (thumbnail != null) {
+      return Future.value(Uri.parse('${widget.apiClient.baseUrl}/')
+          .resolve(thumbnail)
+          .toString());
+    }
     final uri = Uri.tryParse(widget.post.imageUrl);
     if (uri != null &&
         uri.hasAuthority &&
@@ -816,8 +863,63 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
   @override
   void didUpdateWidget(covariant _GalleryPostCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.post.imageUrl != widget.post.imageUrl) {
+    if (oldWidget.post.id != widget.post.id ||
+        oldWidget.post.thumbnailUrl != widget.post.thumbnailUrl ||
+        (widget.post.thumbnailUrl == null &&
+            oldWidget.post.imageUrl != widget.post.imageUrl)) {
       _imageUrl = _initialImageUrl();
+    }
+  }
+
+  Future<void> _import() async {
+    if (_importing) return;
+    setState(() => _importing = true);
+    String? path;
+    try {
+      final store = LocalImageStore(scope: widget.apiClient.storageScope);
+      final url = await widget.apiClient.getGalleryDownloadUrl(widget.post.id);
+      path = await store.downloadShared(
+          url: url,
+          fileName: widget.post.fileName ?? Uri.parse(url).pathSegments.last);
+      if (!mounted) return;
+      final completed =
+          await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) =>
+            WallpaperPreviewPage(filePath: path!, finishLabel: '내 보관함에 저장'),
+      ));
+      if (completed != true || !mounted) return;
+      final bytes = await File(path).readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final width = frame.image.width;
+      final height = frame.image.height;
+      frame.image.dispose();
+      codec.dispose();
+      await store.import(
+          sourcePath: path,
+          fileName: path.split(Platform.pathSeparator).last,
+          title: widget.post.title,
+          tags: widget.post.tags,
+          width: width,
+          height: height,
+          mode: 'original');
+      widget.onImported?.call();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('공유 이미지를 내 보관함에 저장했습니다.')));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('공유 이미지를 가져오지 못했습니다.\n$error')));
+      }
+    } finally {
+      if (path != null) {
+        try {
+          await File(path).delete();
+        } catch (_) {/* Android may have already cleared its cache. */}
+      }
+      if (mounted) setState(() => _importing = false);
     }
   }
 
@@ -835,7 +937,9 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
       );
 
   @override
-  Widget build(BuildContext context) => Column(
+  Widget build(BuildContext context) => InkWell(
+      onTap: _importing ? null : _import,
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
@@ -852,6 +956,12 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
                     return Image.network(
                       snapshot.data!,
                       fit: BoxFit.cover,
+                      cacheWidth: 480,
+                      frameBuilder: (context, child, frame, synchronous) =>
+                          frame != null || synchronous
+                              ? child
+                              : const Center(
+                                  child: CircularProgressIndicator()),
                       errorBuilder: (_, __, ___) => _imageError(),
                     );
                   },
@@ -868,13 +978,17 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
           ),
           const SizedBox(height: 3),
           Text(
-            '${widget.post.username} · ${widget.post.tag}',
+            '${widget.post.username} · ${widget.post.tags.join(' · ')}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 12, color: Color(0xFF6F7789)),
           ),
+          Text(_importing ? '원본 가져오는 중…' : '눌러서 가져오기 · 배경화면 적용',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, color: Color(0xFF4658D6))),
         ],
-      );
+      ));
 }
 
 class ImageFeaturePage extends StatefulWidget {
@@ -895,7 +1009,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   ImageCreationMode _mode = ImageCreationMode.original;
   late final TextEditingController _titleController =
       TextEditingController(text: widget.title);
-  String _tag = unspecifiedGalleryTag;
+  final Set<String> _tags = {};
 
   @override
   void dispose() {
@@ -922,7 +1036,8 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     if (completed == true && mounted) {
       Navigator.pop(
         context,
-        ImageRegistrationOptions(title: title, tag: _tag, mode: _mode),
+        ImageRegistrationOptions(
+            title: title, tags: _normalizedTags(_tags), mode: _mode),
       );
     }
   }
@@ -986,10 +1101,11 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                 spacing: 8,
                 runSpacing: 8,
                 children: galleryTags.map((tag) {
-                  return ChoiceChip(
+                  return FilterChip(
                     label: Text(tag),
-                    selected: _tag == tag,
-                    onSelected: (_) => setState(() => _tag = tag),
+                    selected: _tags.contains(tag),
+                    onSelected: (checked) =>
+                        setState(() => _toggleTag(_tags, tag, checked)),
                   );
                 }).toList(),
               ),

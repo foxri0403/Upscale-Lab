@@ -13,6 +13,75 @@ void main() {
         headers: {'content-type': 'application/json'},
       );
 
+  test('multiple tags are confirmed as a complete set', () async {
+    await http.runWithClient(() async {
+      expect(
+          await api.updateGalleryTags(postId: 'post-id', tags: ['동물', '레트로']),
+          ['레트로', '동물']);
+    },
+        () => MockClient((request) async {
+              expect(jsonDecode(request.body)['tags'], ['동물', '레트로']);
+              return jsonResponse({
+                'id': 'post-id',
+                'tag': '레트로',
+                'tags': ['레트로', '동물']
+              });
+            }));
+    await http.runWithClient(() async {
+      await expectLater(
+          api.shareProject(projectId: 'p', title: 'cat', tags: ['동물', '레트로']),
+          throwsStateError);
+    },
+        () => MockClient((_) async => jsonResponse({
+              'id': 'post-id',
+              'tag': '동물',
+              'tags': ['동물']
+            })));
+  });
+
+  test('multiple search tags match any secondary tag', () async {
+    await http.runWithClient(() async {
+      final posts = await api.getGallery(tags: ['레트로', '풍경']);
+      expect(posts.single.tags, ['동물', '레트로']);
+    },
+        () => MockClient((request) async {
+              expect(request.url.queryParametersAll['tags'], ['레트로', '풍경']);
+              return jsonResponse([
+                {
+                  'id': '1',
+                  'username': 'artist',
+                  'title': 'cat',
+                  'imageUrl': 'https://images.test/cat.png',
+                  'tag': '동물',
+                  'tags': ['동물', '레트로'],
+                  'createdAt': '2026-10-12T00:00:00Z'
+                },
+                {
+                  'id': '2',
+                  'username': 'artist',
+                  'title': 'dog',
+                  'imageUrl': 'https://images.test/dog.png',
+                  'tag': '동물',
+                  'tags': ['동물'],
+                  'createdAt': '2026-10-12T00:00:00Z'
+                },
+              ]);
+            }));
+  });
+
+  test('import requests an original download and never uses the thumbnail',
+      () async {
+    await http.runWithClient(() async {
+      expect(await api.getGalleryDownloadUrl('post-id'),
+          'https://images.test/original.png');
+    },
+        () => MockClient((request) async {
+              expect(request.method, 'POST');
+              expect(request.url.path, '/api/gallery/post-id/download-url');
+              return jsonResponse({'url': 'https://images.test/original.png'});
+            }));
+  });
+
   test('tag changes send Korean tag and require cloud confirmation', () async {
     api.restoreSession(AuthSession(
       accessToken: 'test-token',

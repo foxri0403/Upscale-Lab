@@ -13,6 +13,21 @@ class ApiClient {
 
   String get baseUrl => _baseUrl;
 
+  String get storageScope {
+    final token = _accessToken;
+    if (token == null) throw StateError('로그인이 필요합니다.');
+    final parts = token.split('.');
+    if (parts.length != 3) throw StateError('계정 정보를 확인하지 못했습니다.');
+    final payload =
+        jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))))
+            as Map<String, dynamic>;
+    final userId = payload['sub'];
+    if (userId is! String || userId.isEmpty) {
+      throw StateError('계정 정보를 확인하지 못했습니다.');
+    }
+    return '$baseUrl\n$userId';
+  }
+
   void restoreSession(AuthSession session) {
     _accessToken = session.accessToken;
   }
@@ -198,8 +213,10 @@ class ApiClient {
   Future<String> shareProject({
     required String projectId,
     required String title,
-    required String tag,
+    String? tag,
+    List<String>? tags,
   }) async {
+    final selected = tags ?? [tag ?? unspecifiedGalleryTag];
     final response = await http.post(
       Uri.parse('$baseUrl/api/gallery'),
       headers: _headers,
@@ -208,23 +225,26 @@ class ApiClient {
         'title': title,
         'description': 'Upscale Lab 모바일 앱에서 공유했습니다.',
         'isPublic': true,
-        'tag': tag,
+        'tag': selected.first,
+        'tags': selected,
       }),
     );
     _ensureSuccess(response);
     final post =
         jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-    _confirmedGalleryTag(post, tag);
+    _confirmedGalleryTags(post, selected);
     return post['id'] as String;
   }
 
   Future<List<GalleryPostItem>> getGallery({
     String? search,
     String? tag,
+    List<String>? tags,
   }) async {
-    final parameters = <String, String>{
+    final parameters = <String, dynamic>{
       if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
       if (tag != null && tag.isNotEmpty) 'tag': tag,
+      if (tags != null && tags.isNotEmpty) 'tags': tags,
     };
     final response = await http.get(
       Uri.parse('$baseUrl/api/gallery').replace(queryParameters: parameters),
@@ -233,7 +253,8 @@ class ApiClient {
     _ensureSuccess(response);
     return (jsonDecode(utf8.decode(response.bodyBytes)) as List<dynamic>)
         .map((item) => GalleryPostItem.fromJson(item as Map<String, dynamic>))
-        .where((post) => post.matches(search: search, selectedTag: tag))
+        .where((post) =>
+            post.matches(search: search, selectedTag: tag, selectedTags: tags))
         .toList();
   }
 
@@ -241,10 +262,17 @@ class ApiClient {
     required String postId,
     required String tag,
   }) async {
+    return (await updateGalleryTags(postId: postId, tags: [tag])).first;
+  }
+
+  Future<List<String>> updateGalleryTags({
+    required String postId,
+    required List<String> tags,
+  }) async {
     final response = await http.patch(
       Uri.parse('$baseUrl/api/gallery/$postId/tag'),
       headers: _headers,
-      body: jsonEncode({'tag': tag}),
+      body: jsonEncode({'tag': tags.first, 'tags': tags}),
     );
     if (response.statusCode == 404 || response.statusCode == 405) {
       throw StateError('공유 태그를 수정할 수 없습니다. 서버 업데이트가 필요한지 관리자에게 문의해주세요.');
@@ -255,15 +283,32 @@ class ApiClient {
     if (post['id'] != postId) {
       throw StateError('수정한 공유 게시물 정보를 확인하지 못했습니다.');
     }
-    return _confirmedGalleryTag(post, tag);
+    return _confirmedGalleryTags(post, tags);
   }
 
-  String _confirmedGalleryTag(Map<String, dynamic> post, String requestedTag) {
-    final tag = post['tag'];
-    if (tag is! String || tag != requestedTag.trim()) {
+  List<String> _confirmedGalleryTags(
+      Map<String, dynamic> post, List<String> requested) {
+    final raw = post['tags'];
+    final confirmed = raw is List
+        ? raw.cast<String>()
+        : post['tag'] is String
+            ? [post['tag'] as String]
+            : <String>[];
+    if (confirmed.toSet().length != requested.toSet().length ||
+        !requested.every(confirmed.contains)) {
       throw StateError('공유 태그가 저장되지 않았습니다. 서버 업데이트가 필요한지 관리자에게 문의해주세요.');
     }
-    return tag;
+    return confirmed;
+  }
+
+  Future<String> getGalleryDownloadUrl(String postId) async {
+    final response = await http.post(
+        Uri.parse('$baseUrl/api/gallery/$postId/download-url'),
+        headers: _headers);
+    _ensureSuccess(response);
+    final body =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    return body['url'] as String;
   }
 
   Future<String> getGalleryImageUrl(String postId) async {

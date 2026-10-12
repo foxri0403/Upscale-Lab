@@ -7,6 +7,7 @@ class LocalImageItem {
     required this.height,
     required this.mode,
     required this.tag,
+    this.selectedTags,
     required this.createdAt,
     this.cloudProjectId,
     this.galleryPostId,
@@ -19,6 +20,8 @@ class LocalImageItem {
   final int height;
   final String mode;
   final String tag;
+  final List<String>? selectedTags;
+  List<String> get tags => selectedTags ?? [tag];
   final DateTime createdAt;
   final String? cloudProjectId;
   final String? galleryPostId;
@@ -34,6 +37,7 @@ class LocalImageItem {
       height: (map['height']! as num).toInt(),
       mode: map['mode']! as String,
       tag: map['tag'] as String? ?? '장르 설정되지 않음',
+      selectedTags: (map['tags'] as List?)?.cast<String>(),
       createdAt: DateTime.parse(map['createdAt']! as String),
       cloudProjectId: map['cloudProjectId'] as String?,
       galleryPostId: map['galleryPostId'] as String?,

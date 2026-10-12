@@ -107,6 +107,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         post.ToTable("gallery_posts");
         post.Property(x => x.Title).HasMaxLength(160).IsRequired();
         post.Property(x => x.Tag).HasMaxLength(50).HasDefaultValue("장르 설정되지 않음").IsRequired();
+        post.Property(x => x.Tags).HasColumnType("text[]").IsRequired();
+        post.HasIndex(x => x.Tags).HasMethod("gin");
         post.Property(x => x.Description).HasMaxLength(2000);
         post.Property(x => x.IsPublic).HasDefaultValue(true);
         post.HasIndex(x => x.CreatedAt);

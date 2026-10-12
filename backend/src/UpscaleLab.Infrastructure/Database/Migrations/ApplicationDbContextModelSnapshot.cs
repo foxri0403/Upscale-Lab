@@ -164,6 +164,10 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .HasColumnType("character varying(50)")
                         .HasDefaultValue("장르 설정되지 않음");
 
+                    b.Property<string[]>("Tags")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(160)
@@ -188,6 +192,7 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.HasIndex("IsPublic", "CreatedAt");
 
                     b.HasIndex("Tag", "CreatedAt");
+                    b.HasIndex("Tags").HasAnnotation("Npgsql:IndexMethod", "gin");
 
                     b.ToTable("gallery_posts", (string)null);
                 });

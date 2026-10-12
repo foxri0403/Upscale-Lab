@@ -24,6 +24,9 @@ class GalleryPostItem {
     required this.title,
     required this.imageUrl,
     required this.tag,
+    this.selectedTags,
+    this.thumbnailUrl,
+    this.fileName,
     required this.createdAt,
   });
 
@@ -32,10 +35,20 @@ class GalleryPostItem {
   final String title;
   final String imageUrl;
   final String tag;
+  final List<String>? selectedTags;
+  final String? thumbnailUrl;
+  final String? fileName;
+  List<String> get tags => selectedTags ?? [tag];
   final DateTime createdAt;
 
-  bool matches({String? search, String? selectedTag}) {
-    if (selectedTag != null && tag != selectedTag) return false;
+  bool matches(
+      {String? search, String? selectedTag, Iterable<String>? selectedTags}) {
+    if (selectedTag != null && !tags.contains(selectedTag)) return false;
+    if (selectedTags != null &&
+        selectedTags.isNotEmpty &&
+        !selectedTags.any(tags.contains)) {
+      return false;
+    }
     final normalizedSearch = search?.trim().toLowerCase();
     return normalizedSearch == null ||
         normalizedSearch.isEmpty ||
@@ -49,6 +62,9 @@ class GalleryPostItem {
         title: json['title'] as String,
         imageUrl: json['imageUrl'] as String,
         tag: json['tag'] as String? ?? unspecifiedGalleryTag,
+        selectedTags: (json['tags'] as List?)?.cast<String>(),
+        thumbnailUrl: json['thumbnailUrl'] as String?,
+        fileName: json['fileName'] as String?,
         createdAt: DateTime.parse(json['createdAt'] as String).toLocal(),
       );
 }

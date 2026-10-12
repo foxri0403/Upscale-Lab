@@ -12,6 +12,51 @@ namespace UpscaleLab.Tests;
 public sealed class GalleryServiceTests
 {
     [Fact]
+    public async Task MultipleTags_MatchAnySelectedTagAndPreserveLegacyAndPrivacy()
+    {
+        await using var db = CreateDbContext();
+        var user = new User { Email = "multi@example.com", Username = "multi", PasswordHash = "hash" };
+        var tagged = new GalleryPost { User = user, Image = CreateImage(user, "multi.png"),
+            Title = "Multi", Tag = "동물", Tags = ["동물", "레트로"] };
+        var legacy = new GalleryPost { User = user, Image = CreateImage(user, "legacy.png"),
+            Title = "Legacy", Tag = "SF" };
+        var hidden = new GalleryPost { User = user, Image = CreateImage(user, "private.png"),
+            Title = "Private", Tag = "동물", Tags = ["동물"], IsPublic = false };
+        db.GalleryPosts.AddRange(tagged, legacy, hidden);
+        await db.SaveChangesAsync();
+        var service = new GalleryService(db, new FakeStorageService());
+        var matches = await service.GetAllAsync(null, null, null, CancellationToken.None, ["레트로", "SF"]);
+        Assert.Equal(2, matches.Count);
+        Assert.DoesNotContain(matches, x => x.Id == hidden.Id);
+        Assert.Equal(["SF"], matches.Single(x => x.Id == legacy.Id).Tags);
+        Assert.Single(await service.GetAllAsync(null, null, "레트로", CancellationToken.None));
+
+        var updated = await service.UpdateTagAsync(user.Id, tagged.Id,
+            new UpdateGalleryPostTagRequest(Tags: ["풍경", "게임", "풍경"]), CancellationToken.None);
+        Assert.Equal(["풍경", "게임"], updated.Tags);
+        Assert.Equal("풍경", updated.Tag);
+        await Assert.ThrowsAsync<ForbiddenException>(() => service.UpdateTagAsync(Guid.NewGuid(), tagged.Id,
+            new UpdateGalleryPostTagRequest(Tags: ["남자", "SF"]), CancellationToken.None));
+        await Assert.ThrowsAsync<ValidationException>(() => service.UpdateTagAsync(user.Id, tagged.Id,
+            new UpdateGalleryPostTagRequest(Tags: ["풍경", "unknown"]), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Create_PersistsAllSelectedTags()
+    {
+        await using var db = CreateDbContext();
+        var user = new User { Email = "create@example.com", Username = "creator", PasswordHash = "hash" };
+        var image = CreateImage(user, "new.png");
+        db.Images.Add(image);
+        await db.SaveChangesAsync();
+        var response = await new GalleryService(db, new FakeStorageService()).CreateAsync(user.Id,
+            new CreateGalleryPostRequest(image.Id, "New", null, Tags: ["동물", "레트로"]), CancellationToken.None);
+        Assert.Equal(["동물", "레트로"], response.Tags);
+        db.ChangeTracker.Clear();
+        Assert.Equal(["동물", "레트로"], (await db.GalleryPosts.SingleAsync()).Tags);
+    }
+
+    [Fact]
     public async Task GetAll_FiltersPublicPostsBySearchAndTag()
     {
         await using var dbContext = CreateDbContext();

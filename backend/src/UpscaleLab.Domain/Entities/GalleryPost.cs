@@ -7,6 +7,7 @@ public sealed class GalleryPost : BaseEntity
     public Guid? ProjectId { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Tag { get; set; } = "장르 설정되지 않음";
+    public string[] Tags { get; set; } = [];
     public string? Description { get; set; }
     public long DownloadCount { get; set; }
     public bool IsPublic { get; set; } = true;
