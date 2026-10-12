@@ -12,6 +12,27 @@ namespace UpscaleLab.Tests;
 public sealed class GalleryServiceTests
 {
     [Fact]
+    public async Task CompatibilityPosts_RetainSecondaryTagsAfterServerUpgradeAndEdit()
+    {
+        await using var db = CreateDbContext();
+        var user = new User { Email = "legacy@example.com", Username = "legacy", PasswordHash = "hash" };
+        var post = new GalleryPost { User = user, Image = CreateImage(user, "legacy.png"),
+            Title = "Legacy Cat", Tag = "동물", Tags = ["동물"],
+            Description = "Shared\n[UpscaleLab.Tags:v1][\"동물\",\"레트로\"]" };
+        db.GalleryPosts.Add(post);
+        await db.SaveChangesAsync();
+        var service = new GalleryService(db, new FakeStorageService());
+        var found = await service.GetAllAsync(null, null, null, CancellationToken.None, ["레트로", "SF"]);
+        Assert.Equal(["동물", "레트로"], Assert.Single(found).Tags);
+        Assert.Equal(["동물", "레트로"], (await service.GetAsync(post.Id, null, CancellationToken.None)).Post.Tags);
+        var edited = await service.UpdateTagAsync(user.Id, post.Id,
+            new UpdateGalleryPostTagRequest(Tags: ["동물"]), CancellationToken.None);
+        Assert.Equal(["동물"], edited.Tags);
+        Assert.Equal("Shared", edited.Description);
+        Assert.Empty(await service.GetAllAsync(null, null, "레트로", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task MultipleTags_MatchAnySelectedTagAndPreserveLegacyAndPrivacy()
     {
         await using var db = CreateDbContext();

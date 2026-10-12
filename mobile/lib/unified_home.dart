@@ -51,6 +51,11 @@ extension on ImageCreationMode {
       };
 }
 
+class GallerySearchSelection {
+  String search = '';
+  final Set<String> tags = {};
+}
+
 class UnifiedHomePage extends StatefulWidget {
   const UnifiedHomePage({
     super.key,
@@ -73,6 +78,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
   bool _creating = false;
   int _selectedIndex = 0;
   int _galleryRevision = 0;
+  final _gallerySelection = GallerySearchSelection();
 
   void _reload() => setState(() => _images = _localImageStore.getAll());
 
@@ -445,6 +451,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
           key: ValueKey(_galleryRevision),
           apiClient: widget.apiClient,
           onImported: _reload,
+          selection: _gallerySelection,
         ),
       2 => _settings(),
       _ => _home(),
@@ -667,24 +674,29 @@ class _LocalImageCard extends StatelessWidget {
 
 class GallerySearchPage extends StatefulWidget {
   const GallerySearchPage(
-      {super.key, required this.apiClient, this.onImported});
+      {super.key, required this.apiClient, this.onImported, this.selection});
 
   final ApiClient apiClient;
   final VoidCallback? onImported;
+  final GallerySearchSelection? selection;
 
   @override
   State<GallerySearchPage> createState() => _GallerySearchPageState();
 }
 
 class _GallerySearchPageState extends State<GallerySearchPage> {
-  final _searchController = TextEditingController();
-  final Set<String> _selectedTags = {};
+  late final _searchController =
+      TextEditingController(text: widget.selection?.search ?? '');
+  late final Set<String> _selectedTags = widget.selection?.tags ?? {};
   late Future<List<GalleryPostItem>> _posts = _load();
 
-  Future<List<GalleryPostItem>> _load() => widget.apiClient.getGallery(
-        search: _searchController.text,
-        tags: _selectedTags.toList(),
-      );
+  Future<List<GalleryPostItem>> _load() {
+    widget.selection?.search = _searchController.text;
+    return widget.apiClient.getGallery(
+      search: _searchController.text,
+      tags: _selectedTags.toList(),
+    );
+  }
 
   Future<void> _refresh() async {
     final posts = _load();
@@ -696,6 +708,7 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
 
   @override
   void dispose() {
+    widget.selection?.search = _searchController.text;
     _searchController.dispose();
     super.dispose();
   }
@@ -721,45 +734,62 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
               ),
             ),
           ),
-          SizedBox(
-            height: 45,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 22),
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: const Text('전체'),
-                    selected: _selectedTags.isEmpty,
-                    onSelected: (_) {
-                      setState(() {
-                        _selectedTags.clear();
-                        _posts = _load();
-                      });
-                    },
-                  ),
-                ),
-                ...galleryTags.map(
-                  (tag) => Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: FilterChip(
-                      label: Text(tag),
-                      selected: _selectedTags.contains(tag),
-                      onSelected: (checked) {
-                        setState(() {
-                          if (checked) {
-                            _selectedTags.add(tag);
-                          } else {
-                            _selectedTags.remove(tag);
-                          }
-                          _posts = _load();
-                        });
-                      },
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 22),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 150),
+              child: SingleChildScrollView(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: const Text('전체'),
+                        selected: _selectedTags.isEmpty,
+                        onSelected: (_) {
+                          setState(() {
+                            _selectedTags.clear();
+                            _posts = _load();
+                          });
+                        },
+                      ),
                     ),
-                  ),
+                    ...galleryTags.map(
+                      (tag) => Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          label: Text(tag),
+                          selected: _selectedTags.contains(tag),
+                          onSelected: (checked) {
+                            setState(() {
+                              if (checked) {
+                                _selectedTags.add(tag);
+                              } else {
+                                _selectedTags.remove(tag);
+                              }
+                              _posts = _load();
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(22, 6, 22, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                  _selectedTags.isEmpty
+                      ? '태그를 여러 개 선택할 수 있습니다.'
+                      : '${_selectedTags.length}개 선택 · 선택한 태그 중 하나라도 포함된 이미지',
+                  style:
+                      const TextStyle(fontSize: 12, color: Color(0xFF6F7789))),
             ),
           ),
           const SizedBox(height: 12),

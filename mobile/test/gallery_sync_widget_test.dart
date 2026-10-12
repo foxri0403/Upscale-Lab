@@ -14,6 +14,7 @@ class _GalleryApi extends ApiClient {
 
   final tagResult = Completer<List<String>>();
   final requestedTags = <String>[];
+  final searchTagRequests = <List<String>>[];
   int previewRequests = 0;
 
   @override
@@ -29,17 +30,19 @@ class _GalleryApi extends ApiClient {
 
   @override
   Future<List<GalleryPostItem>> getGallery(
-          {String? search, String? tag, List<String>? tags}) async =>
-      [
-        GalleryPostItem(
-          id: 'post-id',
-          username: 'artist',
-          title: '고양이 이미지',
-          imageUrl: 's3://private/cat.png',
-          tag: '동물',
-          createdAt: DateTime.utc(2026),
-        ),
-      ];
+      {String? search, String? tag, List<String>? tags}) async {
+    searchTagRequests.add(List<String>.of(tags ?? []));
+    return [
+      GalleryPostItem(
+        id: 'post-id',
+        username: 'artist',
+        title: '고양이 이미지',
+        imageUrl: 's3://private/cat.png',
+        tag: '동물',
+        createdAt: DateTime.utc(2026),
+      ),
+    ];
+  }
 
   @override
   Future<String> getGalleryImageUrl(String postId) async {
@@ -50,6 +53,51 @@ class _GalleryApi extends ApiClient {
 }
 
 void main() {
+  testWidgets('search keeps multiple tags and title across tab changes',
+      (tester) async {
+    const channel = MethodChannel('live_layer/storage');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel, (call) async => call.method == 'listLocalImages' ? [] : null);
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+    final api = _GalleryApi();
+    await tester.pumpWidget(MaterialApp(
+        home: UnifiedHomePage(apiClient: api, onLogout: (_) async {})));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('검색'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilterChip, '동물'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilterChip, '애니'));
+    await tester.pumpAndSettle();
+    expect(api.searchTagRequests.last.toSet(), {'동물', '애니'});
+    expect(
+        tester
+            .widget<FilterChip>(find.widgetWithText(FilterChip, '동물'))
+            .selected,
+        isTrue);
+    expect(
+        tester
+            .widget<FilterChip>(find.widgetWithText(FilterChip, '애니'))
+            .selected,
+        isTrue);
+    await tester.enterText(find.byType(TextField), '고양이');
+    await tester.tap(find.text('홈'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('검색'));
+    await tester.pumpAndSettle();
+    expect(api.searchTagRequests.last.toSet(), {'동물', '애니'});
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        '고양이');
+    await tester.tap(find.widgetWithText(FilterChip, '동물'));
+    await tester.pumpAndSettle();
+    expect(api.searchTagRequests.last, ['애니']);
+    await tester.tap(find.widgetWithText(ChoiceChip, '전체'));
+    await tester.pumpAndSettle();
+    expect(api.searchTagRequests.last, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
   for (final originalTag in [unspecifiedGalleryTag, '동물']) {
     testWidgets(
         'shared $originalTag waits for cloud confirmation before saving locally',

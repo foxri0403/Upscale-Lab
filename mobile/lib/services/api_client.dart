@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/gallery.dart';
+import '../models/gallery_tag_codec.dart';
 import '../models/live_layer_models.dart';
 
 class ApiClient {
@@ -216,14 +217,15 @@ class ApiClient {
     String? tag,
     List<String>? tags,
   }) async {
-    final selected = tags ?? [tag ?? unspecifiedGalleryTag];
+    final selected =
+        GalleryTagCodec.normalize(tags ?? [tag ?? unspecifiedGalleryTag]);
     final response = await http.post(
       Uri.parse('$baseUrl/api/gallery'),
       headers: _headers,
       body: jsonEncode({
         'projectId': projectId,
         'title': title,
-        'description': 'Upscale Lab 모바일 앱에서 공유했습니다.',
+        'description': GalleryTagCodec.sharingDescription(selected),
         'isPublic': true,
         'tag': selected.first,
         'tags': selected,
@@ -288,12 +290,7 @@ class ApiClient {
 
   List<String> _confirmedGalleryTags(
       Map<String, dynamic> post, List<String> requested) {
-    final raw = post['tags'];
-    final confirmed = raw is List
-        ? raw.cast<String>()
-        : post['tag'] is String
-            ? [post['tag'] as String]
-            : <String>[];
+    final confirmed = GalleryTagCodec.fromPost(post);
     if (confirmed.toSet().length != requested.toSet().length ||
         !requested.every(confirmed.contains)) {
       throw StateError('공유 태그가 저장되지 않았습니다. 서버 업데이트가 필요한지 관리자에게 문의해주세요.');

@@ -13,6 +13,53 @@ void main() {
         headers: {'content-type': 'application/json'},
       );
 
+  for (final tags in [
+    ['동물', '레트로'],
+    ['풍경', '게임', 'SF']
+  ]) {
+    test('legacy server persists and confirms every tag in $tags', () async {
+      Map<String, dynamic>? saved;
+      await http.runWithClient(() async {
+        expect(
+            await api.shareProject(projectId: 'p', title: 'sample', tags: tags),
+            'post-id');
+        // Simulate a separate search client reading only persisted legacy fields.
+        final reader = ApiClient(baseUrl: 'https://api.example.test');
+        final posts = await reader.getGallery(tags: [tags.last]);
+        expect(posts.single.tags, tags);
+      },
+          () => MockClient((request) async {
+                if (request.method == 'POST') {
+                  final body = jsonDecode(request.body) as Map<String, dynamic>;
+                  expect(body['tags'], tags);
+                  saved = {
+                    'id': 'post-id',
+                    'username': 'artist',
+                    'title': body['title'],
+                    'imageUrl': 'https://images.test/cat.png',
+                    'tag': body['tag'],
+                    'description': body['description'],
+                    'createdAt': '2026-10-12T00:00:00Z'
+                  };
+                  // Old servers do not return or store a tags array.
+                  return jsonResponse(saved!);
+                }
+                return jsonResponse([saved!]);
+              }));
+    });
+  }
+
+  test('legacy server discarding metadata still fails instead of losing tags',
+      () async {
+    await http.runWithClient(() async {
+      await expectLater(
+          api.shareProject(projectId: 'p', title: 'cat', tags: ['동물', '레트로']),
+          throwsStateError);
+    },
+        () => MockClient(
+            (_) async => jsonResponse({'id': 'post-id', 'tag': '동물'})));
+  });
+
   test('multiple tags are confirmed as a complete set', () async {
     await http.runWithClient(() async {
       expect(

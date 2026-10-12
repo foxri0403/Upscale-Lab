@@ -30,9 +30,10 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
             query = query.Where(x => x.Title.ToLower().Contains(normalizedSearch));
         }
 
+        string[]? selected = null;
         if (tags is { Length: > 0 } || !string.IsNullOrWhiteSpace(tag))
         {
-            var selected = tags is { Length: > 0 }
+            selected = tags is { Length: > 0 }
                 ? tags.Select(GalleryTagCatalog.Normalize).Distinct().ToArray()
                 : [GalleryTagCatalog.Normalize(tag)];
             var parameter = Expression.Parameter(typeof(GalleryPost), "post");
@@ -44,7 +45,12 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
                 var legacy = Expression.AndAlso(
                     Expression.Equal(Expression.ArrayLength(Expression.Property(parameter, nameof(GalleryPost.Tags))), Expression.Constant(0)),
                     Expression.Equal(Expression.Property(parameter, nameof(GalleryPost.Tag)), Expression.Constant(selectedTag)));
-                matches = Expression.OrElse(matches, Expression.OrElse(contains, legacy));
+                // Compatibility descriptions are searchable before the 100-post limit.
+                Expression<Func<GalleryPost, bool>> metadata = post => post.Tags.Length <= 1 &&
+                    post.Description != null && post.Description.Contains(GalleryTagCompatibility.Marker) &&
+                    post.Description.Contains("\"" + selectedTag + "\"");
+                var embedded = new ReplaceParameter(metadata.Parameters[0], parameter).Visit(metadata.Body)!;
+                matches = Expression.OrElse(matches, Expression.OrElse(Expression.OrElse(contains, legacy), embedded));
             }
             query = query.Where(Expression.Lambda<Func<GalleryPost, bool>>(matches, parameter));
         }
@@ -61,9 +67,9 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
 
         return posts.Select(x => x with {
             ImageUrl = storageService.CreateDownloadUrl(x.ImageUrl, DownloadLifetime),
-            Tags = x.Tags.Count == 0 ? [x.Tag] : x.Tags,
+            Tags = GalleryTagCompatibility.Resolve(x.Tag, x.Tags, x.Description),
             ThumbnailUrl = $"/api/gallery/{x.Id}/thumbnail"
-        }).ToList();
+        }).Where(x => selected is null || x.Tags.Any(selected.Contains)).ToList();
     }
 
     public async Task<GalleryPostDetailResponse> GetAsync(
@@ -142,6 +148,7 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
 
         post.Tags = GalleryTagCatalog.NormalizeMany(request.Tags, request.Tag);
         post.Tag = post.Tags[0];
+        post.Description = GalleryTagCompatibility.WithoutMetadata(post.Description);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         post = await BaseQuery().SingleAsync(x => x.Id == postId, cancellationToken);
@@ -294,7 +301,7 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         post.ProjectId,
         post.IsPublic,
         post.Tag,
-        post.Tags.Length == 0 ? [post.Tag] : post.Tags,
+        GalleryTagCompatibility.Resolve(post.Tag, post.Tags, post.Description),
         $"/api/gallery/{post.Id}/thumbnail");
 
     private static void EnsureAccessible(GalleryPost post, Guid? currentUserId)
@@ -303,6 +310,11 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         {
             throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
         }
+    }
+
+    private sealed class ReplaceParameter(ParameterExpression source, ParameterExpression target) : ExpressionVisitor
+    {
+        protected override Expression VisitParameter(ParameterExpression node) => node == source ? target : node;
     }
 
     private static CommentResponse MapComment(Comment comment) => new(
