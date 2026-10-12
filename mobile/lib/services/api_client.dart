@@ -298,6 +298,28 @@ class ApiClient {
     return confirmed;
   }
 
+  Future<List<String>> updateGalleryPost({
+    required String postId,
+    required String title,
+    required List<String> tags,
+  }) async {
+    final response = await http.patch(
+      Uri.parse('$baseUrl/api/gallery/$postId'),
+      headers: _headers,
+      body: jsonEncode({'title': title, 'tags': tags}),
+    );
+    if (response.statusCode == 404 || response.statusCode == 405) {
+      throw StateError('공유 이미지를 수정하려면 서버 업데이트가 필요합니다.');
+    }
+    _ensureSuccess(response);
+    final post =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    if (post['id'] != postId || post['title'] != title) {
+      throw StateError('공유 이미지 이름이 저장되지 않았습니다.');
+    }
+    return _confirmedGalleryTags(post, tags);
+  }
+
   Future<String> getGalleryDownloadUrl(String postId) async {
     final response = await http.post(
         Uri.parse('$baseUrl/api/gallery/$postId/download-url'),

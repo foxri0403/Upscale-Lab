@@ -59,6 +59,18 @@ class LocalImageStore {
     });
   }
 
+  Future<void> updateDetails({
+    required String id,
+    required String title,
+    required List<String> tags,
+  }) =>
+      _channel.invokeMethod<void>('updateLocalImageDetails', {
+        'scope': scope,
+        'id': id,
+        'title': title,
+        'tags': tags,
+      });
+
   Future<void> markShared({
     required String id,
     required String cloudProjectId,

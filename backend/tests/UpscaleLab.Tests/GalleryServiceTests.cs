@@ -214,6 +214,57 @@ public sealed class GalleryServiceTests
             CancellationToken.None));
     }
 
+    [Fact]
+    public async Task Update_ChangesOwnedNameAndTagsTogether()
+    {
+        await using var db = CreateDbContext();
+        var user = new User { Email = "editor@example.com", Username = "editor", PasswordHash = "hash" };
+        var image = CreateImage(user, "mountain.png");
+        var project = new LiveLayerProject { User = user, OriginalImage = image, Title = "Before" };
+        var post = new GalleryPost
+        {
+            User = user, Image = image, Project = project, Title = "Before", Tag = "SF", Tags = ["SF"],
+        };
+        db.GalleryPosts.Add(post);
+        await db.SaveChangesAsync();
+        var createdAt = post.CreatedAt;
+        var service = new GalleryService(db, new FakeStorageService());
+        var updated = await service.UpdateAsync(user.Id, post.Id,
+            new UpdateGalleryPostRequest("  푸른 산맥  ", ["풍경", "게임", "풍경"]), CancellationToken.None);
+
+        Assert.Equal("푸른 산맥", updated.Title);
+        Assert.Equal(new[] { "풍경", "게임" }, updated.Tags);
+        db.ChangeTracker.Clear();
+        var saved = await db.GalleryPosts.Include(x => x.Project).SingleAsync();
+        Assert.Equal("푸른 산맥", saved.Title);
+        Assert.Equal("푸른 산맥", saved.Project!.Title);
+        Assert.Equal(createdAt, saved.CreatedAt);
+        Assert.Equal(DateTimeKind.Utc, saved.UpdatedAt.Kind);
+        Assert.Equal(post.Id, Assert.Single(await service.GetAllAsync(null, "푸른", null, CancellationToken.None)).Id);
+    }
+
+    [Fact]
+    public async Task Update_RejectsOtherOwnersAndInvalidInputWithoutChangingMetadata()
+    {
+        await using var db = CreateDbContext();
+        var user = new User { Email = "protected@example.com", Username = "protected", PasswordHash = "hash" };
+        var post = new GalleryPost { User = user, Image = CreateImage(user, "cat.png"), Title = "Before", Tags = ["동물"] };
+        db.GalleryPosts.Add(post);
+        await db.SaveChangesAsync();
+        var service = new GalleryService(db, new FakeStorageService());
+        await Assert.ThrowsAsync<ForbiddenException>(() => service.UpdateAsync(Guid.NewGuid(), post.Id,
+            new UpdateGalleryPostRequest("Changed", ["풍경"]), CancellationToken.None));
+        foreach (var title in new[] { "  ", new string('x', 161) })
+            await Assert.ThrowsAsync<ValidationException>(() => service.UpdateAsync(user.Id, post.Id,
+                new UpdateGalleryPostRequest(title, ["풍경"]), CancellationToken.None));
+        await Assert.ThrowsAsync<ValidationException>(() => service.UpdateAsync(user.Id, post.Id,
+            new UpdateGalleryPostRequest("Changed", ["unknown"]), CancellationToken.None));
+        db.ChangeTracker.Clear();
+        var saved = await db.GalleryPosts.SingleAsync();
+        Assert.Equal("Before", saved.Title);
+        Assert.Equal(new[] { "동물" }, saved.Tags);
+    }
+
     private static Image CreateImage(User user, string objectKey) => new()
     {
         User = user,

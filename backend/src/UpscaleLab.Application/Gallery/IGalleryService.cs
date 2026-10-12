@@ -18,6 +18,11 @@ public interface IGalleryService
         Guid postId,
         UpdateGalleryPostTagRequest request,
         CancellationToken cancellationToken);
+    Task<GalleryPostResponse> UpdateAsync(
+        Guid userId,
+        Guid postId,
+        UpdateGalleryPostRequest request,
+        CancellationToken cancellationToken);
     Task DeletePostAsync(Guid userId, Guid postId, CancellationToken cancellationToken);
     Task<CommentResponse> AddCommentAsync(Guid userId, Guid postId, CreateCommentRequest request, CancellationToken cancellationToken);
     Task DeleteCommentAsync(Guid userId, Guid commentId, CancellationToken cancellationToken);

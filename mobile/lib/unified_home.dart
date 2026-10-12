@@ -9,6 +9,10 @@ import 'models/gallery.dart';
 import 'models/local_image.dart';
 import 'services/api_client.dart';
 import 'services/local_image_store.dart';
+import 'theme/app_theme.dart';
+import 'widgets/app_components.dart';
+import 'widgets/image_edit_dialog.dart';
+import 'widgets/local_image_card.dart';
 
 const _wallpaperChannel = MethodChannel('live_layer/wallpaper');
 
@@ -76,6 +80,8 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
   late Future<List<LocalImageItem>> _images = _localImageStore.getAll();
   final Set<String> _busyIds = {};
   bool _creating = false;
+  bool _isGrid = true;
+  bool _removingWallpaper = false;
   int _selectedIndex = 0;
   int _galleryRevision = 0;
   final _gallerySelection = GallerySearchSelection();
@@ -212,81 +218,39 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
     }
   }
 
-  Future<void> _editTag(LocalImageItem image) async {
+  Future<void> _editImage(LocalImageItem image) async {
     if (_busyIds.contains(image.id)) return;
-    final selected = image.tags.toSet();
-    final selectedTags = await showModalBottomSheet<List<String>>(
+    final edited = await showDialog<ImageEditResult>(
       context: context,
-      showDragHandle: true,
-      builder: (context) => StatefulBuilder(
-          builder: (context, updateSheet) => SafeArea(
-                child: SizedBox(
-                  height: 460,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Padding(
-                        padding: EdgeInsets.fromLTRB(22, 4, 22, 12),
-                        child: Text(
-                          '태그 수정',
-                          style: TextStyle(
-                              fontSize: 20, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      Expanded(
-                        child: ListView.builder(
-                          itemCount: galleryTags.length,
-                          itemBuilder: (context, index) {
-                            final tag = galleryTags[index];
-                            return CheckboxListTile(
-                              title: Text(tag),
-                              value: selected.contains(tag),
-                              onChanged: (checked) => updateSheet(() {
-                                _toggleTag(selected, tag, checked == true);
-                              }),
-                            );
-                          },
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: FilledButton(
-                          onPressed: () =>
-                              Navigator.pop(context, _normalizedTags(selected)),
-                          child: const Text('태그 저장'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              )),
+      builder: (_) => ImageEditDialog(title: image.title, tags: image.tags),
     );
-    if (selectedTags == null || !mounted) return;
+    if (edited == null || !mounted) return;
 
     setState(() => _busyIds.add(image.id));
     try {
-      var confirmedTags = selectedTags;
+      var confirmedTags = edited.tags;
       if (image.isShared) {
-        confirmedTags = await widget.apiClient.updateGalleryTags(
+        confirmedTags = await widget.apiClient.updateGalleryPost(
           postId: image.galleryPostId!,
-          tags: selectedTags,
+          title: edited.title,
+          tags: edited.tags,
         );
       }
-      await _localImageStore.updateTags(id: image.id, tags: confirmedTags);
+      await _localImageStore.updateDetails(
+          id: image.id, title: edited.title, tags: confirmedTags);
       if (!mounted) return;
       setState(() => _galleryRevision++);
       _reload();
-      _message(
-          image.isShared ? '로컬 이미지와 공유 게시물의 태그를 수정했습니다.' : '이미지 태그를 수정했습니다.');
+      _message('이미지 이름과 태그를 수정했습니다.');
     } catch (error) {
-      _message('태그를 수정하지 못했습니다.\n$error');
+      _message('이미지를 수정하지 못했습니다.\n$error');
     } finally {
       if (mounted) setState(() => _busyIds.remove(image.id));
     }
   }
 
-  Future<void> _removeWallpaper(LocalImageItem image) async {
-    if (_busyIds.contains(image.id)) return;
+  Future<void> _removeWallpaper() async {
+    if (_removingWallpaper) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -307,14 +271,14 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
     );
     if (confirmed != true || !mounted) return;
 
-    setState(() => _busyIds.add(image.id));
+    setState(() => _removingWallpaper = true);
     try {
       await _wallpaperChannel.invokeMethod<void>('clearHomeWallpaper');
       _message('홈 배경화면을 제거했습니다. 등록된 이미지는 유지됩니다.');
     } on PlatformException catch (error) {
       _message(error.message ?? '$error');
     } finally {
-      if (mounted) setState(() => _busyIds.remove(image.id));
+      if (mounted) setState(() => _removingWallpaper = false);
     }
   }
 
@@ -360,88 +324,132 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
     }
   }
 
-  Widget _home() {
-    return FutureBuilder<List<LocalImageItem>>(
-      future: _images,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) return Center(child: Text('${snapshot.error}'));
-        final images = snapshot.data ?? const <LocalImageItem>[];
-
-        return RefreshIndicator(
-          onRefresh: () async {
-            final refreshed = _localImageStore.getAll();
-            setState(() => _images = refreshed);
-            await refreshed;
-          },
-          child: CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              const SliverToBoxAdapter(
+  Widget _home() => FutureBuilder<List<LocalImageItem>>(
+        future: _images,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(
                 child: Padding(
-                  padding: EdgeInsets.fromLTRB(22, 0, 22, 18),
-                  child: Text(
-                    '이미지는 먼저 이 기기에만 저장됩니다. 카드 설정에서 공유할 때만 클라우드에 업로드됩니다.',
-                    style: TextStyle(color: Color(0xFF6F7789), height: 1.45),
-                  ),
+              padding: const EdgeInsets.all(24),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.image_not_supported_outlined,
+                    color: AppTheme.muted, size: 36),
+                const SizedBox(height: 12),
+                const Text('이미지를 불러오지 못했습니다.'),
+                TextButton(onPressed: _reload, child: const Text('다시 불러오기')),
+              ]),
+            ));
+          }
+          final images = snapshot.data ?? const <LocalImageItem>[];
+          Widget item(int index) {
+            if (index == 0) {
+              return NewImageCard(
+                isGrid: _isGrid,
+                creating: _creating,
+                onTap: _creating ? null : _createImage,
+              );
+            }
+            final image = images[index - 1];
+            return LocalImageCard(
+              key: ValueKey(image.id),
+              image: image,
+              isGrid: _isGrid,
+              busy: _busyIds.contains(image.id),
+              onTap: () => Navigator.of(context).push<void>(MaterialPageRoute(
+                builder: (_) => WallpaperPreviewPage(
+                  filePath: image.path,
+                  finishLabel: '메인으로 돌아가기',
                 ),
-              ),
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
-                sliver: SliverGrid(
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 22,
-                    childAspectRatio: 0.70,
-                  ),
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      if (index == 0) {
-                        return _NewImageCard(
-                          creating: _creating,
-                          onTap: _creating ? null : _createImage,
-                        );
-                      }
-                      final image = images[index - 1];
-                      return _LocalImageCard(
-                        image: image,
-                        busy: _busyIds.contains(image.id),
-                        onTap: () => Navigator.of(context).push<void>(
-                          MaterialPageRoute(
-                            builder: (_) => WallpaperPreviewPage(
-                              filePath: image.path,
-                              finishLabel: '메인으로 돌아가기',
+              )),
+              onShare: () => _share(image),
+              onUnshare: () => _unshare(image),
+              onEdit: () => _editImage(image),
+              onDelete: () => _delete(image),
+            );
+          }
+
+          return LayoutBuilder(builder: (context, constraints) {
+            final cellWidth = (constraints.maxWidth - 52) / 2;
+            final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+            return RefreshIndicator(
+              onRefresh: () async {
+                final refreshed = _localImageStore.getAll();
+                setState(() => _images = refreshed);
+                await refreshed;
+              },
+              child: CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  SliverToBoxAdapter(
+                      child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                    child:
+                        AppSectionTitle('내 이미지', trailing: '${images.length}개'),
+                  )),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                    sliver: _isGrid
+                        ? SliverGrid(
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              crossAxisSpacing: 12,
+                              mainAxisSpacing: 12,
+                              mainAxisExtent: cellWidth * 0.8 + 68 * scale,
+                            ),
+                            delegate: SliverChildBuilderDelegate(
+                              (context, index) => item(index),
+                              childCount: images.length + 1,
+                            ),
+                          )
+                        : SliverList(
+                            delegate: SliverChildBuilderDelegate(
+                              (context, index) => Column(children: [
+                                item(index),
+                                if (index > 0 && index < images.length)
+                                  const Divider(),
+                                if (index == 0) const SizedBox(height: 6),
+                              ]),
+                              childCount: images.length + 1,
                             ),
                           ),
-                        ),
-                        onShare: () => _share(image),
-                        onUnshare: () => _unshare(image),
-                        onEditTag: () => _editTag(image),
-                        onRemoveWallpaper: () => _removeWallpaper(image),
-                        onDelete: () => _delete(image),
-                      );
-                    },
-                    childCount: images.length + 1,
                   ),
-                ),
+                ],
               ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+            );
+          });
+        },
+      );
 
-  Widget _settings() => Align(
-        alignment: Alignment.topCenter,
-        child: OutlinedButton.icon(
-          onPressed: () => widget.onLogout(context),
-          icon: const Icon(Icons.logout),
-          label: const Text('로그아웃'),
-        ),
+  Widget _settings() => ListView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        children: [
+          const AppSectionTitle('설정'),
+          const SizedBox(height: 16),
+          AppPanel(
+            padding: EdgeInsets.zero,
+            child: Column(children: [
+              ListTile(
+                leading: const Icon(Icons.wallpaper_outlined),
+                title: const Text('홈 배경화면 제거'),
+                subtitle: const Text('등록한 이미지는 보관됩니다.'),
+                trailing: const Icon(Icons.chevron_right),
+                enabled: !_removingWallpaper,
+                onTap: _removingWallpaper ? null : _removeWallpaper,
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.logout),
+                title: const Text('로그아웃'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => widget.onLogout(context),
+              ),
+            ]),
+          ),
+        ],
       );
 
   @override
@@ -452,233 +460,77 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
           apiClient: widget.apiClient,
           onImported: _reload,
           selection: _gallerySelection,
+          isGrid: _isGrid,
         ),
       2 => _settings(),
       _ => _home(),
     };
     return Scaffold(
       body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(22, 25, 22, 28),
-              child: Text(
+        bottom: false,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 14, 20),
+            child: Row(children: [
+              const Expanded(
+                  child: Text(
                 'Upscale Lab',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: -1,
-                ),
-              ),
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.8),
+              )),
+              if (_selectedIndex != 2) ...[
+                const SizedBox(width: 12),
+                LibraryLayoutToggle(
+                    isGrid: _isGrid,
+                    onChanged: (value) => setState(() => _isGrid = value)),
+              ],
+            ]),
+          ),
+          Expanded(child: content),
+        ]),
+      ),
+      bottomNavigationBar: DecoratedBox(
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: AppTheme.border)),
+        ),
+        child: NavigationBar(
+          selectedIndex: _selectedIndex,
+          onDestinationSelected: (value) => setState(() {
+            _selectedIndex = value;
+            if (value == 1) _galleryRevision++;
+          }),
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.home_outlined),
+              selectedIcon: Icon(Icons.home_rounded),
+              label: '홈',
             ),
-            Expanded(child: content),
+            NavigationDestination(icon: Icon(Icons.search), label: '검색'),
+            NavigationDestination(
+                icon: Icon(Icons.settings_outlined), label: '설정'),
           ],
         ),
-      ),
-      bottomNavigationBar: NavigationBar(
-        height: 70,
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (value) => setState(() {
-          _selectedIndex = value;
-          if (value == 1) _galleryRevision++;
-        }),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), label: '홈'),
-          NavigationDestination(icon: Icon(Icons.search), label: '검색'),
-          NavigationDestination(
-              icon: Icon(Icons.settings_outlined), label: '설정'),
-        ],
       ),
     );
   }
 }
 
-class _NewImageCard extends StatelessWidget {
-  const _NewImageCard({required this.creating, required this.onTap});
-
-  final bool creating;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFFFAFBFF),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFDDE2F1)),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (creating)
-                const CircularProgressIndicator()
-              else
-                const Icon(Icons.add, size: 52, color: Color(0xFF58647D)),
-              const SizedBox(height: 18),
-              Text(creating ? '등록 중...' : '새 이미지 등록'),
-              const SizedBox(height: 6),
-              const Text(
-                '로컬에 저장',
-                style: TextStyle(fontSize: 12, color: Color(0xFF9299AA)),
-              ),
-            ],
-          ),
-        ),
-      );
-}
-
-class _LocalImageCard extends StatelessWidget {
-  const _LocalImageCard({
-    required this.image,
-    required this.busy,
-    required this.onTap,
-    required this.onShare,
-    required this.onUnshare,
-    required this.onEditTag,
-    required this.onRemoveWallpaper,
-    required this.onDelete,
-  });
-
-  final LocalImageItem image;
-  final bool busy;
-  final VoidCallback onTap;
-  final VoidCallback onShare;
-  final VoidCallback onUnshare;
-  final VoidCallback onEditTag;
-  final VoidCallback onRemoveWallpaper;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: busy ? null : onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Image.file(
-                      File(image.path),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const ColoredBox(
-                        color: Color(0xFFF3F4F7),
-                        child: Icon(Icons.broken_image_outlined, size: 42),
-                      ),
-                    ),
-                    Positioned(
-                      top: 4,
-                      right: 4,
-                      child: Material(
-                        color: Colors.black54,
-                        shape: const CircleBorder(),
-                        child: PopupMenuButton<String>(
-                          enabled: !busy,
-                          iconColor: Colors.white,
-                          onSelected: (value) {
-                            if (value == 'share') onShare();
-                            if (value == 'unshare') onUnshare();
-                            if (value == 'remove_wallpaper') {
-                              onRemoveWallpaper();
-                            }
-                            if (value == 'delete') onDelete();
-                          },
-                          itemBuilder: (_) => [
-                            if (image.isShared)
-                              const PopupMenuItem(
-                                value: 'unshare',
-                                child: Text('공유 취소'),
-                              )
-                            else
-                              const PopupMenuItem(
-                                value: 'share',
-                                child: Text('공유'),
-                              ),
-                            const PopupMenuItem(
-                              value: 'remove_wallpaper',
-                              child: Text('홈 배경화면에서 제거'),
-                            ),
-                            const PopupMenuItem(
-                              value: 'delete',
-                              child: Text('삭제'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (busy)
-                      const ColoredBox(
-                        color: Colors.black38,
-                        child: Center(child: CircularProgressIndicator()),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              image.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              image.isShared ? '공유됨 · 클라우드' : '로컬 · 공유 안 됨',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF9299AA)),
-            ),
-            const SizedBox(height: 3),
-            InkWell(
-              borderRadius: BorderRadius.circular(6),
-              onTap: busy ? null : onEditTag,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.sell_outlined,
-                      size: 13,
-                      color: Color(0xFF6F7789),
-                    ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        image.tags.join(' · '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFF6F7789),
-                        ),
-                      ),
-                    ),
-                    const Icon(
-                      Icons.edit_outlined,
-                      size: 12,
-                      color: Color(0xFF9299AA),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-}
-
 class GallerySearchPage extends StatefulWidget {
   const GallerySearchPage(
-      {super.key, required this.apiClient, this.onImported, this.selection});
+      {super.key,
+      required this.apiClient,
+      this.onImported,
+      this.selection,
+      this.isGrid = true});
 
   final ApiClient apiClient;
   final VoidCallback? onImported;
   final GallerySearchSelection? selection;
+  final bool isGrid;
 
   @override
   State<GallerySearchPage> createState() => _GallerySearchPageState();
@@ -714,144 +566,149 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(22, 0, 22, 12),
-            child: TextField(
-              controller: _searchController,
-              textInputAction: TextInputAction.search,
-              onSubmitted: (_) => _search(),
-              decoration: InputDecoration(
-                hintText: '이미지 이름 검색',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: IconButton(
-                  tooltip: '검색',
-                  onPressed: _search,
-                  icon: const Icon(Icons.arrow_forward),
-                ),
-                border: const OutlineInputBorder(),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 22),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 150),
-              child: SingleChildScrollView(
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: const Text('전체'),
-                        selected: _selectedTags.isEmpty,
-                        onSelected: (_) {
-                          setState(() {
-                            _selectedTags.clear();
-                            _posts = _load();
-                          });
-                        },
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) {
+          final cellWidth = (constraints.maxWidth - 52) / 2;
+          final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+          return RefreshIndicator(
+            onRefresh: _refresh,
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(
+                    child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                  child: const AppSectionTitle('공유 이미지'),
+                )),
+                SliverToBoxAdapter(
+                    child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: TextField(
+                    controller: _searchController,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => _search(),
+                    decoration: InputDecoration(
+                      hintText: '이미지 이름 검색',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: IconButton(
+                        tooltip: '검색',
+                        onPressed: _search,
+                        icon: const Icon(Icons.arrow_forward),
                       ),
-                    ),
-                    ...galleryTags.map(
-                      (tag) => Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: FilterChip(
-                          label: Text(tag),
-                          selected: _selectedTags.contains(tag),
-                          onSelected: (checked) {
-                            setState(() {
-                              if (checked) {
-                                _selectedTags.add(tag);
-                              } else {
-                                _selectedTags.remove(tag);
-                              }
-                              _posts = _load();
-                            });
-                          },
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(22, 6, 22, 0),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                  _selectedTags.isEmpty
-                      ? '태그를 여러 개 선택할 수 있습니다.'
-                      : '${_selectedTags.length}개 선택 · 선택한 태그 중 하나라도 포함된 이미지',
-                  style:
-                      const TextStyle(fontSize: 12, color: Color(0xFF6F7789))),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: FutureBuilder<List<GalleryPostItem>>(
-              future: _posts,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return RefreshIndicator(
-                    onRefresh: _refresh,
-                    child: ListView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      children: [
-                        const SizedBox(height: 100),
-                        Center(
-                            child:
-                                Text('공유 이미지를 불러오지 못했습니다.\n${snapshot.error}')),
-                      ],
-                    ),
-                  );
-                }
-                final posts = snapshot.data ?? const <GalleryPostItem>[];
-                if (posts.isEmpty) {
-                  return RefreshIndicator(
-                    onRefresh: _refresh,
-                    child: ListView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      children: const [
-                        SizedBox(height: 100),
-                        Center(child: Text('조건에 맞는 공유 이미지가 없습니다.')),
-                      ],
-                    ),
-                  );
-                }
-                return RefreshIndicator(
-                  onRefresh: _refresh,
-                  child: GridView.builder(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 14,
-                      mainAxisSpacing: 18,
-                      childAspectRatio: 0.72,
-                    ),
-                    itemCount: posts.length,
-                    itemBuilder: (context, index) => _GalleryPostCard(
-                      key: ValueKey(posts[index].id),
-                      post: posts[index],
-                      apiClient: widget.apiClient,
-                      onImported: widget.onImported,
                     ),
                   ),
-                );
-              },
+                )),
+                SliverToBoxAdapter(
+                    child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 136),
+                    child: SingleChildScrollView(
+                        child: Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        ChoiceChip(
+                          label: const Text('전체'),
+                          selected: _selectedTags.isEmpty,
+                          onSelected: (_) => setState(() {
+                            _selectedTags.clear();
+                            _posts = _load();
+                          }),
+                        ),
+                        ...galleryTags.map((tag) => FilterChip(
+                              label: Text(tag),
+                              selected: _selectedTags.contains(tag),
+                              onSelected: (checked) => setState(() {
+                                checked
+                                    ? _selectedTags.add(tag)
+                                    : _selectedTags.remove(tag);
+                                _posts = _load();
+                              }),
+                            )),
+                      ],
+                    )),
+                  ),
+                )),
+                SliverToBoxAdapter(
+                    child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                  child: Text(
+                    _selectedTags.isEmpty
+                        ? '태그를 여러 개 선택할 수 있습니다.'
+                        : '${_selectedTags.length}개 선택 · 선택한 태그 중 하나라도 포함된 이미지',
+                    style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                  ),
+                )),
+                FutureBuilder<List<GalleryPostItem>>(
+                  future: _posts,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState != ConnectionState.done) {
+                      return const SliverToBoxAdapter(
+                          child: Padding(
+                        padding: EdgeInsets.all(32),
+                        child: Center(child: CircularProgressIndicator()),
+                      ));
+                    }
+                    if (snapshot.hasError || (snapshot.data?.isEmpty ?? true)) {
+                      return SliverToBoxAdapter(
+                          child: Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: Column(children: [
+                          const Icon(Icons.photo_library_outlined,
+                              color: AppTheme.muted, size: 36),
+                          const SizedBox(height: 12),
+                          Text(
+                              snapshot.hasError
+                                  ? '공유 이미지를 불러오지 못했습니다.'
+                                  : '조건에 맞는 공유 이미지가 없습니다.',
+                              textAlign: TextAlign.center),
+                          if (snapshot.hasError)
+                            TextButton(
+                                onPressed: _refresh,
+                                child: const Text('다시 불러오기')),
+                        ]),
+                      ));
+                    }
+                    final posts = snapshot.data!;
+                    Widget item(int index) => _GalleryPostCard(
+                          key: ValueKey(posts[index].id),
+                          post: posts[index],
+                          apiClient: widget.apiClient,
+                          onImported: widget.onImported,
+                          isGrid: widget.isGrid,
+                        );
+                    return SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                      sliver: widget.isGrid
+                          ? SliverGrid(
+                              gridDelegate:
+                                  SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 12,
+                                mainAxisExtent: cellWidth * 0.8 + 84 * scale,
+                              ),
+                              delegate: SliverChildBuilderDelegate(
+                                (context, index) => item(index),
+                                childCount: posts.length,
+                              ),
+                            )
+                          : SliverList(
+                              delegate: SliverChildBuilderDelegate(
+                              (context, index) => Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: item(index),
+                              ),
+                              childCount: posts.length,
+                            )),
+                    );
+                  },
+                ),
+              ],
             ),
-          ),
-        ],
+          );
+        },
       );
 }
 
@@ -860,11 +717,13 @@ class _GalleryPostCard extends StatefulWidget {
       {super.key,
       required this.post,
       required this.apiClient,
-      this.onImported});
+      this.onImported,
+      this.isGrid = true});
 
   final GalleryPostItem post;
   final ApiClient apiClient;
   final VoidCallback? onImported;
+  final bool isGrid;
 
   @override
   State<_GalleryPostCard> createState() => _GalleryPostCardState();
@@ -966,59 +825,78 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
         ),
       );
 
-  @override
-  Widget build(BuildContext context) => InkWell(
-      onTap: _importing ? null : _import,
-      child: Column(
+  Widget _previewImage() => FutureBuilder<String>(
+        future: _imageUrl,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) return _imageError();
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          return Image.network(
+            snapshot.data!,
+            fit: BoxFit.cover,
+            cacheWidth: 480,
+            frameBuilder: (context, child, frame, synchronous) =>
+                frame != null || synchronous
+                    ? child
+                    : const Center(child: CircularProgressIndicator()),
+            errorBuilder: (_, __, ___) => _imageError(),
+          );
+        },
+      );
+
+  Widget _details() => Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: SizedBox.expand(
-                child: FutureBuilder<String>(
-                  future: _imageUrl,
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) return _imageError();
-                    if (!snapshot.hasData) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    return Image.network(
-                      snapshot.data!,
-                      fit: BoxFit.cover,
-                      cacheWidth: 480,
-                      frameBuilder: (context, child, frame, synchronous) =>
-                          frame != null || synchronous
-                              ? child
-                              : const Center(
-                                  child: CircularProgressIndicator()),
-                      errorBuilder: (_, __, ___) => _imageError(),
-                    );
-                  },
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 9),
-          Text(
-            widget.post.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            '${widget.post.username} · ${widget.post.tags.join(' · ')}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12, color: Color(0xFF6F7789)),
-          ),
+          Text(widget.post.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style:
+                  const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 5),
+          Text('${widget.post.username} · ${widget.post.tags.join(' · ')}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: AppTheme.muted)),
+          const SizedBox(height: 5),
           Text(_importing ? '원본 가져오는 중…' : '눌러서 가져오기 · 배경화면 적용',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: Color(0xFF4658D6))),
+              style: const TextStyle(fontSize: 11, color: AppTheme.primary)),
         ],
-      ));
+      );
+
+  @override
+  Widget build(BuildContext context) => Material(
+        color: AppTheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: AppTheme.border),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: _importing ? null : _import,
+          child: widget.isGrid
+              ? Column(children: [
+                  Expanded(child: SizedBox.expand(child: _previewImage())),
+                  Padding(padding: const EdgeInsets.all(10), child: _details()),
+                ])
+              : Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Row(children: [
+                    ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: SizedBox.square(
+                            dimension: 80, child: _previewImage())),
+                    const SizedBox(width: 14),
+                    Expanded(child: _details()),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.download_outlined,
+                        size: 20, color: AppTheme.primary),
+                  ])),
+        ),
+      );
 }
 
 class ImageFeaturePage extends StatefulWidget {
@@ -1074,7 +952,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('이미지 기능 선택')),
+        appBar: AppBar(title: const Text('새 이미지 등록')),
         body: SafeArea(
           child: ListView(
             padding: const EdgeInsets.all(20),
@@ -1090,16 +968,10 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
               TextField(
                 controller: _titleController,
                 maxLength: 160,
-                decoration: const InputDecoration(
-                  labelText: '이미지 이름',
-                  border: OutlineInputBorder(),
-                ),
+                decoration: const InputDecoration(labelText: '이미지 이름'),
               ),
               const SizedBox(height: 10),
-              const Text(
-                '이 이미지로 무엇을 할까요?',
-                style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
-              ),
+              const AppSectionTitle('이미지 기능'),
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
@@ -1122,10 +994,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                 ),
               ],
               const SizedBox(height: 20),
-              const Text(
-                '장르 태그',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
+              const AppSectionTitle('태그'),
               const SizedBox(height: 10),
               Wrap(
                 spacing: 8,
@@ -1195,57 +1064,46 @@ class _WallpaperPreviewPageState extends State<WallpaperPreviewPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
-          title: const Text('배경화면 미리보기'),
-          backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-        ),
+        appBar: AppBar(title: const Text('배경화면 미리보기')),
         body: SafeArea(
-          child: Column(
-            children: [
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: SizedBox.expand(
-                      child:
-                          Image.file(File(widget.filePath), fit: BoxFit.cover),
-                    ),
-                  ),
-                ),
+            child: Column(children: [
+          Expanded(
+              child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: SizedBox.expand(
+                child: Image.file(File(widget.filePath), fit: BoxFit.cover),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: _applying ? null : _apply,
-                    icon: _applying
-                        ? const SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Icon(_applied ? Icons.check : Icons.wallpaper),
-                    label: Text(_applied ? '배경화면 적용됨' : '홈 화면에 적용'),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context, true),
-                    style:
-                        OutlinedButton.styleFrom(foregroundColor: Colors.white),
-                    child: Text(widget.finishLabel),
-                  ),
-                ),
-              ),
-            ],
+            ),
+          )),
+          Flexible(
+            fit: FlexFit.loose,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _applying ? null : _apply,
+                      icon: _applying
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : Icon(_applied ? Icons.check : Icons.wallpaper),
+                      label: Text(_applied ? '배경화면 적용됨' : '홈 화면에 적용'),
+                    )),
+                const SizedBox(height: 10),
+                SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed:
+                          _applying ? null : () => Navigator.pop(context, true),
+                      child: Text(widget.finishLabel),
+                    )),
+              ]),
+            ),
           ),
-        ),
+        ])),
       );
 }

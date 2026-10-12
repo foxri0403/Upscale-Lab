@@ -13,6 +13,54 @@ void main() {
         headers: {'content-type': 'application/json'},
       );
 
+  test(
+      'editing confirms both the name and complete tags returned by the server',
+      () async {
+    await http.runWithClient(() async {
+      expect(
+          await api.updateGalleryPost(
+              postId: 'post-id', title: '새 이름', tags: ['풍경', 'SF']),
+          ['SF', '풍경']);
+    },
+        () => MockClient((request) async {
+              expect(request.method, 'PATCH');
+              expect(request.url.path, '/api/gallery/post-id');
+              expect(jsonDecode(request.body), {
+                'title': '새 이름',
+                'tags': ['풍경', 'SF']
+              });
+              return jsonResponse({
+                'id': 'post-id',
+                'title': '새 이름',
+                'tags': ['SF', '풍경']
+              });
+            }));
+    for (final response in [
+      {
+        'id': 'post-id',
+        'title': 'old',
+        'tags': ['풍경', 'SF']
+      },
+      {
+        'id': 'post-id',
+        'title': '새 이름',
+        'tags': ['풍경']
+      },
+      {
+        'id': 'wrong-id',
+        'title': '새 이름',
+        'tags': ['풍경', 'SF']
+      },
+    ]) {
+      await http.runWithClient(() async {
+        await expectLater(
+            api.updateGalleryPost(
+                postId: 'post-id', title: '새 이름', tags: ['풍경', 'SF']),
+            throwsStateError);
+      }, () => MockClient((_) async => jsonResponse(response)));
+    }
+  });
+
   for (final tags in [
     ['동물', '레트로'],
     ['풍경', '게임', 'SF']

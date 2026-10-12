@@ -155,6 +155,34 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         return MapPost(post, userId);
     }
 
+    public async Task<GalleryPostResponse> UpdateAsync(
+        Guid userId, Guid postId, UpdateGalleryPostRequest request, CancellationToken cancellationToken)
+    {
+        var post = await dbContext.GalleryPosts.Include(x => x.Project)
+            .SingleOrDefaultAsync(x => x.Id == postId, cancellationToken)
+            ?? throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
+        if (post.UserId != userId)
+            throw new ForbiddenException("본인의 게시글만 수정할 수 있습니다.");
+
+        var title = request.Title?.Trim();
+        if (string.IsNullOrWhiteSpace(title) || title.Length > 160)
+            throw new ValidationException("이미지 이름은 1~160자로 입력해 주세요.");
+        var tags = GalleryTagCatalog.NormalizeMany(request.Tags, null);
+        post.Title = title;
+        post.Tags = tags;
+        post.Tag = tags[0];
+        post.Description = GalleryTagCompatibility.WithoutMetadata(post.Description);
+        post.UpdatedAt = DateTime.UtcNow;
+        if (post.Project is { } project && project.UserId == userId)
+        {
+            project.Title = title;
+            project.UpdatedAt = DateTime.UtcNow;
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+        post = await BaseQuery().SingleAsync(x => x.Id == postId, cancellationToken);
+        return MapPost(post, userId);
+    }
+
     public async Task DeletePostAsync(Guid userId, Guid postId, CancellationToken cancellationToken)
     {
         var post = await dbContext.GalleryPosts.SingleOrDefaultAsync(x => x.Id == postId, cancellationToken)

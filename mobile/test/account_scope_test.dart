@@ -47,12 +47,14 @@ void main() {
     const store = LocalImageStore(scope: 'server\naccount-a');
     await store.getAll();
     await store.updateTags(id: 'a', tags: ['동물', '레트로']);
+    await store.updateDetails(id: 'a', title: '새 이름', tags: ['동물', '풍경']);
     await store.markShared(id: 'a', cloudProjectId: 'p', galleryPostId: 'g');
     await store.markUnshared('a');
     await store.delete('a');
     expect(calls, [
       'listLocalImages',
       'updateLocalImageTag',
+      'updateLocalImageDetails',
       'markLocalImageShared',
       'markLocalImageUnshared',
       'deleteLocalImage'

@@ -21,8 +21,10 @@ class _GalleryApi extends ApiClient {
   String get storageScope => apiScope;
 
   @override
-  Future<List<String>> updateGalleryTags(
-      {required String postId, required List<String> tags}) {
+  Future<List<String>> updateGalleryPost(
+      {required String postId,
+      required String title,
+      required List<String> tags}) {
     expect(postId, 'post-id');
     requestedTags.addAll(tags);
     return tagResult.future;
@@ -119,9 +121,10 @@ void main() {
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
           (call) async {
         if (call.method == 'listLocalImages') return [image];
-        if (call.method == 'updateLocalImageTag') {
+        if (call.method == 'updateLocalImageDetails') {
           final arguments = call.arguments as Map;
           expect(arguments['id'], 'local-id');
+          image['title'] = arguments['title'];
           image['tag'] = (arguments['tags'] as List).first;
           image['tags'] = arguments['tags'];
           expect(arguments['scope'], apiScope);
@@ -136,14 +139,15 @@ void main() {
       await tester.pumpWidget(MaterialApp(
           home: UnifiedHomePage(apiClient: api, onLogout: (_) async {})));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text(originalTag));
+      await tester.tap(find.byTooltip('이미지 메뉴'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text(originalTag));
+      await tester.tap(find.text('수정'));
       await tester.pumpAndSettle();
       if (originalTag != '동물') {
-        await tester.tap(find.widgetWithText(CheckboxListTile, '동물'));
+        await tester.tap(find.widgetWithText(FilterChip, '동물'));
       }
-      await tester.tap(find.text('태그 저장'));
+      await tester.enterText(find.byType(TextFormField), '새 고양이 이름');
+      await tester.tap(find.text('저장'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
@@ -154,6 +158,7 @@ void main() {
 
       expect(localWrites, 1);
       expect(image['tag'], '동물');
+      expect(image['title'], '새 고양이 이름');
       expect(find.text('동물'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });

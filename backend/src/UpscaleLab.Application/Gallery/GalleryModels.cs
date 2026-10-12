@@ -15,6 +15,10 @@ public sealed record UpdateGalleryPostTagRequest(
     [param: MaxLength(50)] string? Tag = null,
     string[]? Tags = null);
 
+public sealed record UpdateGalleryPostRequest(
+    [param: Required, MaxLength(160)] string Title,
+    string[]? Tags = null);
+
 public sealed record GalleryPostResponse(
     Guid Id,
     Guid ImageId,

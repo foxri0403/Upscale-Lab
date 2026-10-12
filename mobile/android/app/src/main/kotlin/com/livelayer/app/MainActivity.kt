@@ -149,6 +149,9 @@ class MainActivity : FlutterActivity() {
                             scope,
                             result,
                         )
+                        "updateLocalImageDetails" -> updateLocalImageDetails(
+                            call.arguments as? Map<*, *>, scope, result,
+                        )
                         "deleteLocalImage" -> deleteLocalImage(
                             call.argument<String>("id"),
                             scope,
@@ -452,6 +455,33 @@ class MainActivity : FlutterActivity() {
                 if (item.optString("id") == id) {
                     item.put("tag", tags.first())
                     item.put("tags", JSONArray(tags))
+                    writeLocalImagesJson(scope, items)
+                    result.success(null)
+                    return
+                }
+            }
+        }
+        result.error("local_image_not_found", "로컬 이미지를 찾을 수 없습니다.", null)
+    }
+
+    private fun updateLocalImageDetails(arguments: Map<*, *>?, scope: String, result: MethodChannel.Result) {
+        val id = arguments?.get("id") as? String
+        val title = (arguments?.get("title") as? String)?.trim()
+        val tags = (arguments?.get("tags") as? List<*>)?.filterIsInstance<String>()?.distinct()
+        if (id.isNullOrBlank() || title.isNullOrBlank() || title.length > 160 ||
+            tags.isNullOrEmpty() || tags.any { it.isBlank() }) {
+            result.error("invalid_local_image", "이름과 태그를 확인해 주세요.", null)
+            return
+        }
+        synchronized(localImagesLock) {
+            val items = readLocalImagesJson(scope)
+            for (index in 0 until items.length()) {
+                val item = items.getJSONObject(index)
+                if (item.optString("id") == id) {
+                    item.put("title", title)
+                    item.put("tag", tags.first())
+                    item.put("tags", JSONArray(tags))
+                    item.put("updatedAt", utcTimestamp())
                     writeLocalImagesJson(scope, items)
                     result.success(null)
                     return
