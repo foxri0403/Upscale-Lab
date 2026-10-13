@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:live_layer/main.dart';
+import 'package:live_layer/image_editor_page.dart';
 import 'package:live_layer/models/gallery.dart';
 import 'package:live_layer/models/live_layer_models.dart';
+import 'package:live_layer/models/image_editor.dart';
 import 'package:live_layer/services/api_client.dart';
 import 'package:live_layer/theme/app_theme.dart';
 import 'package:live_layer/unified_home.dart';
@@ -105,7 +107,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(MaterialApp(
+    final app = MaterialApp(
       theme: AppTheme.light,
       builder: (context, child) => MediaQuery(
         data: MediaQuery.of(context).copyWith(
@@ -117,7 +119,26 @@ void main() {
         child: child!,
       ),
       home: page,
-    ));
+    );
+    if (page is ImageFeaturePage || page is ImageEditorPage) {
+      // The registration page decodes a real file outside Flutter's fake clock.
+      final loadedImage = find.byKey(ValueKey(page is ImageFeaturePage
+          ? 'registration-original-image'
+          : 'image-editor-canvas'));
+      await tester.runAsync(() async {
+        await tester.pumpWidget(app);
+        for (var attempt = 0; attempt < 100; attempt++) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          await tester.pump();
+          if (loadedImage.evaluate().isNotEmpty) {
+            break;
+          }
+        }
+      });
+      expect(loadedImage, findsOneWidget);
+    } else {
+      await tester.pumpWidget(app);
+    }
     await tester.pumpAndSettle();
   }
 
@@ -201,6 +222,116 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+      'editor switches directional ratios and keeps conversion buttons pending',
+      (tester) async {
+    await show(tester, ImageEditorPage(filePath: imagePath));
+    expect(find.text('홈 화면에 적용'), findsNothing);
+    for (final portrait in [true, false, true]) {
+      final orientation = find.byTooltip(portrait ? '세로 방향' : '가로 방향');
+      await tester.ensureVisible(orientation);
+      await tester.tap(orientation);
+      await tester.pumpAndSettle();
+      expect(find.text(portrait ? '9:16' : '16:9'), findsOneWidget);
+      expect(find.text(portrait ? '3:4' : '4:3'), findsOneWidget);
+      expect(find.text(portrait ? '16:9' : '9:16'), findsNothing);
+    }
+    for (final feature in ['업스케일', '2.5D 변환']) {
+      final button = find.widgetWithText(OutlinedButton, feature);
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(find.text('$feature 기능은 준비 중입니다.'), findsOneWidget);
+    }
+    final filters = find.widgetWithText(TextButton, '필터');
+    await tester.ensureVisible(filters);
+    await tester.tap(filters);
+    await tester.pumpAndSettle();
+    final monochrome = find.byKey(const ValueKey(PhotoFilter.monochrome));
+    await tester.ensureVisible(monochrome);
+    await tester.tap(monochrome);
+    await tester.pumpAndSettle();
+    expect(find.text('선명'), findsOneWidget);
+    expect(find.text('차분'), findsOneWidget);
+    expect(find.text('세피아'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('registration returns an edited copy with name and fallback tags',
+      (tester) async {
+    ImageRegistrationOptions? result;
+    Future<void> settleFileWork(Finder ready) async {
+      await tester.runAsync(() async {
+        for (var attempt = 0; attempt < 200; attempt++) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          await tester.pump();
+          if (ready.evaluate().isNotEmpty) break;
+        }
+      });
+      expect(ready, findsOneWidget);
+      await tester.pumpAndSettle();
+    }
+
+    await show(
+        tester,
+        Scaffold(
+            body: Builder(
+                builder: (context) => TextButton(
+                    onPressed: () async {
+                      result = await Navigator.push<ImageRegistrationOptions>(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => ImageFeaturePage(
+                                  filePath: imagePath, title: '원본 이름')));
+                    },
+                    child: const Text('등록 열기')))));
+    await tester.tap(find.text('등록 열기'));
+    await settleFileWork(
+        find.byKey(const ValueKey('registration-original-image')));
+    expect(find.text(unspecifiedGalleryTag), findsNothing);
+    await tester.enterText(find.byType(TextFormField), '  편집한 이미지  ');
+    final openEditor = find.widgetWithText(FilledButton, '업스케일링');
+    await tester.ensureVisible(openEditor);
+    await tester.tap(openEditor);
+    await settleFileWork(find.byKey(const ValueKey('image-editor-canvas')));
+    final standard = find.byKey(const ValueKey(CropPreset.standard));
+    await tester.ensureVisible(standard);
+    await tester.tap(standard);
+    await tester.pumpAndSettle();
+    final filters = find.widgetWithText(TextButton, '필터');
+    await tester.ensureVisible(filters);
+    await tester.tap(filters);
+    await tester.pumpAndSettle();
+    final mono = find.byKey(const ValueKey(PhotoFilter.monochrome));
+    await tester.ensureVisible(mono);
+    await tester.tap(mono);
+    final finish = find.widgetWithText(FilledButton, '완료하고 등록');
+    await tester.ensureVisible(finish);
+    await tester.tap(finish);
+    await settleFileWork(find.text('등록 열기'));
+    expect(result!.title, '편집한 이미지');
+    expect(result!.tags, [unspecifiedGalleryTag]);
+    final edited = result!.editedFile!;
+    expect(edited.width, 30);
+    expect(edited.height, 40);
+    await tester.runAsync(() async {
+      final codec =
+          await ui.instantiateImageCodec(File(edited.path).readAsBytesSync());
+      final image = (await codec.getNextFrame()).image;
+      final pixel =
+          (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!
+              .buffer
+              .asUint8List();
+      expect((pixel[0] - pixel[1]).abs(), lessThanOrEqualTo(1));
+      expect((pixel[1] - pixel[2]).abs(), lessThanOrEqualTo(1));
+      image.dispose();
+      codec.dispose();
+      await edited.dispose();
+    });
+    expect(File(imagePath).existsSync(), isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
   final pages = <String, Widget Function()>{
     'login': () => LoginPage(apiClient: api),
     'find ID': () => FindIdPage(apiClient: api),
@@ -210,6 +341,7 @@ void main() {
         EmailVerificationPage(apiClient: api, email: 'artist@example.test'),
     'image registration': () =>
         ImageFeaturePage(filePath: imagePath, title: '이미지'),
+    'image editor': () => ImageEditorPage(filePath: imagePath),
     'wallpaper preview': () =>
         WallpaperPreviewPage(filePath: imagePath, finishLabel: '완료'),
     'project preview': () => PreviewPage(

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'image_registration_page.dart';
 import 'models/gallery.dart';
 import 'models/local_image.dart';
 import 'services/api_client.dart';
@@ -14,46 +15,9 @@ import 'widgets/app_components.dart';
 import 'widgets/image_edit_dialog.dart';
 import 'widgets/local_image_card.dart';
 
+export 'image_registration_page.dart';
+
 const _wallpaperChannel = MethodChannel('live_layer/wallpaper');
-
-enum ImageCreationMode { original, upscale, depth25d }
-
-List<String> _normalizedTags(Set<String> selected) => selected.isEmpty
-    ? [unspecifiedGalleryTag]
-    : galleryTags.where(selected.contains).toList();
-
-void _toggleTag(Set<String> selected, String tag, bool checked) {
-  if (!checked) {
-    selected.remove(tag);
-    return;
-  }
-  if (tag == unspecifiedGalleryTag) {
-    selected.clear();
-  } else {
-    selected.remove(unspecifiedGalleryTag);
-  }
-  selected.add(tag);
-}
-
-class ImageRegistrationOptions {
-  const ImageRegistrationOptions({
-    required this.title,
-    required this.tags,
-    required this.mode,
-  });
-
-  final String title;
-  final List<String> tags;
-  final ImageCreationMode mode;
-}
-
-extension on ImageCreationMode {
-  String get label => switch (this) {
-        ImageCreationMode.original => '원본 이미지',
-        ImageCreationMode.upscale => '업스케일링',
-        ImageCreationMode.depth25d => '2.5D 변환',
-      };
-}
 
 class GallerySearchSelection {
   String search = '';
@@ -99,18 +63,9 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
     if (picked == null || !mounted) return;
 
     setState(() => _creating = true);
+    ImageRegistrationOptions? options;
     try {
-      final bytes = await picked.readAsBytes();
-      final codec = await ui.instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      final width = frame.image.width;
-      final height = frame.image.height;
-      frame.image.dispose();
-      codec.dispose();
-
-      if (!mounted) return;
-      final options =
-          await Navigator.of(context).push<ImageRegistrationOptions>(
+      options = await Navigator.of(context).push<ImageRegistrationOptions>(
         MaterialPageRoute(
           builder: (_) => ImageFeaturePage(
             filePath: picked.path,
@@ -120,14 +75,29 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
       );
       if (options == null || !mounted) return;
 
+      final edited = options.editedFile;
+      final sourcePath = edited?.path ?? picked.path;
+      final codec =
+          await ui.instantiateImageCodec(await File(sourcePath).readAsBytes());
+      late int width;
+      late int height;
+      try {
+        final frame = await codec.getNextFrame();
+        width = frame.image.width;
+        height = frame.image.height;
+        frame.image.dispose();
+      } finally {
+        codec.dispose();
+      }
+      if (!mounted) return;
       await _localImageStore.import(
-        sourcePath: picked.path,
-        fileName: picked.name,
+        sourcePath: sourcePath,
+        fileName: edited == null ? picked.name : 'edited.png',
         title: options.title,
         tags: options.tags,
         width: width,
         height: height,
-        mode: options.mode.name,
+        mode: 'original',
       );
       if (!mounted) return;
       _reload();
@@ -137,6 +107,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
     } catch (error) {
       _message('이미지를 등록하지 못했습니다.\n$error');
     } finally {
+      await options?.editedFile?.dispose();
       if (mounted) setState(() => _creating = false);
     }
   }
@@ -895,129 +866,6 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
                     const Icon(Icons.download_outlined,
                         size: 20, color: AppTheme.primary),
                   ])),
-        ),
-      );
-}
-
-class ImageFeaturePage extends StatefulWidget {
-  const ImageFeaturePage({
-    super.key,
-    required this.filePath,
-    required this.title,
-  });
-
-  final String filePath;
-  final String title;
-
-  @override
-  State<ImageFeaturePage> createState() => _ImageFeaturePageState();
-}
-
-class _ImageFeaturePageState extends State<ImageFeaturePage> {
-  ImageCreationMode _mode = ImageCreationMode.original;
-  late final TextEditingController _titleController =
-      TextEditingController(text: widget.title);
-  final Set<String> _tags = {};
-
-  @override
-  void dispose() {
-    _titleController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _continue() async {
-    final title = _titleController.text.trim();
-    if (title.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('이미지 이름을 입력해 주세요.')),
-      );
-      return;
-    }
-    final completed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => WallpaperPreviewPage(
-          filePath: widget.filePath,
-          finishLabel: '완료하고 등록',
-        ),
-      ),
-    );
-    if (completed == true && mounted) {
-      Navigator.pop(
-        context,
-        ImageRegistrationOptions(
-            title: title, tags: _normalizedTags(_tags), mode: _mode),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('새 이미지 등록')),
-        body: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              SizedBox(
-                height: 260,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
-                  child: Image.file(File(widget.filePath), fit: BoxFit.contain),
-                ),
-              ),
-              const SizedBox(height: 18),
-              TextField(
-                controller: _titleController,
-                maxLength: 160,
-                decoration: const InputDecoration(labelText: '이미지 이름'),
-              ),
-              const SizedBox(height: 10),
-              const AppSectionTitle('이미지 기능'),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: ImageCreationMode.values.map((mode) {
-                  return ChoiceChip(
-                    label: Text(mode == ImageCreationMode.original
-                        ? mode.label
-                        : '${mode.label} (준비 중)'),
-                    selected: _mode == mode,
-                    onSelected: (_) => setState(() => _mode = mode),
-                  );
-                }).toList(),
-              ),
-              if (_mode != ImageCreationMode.original) ...[
-                const SizedBox(height: 12),
-                const Text(
-                  '변환 엔진 연결 전까지 미리보기와 등록에는 원본 이미지가 사용됩니다.',
-                  style: TextStyle(color: Color(0xFF6F7789)),
-                ),
-              ],
-              const SizedBox(height: 20),
-              const AppSectionTitle('태그'),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: galleryTags.map((tag) {
-                  return FilterChip(
-                    label: Text(tag),
-                    selected: _tags.contains(tag),
-                    onSelected: (checked) =>
-                        setState(() => _toggleTag(_tags, tag, checked)),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: _continue,
-                  child: const Text('배경화면 미리보기'),
-                ),
-              ),
-            ],
-          ),
         ),
       );
 }
