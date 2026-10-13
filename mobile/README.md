@@ -2,7 +2,7 @@
 
 This Flutter client supports JWT login with optional secure auto-login, local-first image registration, explicit cloud sharing, per-image share/delete actions, static wallpaper previews, a sensor-filtered layer preview, and an Android live wallpaper backed by locally cached project layers and `WallpaperService`.
 
-Installable APK deliverables use the `Upscale_Lab-<version>-.apk` naming convention. The current app version is `0.5.1` with Android build number `12`; the APK is `artifacts/Upscale_Lab-0.5.1-.apk`. Read the current version and versioning rules in the root `AGENTS.md` before generating an APK, and replace its latest-version entry after every build.
+Installable APK deliverables use the `Upscale_Lab-<version>-.apk` naming convention. The current app version is `0.6.0` with Android build number `13`; the APK is `artifacts/Upscale_Lab-0.6.0-.apk`. Read the current version and versioning rules in the root `AGENTS.md` before generating an APK, and replace its latest-version entry after every build.
 
 New shares also persist the complete tag set in versioned description metadata for legacy single-tag servers. The app verifies the persisted response and reconstructs tags when another client reads the post. Search supports any-of multi-selection and keeps tags/title when switching tabs. Legacy servers can filter only the primary tag, so secondary-tag filtering is performed by the app within the returned posts; full server-side filtering and shared tag editing require the matching backend. Upgraded servers read compatibility metadata on old posts and remove it on native tag edits.
 
