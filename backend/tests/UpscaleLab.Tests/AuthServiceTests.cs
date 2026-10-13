@@ -13,6 +13,84 @@ public sealed class AuthServiceTests
     private const string ValidPassword = "Correct-horse1!";
 
     [Fact]
+    public async Task Verification_AtFifteenMinutes_IsRejectedAndCleanupDeletesOnlyUnverifiedAccounts()
+    {
+        await using var db = CreateDbContext();
+        var clock = new TestClock();
+        var (service, provider) = CreateService(db, clock);
+        var registration = await service.RegisterAsync(new("expired@example.com", "expired", ValidPassword), default);
+        Assert.Equal(clock.Now.AddMinutes(15), registration.VerificationCodeExpiresAt);
+        await service.RegisterAsync(new("verified@example.com", "verified", ValidPassword), default);
+        await service.VerifyEmailAsync(new("verified@example.com", "000001"), default);
+        clock.Now = clock.Now.AddMinutes(14);
+        await service.ResendVerificationEmailAsync(new("expired@example.com"), default);
+        Assert.Equal(registration.VerificationCodeExpiresAt, (await db.Users.SingleAsync(x => x.Email == "expired@example.com")).EmailVerificationExpiresAt);
+        clock.Now = clock.Now.AddMinutes(1);
+        await Assert.ThrowsAsync<ValidationException>(() => service.VerifyEmailAsync(new("expired@example.com", "000001"), default));
+        await Assert.ThrowsAsync<ValidationException>(() => service.ResendVerificationEmailAsync(new("expired@example.com"), default));
+        Assert.Single(provider.Confirmations);
+        await service.DeleteExpiredAccountsAsync(default);
+        Assert.Equal("verified@example.com", (await db.Users.SingleAsync()).Email);
+        Assert.Equal("expired@example.com", Assert.Single(provider.Deletions));
+        // Reusing the expired email and username creates a fresh 15-minute window.
+        await service.RegisterAsync(new("expired@example.com", "expired", ValidPassword), default);
+    }
+
+    [Fact]
+    public async Task Cleanup_WhenCognitoFails_RetainsAccountForRetryAndProtectsConfirmedRemoteUser()
+    {
+        await using var db = CreateDbContext();
+        var clock = new TestClock();
+        var (service, provider) = CreateService(db, clock);
+        await service.RegisterAsync(new("user@example.com", "tester", ValidPassword), default);
+        clock.Now = clock.Now.AddMinutes(15);
+        provider.DeleteFailure = true;
+        await service.DeleteExpiredAccountsAsync(default);
+        Assert.Single(db.Users);
+        provider.DeleteFailure = false;
+        provider.RemoteConfirmed = true;
+        await service.DeleteExpiredAccountsAsync(default);
+        Assert.Single(db.Users);
+        provider.RemoteConfirmed = false;
+        await service.DeleteExpiredAccountsAsync(default);
+        Assert.Empty(db.Users);
+    }
+
+    [Fact]
+    public async Task Refresh_AfterAccessExpiry_RenewsSessionAndLogoutRevokesIt()
+    {
+        await using var db = CreateDbContext();
+        var clock = new TestClock();
+        var (service, _) = CreateService(db, clock);
+        await service.RegisterAsync(new("user@example.com", "tester", ValidPassword), default);
+        var session = await service.VerifyEmailAsync(new("user@example.com", "000001"), default);
+        Assert.NotEqual(session.RefreshToken, (await db.AuthSessions.SingleAsync()).TokenHash);
+        clock.Now = clock.Now.AddDays(30);
+        var refreshed = await service.RefreshAsync(new(session.RefreshToken!), default);
+        Assert.Equal(session.User.Id, refreshed.User.Id);
+        Assert.Equal(session.RefreshToken, refreshed.RefreshToken);
+        Assert.True(refreshed.RefreshExpiresAt > session.RefreshExpiresAt);
+        await service.RevokeSessionAsync(new(session.RefreshToken!), default);
+        await Assert.ThrowsAsync<UnauthorizedException>(() => service.RefreshAsync(new(session.RefreshToken!), default));
+    }
+
+    [Fact]
+    public async Task Refresh_RejectsUnknownExpiredAndPasswordResetSessions()
+    {
+        await using var db = CreateDbContext();
+        var clock = new TestClock();
+        var (service, _) = CreateService(db, clock);
+        await service.RegisterAsync(new("user@example.com", "tester", ValidPassword), default);
+        var session = await service.VerifyEmailAsync(new("user@example.com", "000001"), default);
+        await Assert.ThrowsAsync<UnauthorizedException>(() => service.RefreshAsync(new("unknown"), default));
+        clock.Now = clock.Now.AddDays(90);
+        await Assert.ThrowsAsync<UnauthorizedException>(() => service.RefreshAsync(new(session.RefreshToken!), default));
+        var second = await service.LoginAsync(new("tester", ValidPassword), default);
+        await service.ConfirmPasswordResetAsync(new("user@example.com", "123456", "Changed-horse2!"), default);
+        await Assert.ThrowsAsync<UnauthorizedException>(() => service.RefreshAsync(new(second.RefreshToken!), default));
+    }
+
+    [Fact]
     public async Task Register_HashesPasswordAndStartsCognitoEmailVerification()
     {
         await using var dbContext = CreateDbContext();
@@ -341,7 +419,7 @@ public sealed class AuthServiceTests
     }
 
     private static (AuthService Service, FakeEmailVerificationProvider Provider) CreateService(
-        ApplicationDbContext dbContext)
+        ApplicationDbContext dbContext, TimeProvider? clock = null)
     {
         var provider = new FakeEmailVerificationProvider();
         var options = new CognitoOptions
@@ -354,7 +432,7 @@ public sealed class AuthServiceTests
             new FakeJwtTokenService(),
             provider,
             provider,
-            options);
+            options, provider, clock);
         return (service, provider);
     }
 
@@ -373,7 +451,7 @@ public sealed class AuthServiceTests
     }
 
     private sealed class FakeEmailVerificationProvider
-        : IEmailVerificationProvider, IPasswordRecoveryProvider
+        : IEmailVerificationProvider, IPasswordRecoveryProvider, IUnverifiedAccountCleaner
     {
         public List<(string Email, string Password)> SignUps { get; } = [];
         public List<(string Email, string Code)> Confirmations { get; } = [];
@@ -382,6 +460,17 @@ public sealed class AuthServiceTests
         public List<(string Email, string Code, string NewPassword)> PasswordResetConfirmations { get; } = [];
         public Exception? ConfirmationException { get; set; }
         public Exception? PasswordResetConfirmationException { get; set; }
+        public List<string> Deletions { get; } = [];
+        public bool DeleteFailure { get; set; }
+        public bool RemoteConfirmed { get; set; }
+
+        public Task<bool> DeleteUnconfirmedAsync(string email, CancellationToken cancellationToken)
+        {
+            if (DeleteFailure) throw new InvalidOperationException("Cognito temporarily unavailable");
+            if (RemoteConfirmed) return Task.FromResult(false);
+            Deletions.Add(email);
+            return Task.FromResult(true);
+        }
 
         public Task<DateTime> SignUpAsync(
             string email,
@@ -432,5 +521,11 @@ public sealed class AuthServiceTests
             PasswordResetConfirmations.Add((email, code, newPassword));
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class TestClock : TimeProvider
+    {
+        public DateTime Now { get; set; } = DateTime.UtcNow;
+        public override DateTimeOffset GetUtcNow() => new(Now, TimeSpan.Zero);
     }
 }

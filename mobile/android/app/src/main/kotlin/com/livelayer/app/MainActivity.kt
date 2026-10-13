@@ -7,6 +7,9 @@ import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.ClipData
+import android.content.ActivityNotFoundException
+import androidx.core.content.FileProvider
 import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
 import android.net.Uri
@@ -128,6 +131,15 @@ class MainActivity : FlutterActivity() {
                             result,
                         )
                         "listLocalImages" -> result.success(readLocalImages(scope))
+                        "getLibraryOrder" -> {
+                            val value = JSONObject(getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE)
+                                .getString("order_$scope", "{}") ?: "{}")
+                            val ids = value.optJSONArray("ids") ?: JSONArray()
+                            result.success(mapOf("sort" to value.optString("sort", "manual"),
+                                "ids" to (0 until ids.length()).map { ids.getString(it) }))
+                        }
+                        "saveLibraryOrder" -> saveLibraryOrder(scope, call.arguments as? Map<*, *>, result)
+                        "previewLocalWallpaper" -> previewLocalWallpaper(scope, call.argument<String>("id"), result)
                         "downloadSharedImage" -> downloadSharedImage(call.arguments as? Map<*, *>, scope, result)
                         "importLocalImage" -> importLocalImage(
                             call.arguments as? Map<*, *>,
@@ -528,6 +540,51 @@ class MainActivity : FlutterActivity() {
         val value = getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE)
             .getString(LOCAL_IMAGES_KEY, "[]") ?: "[]"
         return JSONArray(value)
+    }
+
+    private fun saveLibraryOrder(scope: String, arguments: Map<*, *>?, result: MethodChannel.Result) {
+        val sort = arguments?.get("sort") as? String ?: "manual"
+        require(sort in setOf("manual", "newest", "oldest", "korean", "english")) { "올바르지 않은 정렬 방식입니다." }
+        val ids = (arguments?.get("ids") as? List<*>)?.filterIsInstance<String>()?.distinct() ?: emptyList()
+        ioExecutor.execute {
+            try {
+                synchronized(localImagesLock) {
+                    val owned = readLocalImagesJson(scope)
+                    val ownedIds = (0 until owned.length()).map { owned.getJSONObject(it).getString("id") }.toSet()
+                    val value = JSONObject().put("sort", sort).put("ids", JSONArray(ids.filter { it in ownedIds }))
+                    check(getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE).edit()
+                        .putString("order_$scope", value.toString()).commit()) { "이미지 순서를 저장할 수 없습니다." }
+                }
+                runOnUiThread { result.success(null) }
+            } catch (error: Exception) {
+                runOnUiThread { result.error("order_save_failed", error.message, null) }
+            }
+        }
+    }
+
+    private fun previewLocalWallpaper(scope: String, id: String?, result: MethodChannel.Result) {
+        val path = synchronized(localImagesLock) {
+            val owned = readLocalImagesJson(scope)
+            (0 until owned.length()).map { owned.getJSONObject(it) }.firstOrNull {
+                it.getString("id") == id
+            }?.getString("path") ?: error("등록된 이미지가 없습니다.")
+        }
+        val source = File(path).canonicalFile
+        check(source.isFile) { "이미지 파일을 찾을 수 없습니다." }
+        check(source.path.startsWith(File(filesDir, LOCAL_IMAGES_DIRECTORY).canonicalPath + File.separator))
+        val uri = FileProvider.getUriForFile(this, "$packageName.wallpaper_images", source)
+        try {
+            // Prefer the user's default launcher's crop/preview UI when supported.
+            val intent = WallpaperManager.getInstance(this).getCropAndSetWallpaperIntent(uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            intent.clipData = ClipData.newRawUri("wallpaper", uri)
+            startActivity(intent)
+            result.success(true)
+        } catch (_: ActivityNotFoundException) {
+            result.success(false)
+        } catch (_: IllegalArgumentException) {
+            result.success(false)
+        }
     }
 
     private fun readLocalImagesJson(scope: String): JSONArray {

@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 
 import '../models/local_image.dart';
+import '../models/library_order.dart';
 
 class LocalImageStore {
   const LocalImageStore({required this.scope});
@@ -8,6 +9,19 @@ class LocalImageStore {
   final String scope;
 
   static const _channel = MethodChannel('live_layer/storage');
+
+  Future<LibraryOrder> getOrder() async =>
+      LibraryOrder.fromMap(await _channel.invokeMapMethod<Object?, Object?>(
+              'getLibraryOrder', {'scope': scope}) ??
+          const {});
+
+  Future<void> saveOrder(LibraryOrder order) => _channel.invokeMethod<void>(
+      'saveLibraryOrder', {'scope': scope, ...order.toMap()});
+
+  Future<bool> previewWallpaper(String id) async =>
+      await _channel.invokeMethod<bool>(
+          'previewLocalWallpaper', {'scope': scope, 'id': id}) ??
+      false;
 
   Future<List<LocalImageItem>> getAll() async {
     final values = await _channel

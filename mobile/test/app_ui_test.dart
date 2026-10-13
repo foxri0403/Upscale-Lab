@@ -44,6 +44,8 @@ void main() {
   late List<Map<String, Object?>> images;
   late _UiApi api;
   late int localWrites;
+  late Map<String, Object?> libraryOrder;
+  late String? previewedId;
 
   setUpAll(() async {
     temp = Directory.systemTemp.createTempSync('upscale-ui-test-');
@@ -64,6 +66,8 @@ void main() {
   setUp(() {
     api = _UiApi();
     localWrites = 0;
+    libraryOrder = {'sort': 'manual', 'ids': <String>[]};
+    previewedId = null;
     images = List.generate(
         2,
         (index) => {
@@ -83,6 +87,16 @@ void main() {
         .setMockMethodCallHandler(channel, (call) async {
       expect((call.arguments as Map)['scope'], api.storageScope);
       if (call.method == 'listLocalImages') return images;
+      if (call.method == 'getLibraryOrder') return libraryOrder;
+      if (call.method == 'saveLibraryOrder') {
+        libraryOrder = Map<String, Object?>.from(call.arguments as Map)
+          ..remove('scope');
+        return null;
+      }
+      if (call.method == 'previewLocalWallpaper') {
+        previewedId = (call.arguments as Map)['id'] as String;
+        return true;
+      }
       if (call.method == 'updateLocalImageDetails') {
         localWrites++;
         final args = call.arguments as Map;
@@ -181,6 +195,45 @@ void main() {
     expect(navigation.bottom, 892);
     // NavigationBar includes its own SafeArea above the actual Android inset.
     expect(tester.getCenter(find.text('홈')).dy, lessThan(892 - 48));
+  });
+
+  testWidgets(
+      'sort then long press preserves displayed order and persists drag across home recreation',
+      (tester) async {
+    images[0]['createdAt'] = '2026-10-12T00:00:00Z';
+    await show(tester, home());
+    expect(find.text('내 이미지 (2)'), findsOneWidget);
+    await tester.tap(find.byTooltip('이미지 정렬'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('오래된순'));
+    await tester.pumpAndSettle();
+    expect(
+        tester.getTopLeft(card(0)).dy, lessThan(tester.getTopLeft(card(1)).dy));
+    final gesture = await tester.startGesture(tester.getCenter(card(0)));
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(libraryOrder['sort'], 'manual');
+    expect(libraryOrder['ids'], ['image-0', 'image-1']);
+    await gesture.moveTo(
+        tester.getCenter(find.byKey(const ValueKey('reorder-image-1'))));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(libraryOrder['ids'], ['image-1', 'image-0']);
+    await tester.pumpWidget(const SizedBox());
+    await show(tester, home());
+    expect(find.text('사용자순'), findsOneWidget);
+    expect(
+        tester.getTopLeft(card(1)).dy, lessThan(tester.getTopLeft(card(0)).dy));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('registered image opens native launcher wallpaper preview',
+      (tester) async {
+    await show(tester, home());
+    await tester.tap(card(0));
+    await tester.pumpAndSettle();
+    expect(previewedId, 'image-0');
+    expect(find.text('메인으로 돌아가기'), findsNothing);
   });
 
   testWidgets(

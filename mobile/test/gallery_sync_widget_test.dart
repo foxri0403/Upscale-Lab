@@ -121,6 +121,7 @@ void main() {
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
           (call) async {
         if (call.method == 'listLocalImages') return [image];
+        if (call.method == 'getLibraryOrder') return {};
         if (call.method == 'updateLocalImageDetails') {
           final arguments = call.arguments as Map;
           expect(arguments['id'], 'local-id');

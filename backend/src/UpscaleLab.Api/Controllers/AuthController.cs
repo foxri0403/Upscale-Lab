@@ -10,6 +10,19 @@ namespace UpscaleLab.Api.Controllers;
 public sealed class AuthController(IAuthService authService) : ControllerBase
 {
     [AllowAnonymous]
+    [HttpPost("refresh")]
+    public async Task<ActionResult<AuthResponse>> Refresh(RefreshSessionRequest request, CancellationToken cancellationToken) =>
+        Ok(await authService.RefreshAsync(request, cancellationToken));
+
+    [AllowAnonymous]
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout(RefreshSessionRequest request, CancellationToken cancellationToken)
+    {
+        await authService.RevokeSessionAsync(request, cancellationToken);
+        return NoContent();
+    }
+
+    [AllowAnonymous]
     [HttpPost("register")]
     [ProducesResponseType<RegisterResponse>(StatusCodes.Status201Created)]
     public async Task<ActionResult<RegisterResponse>> Register(

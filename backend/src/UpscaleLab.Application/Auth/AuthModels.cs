@@ -44,6 +44,9 @@ public sealed record RegisterResponse(
     bool RequiresEmailVerification,
     DateTime VerificationCodeExpiresAt);
 
-public sealed record AuthResponse(string AccessToken, DateTime ExpiresAt, UserResponse User);
+public sealed record AuthResponse(string AccessToken, DateTime ExpiresAt, UserResponse User,
+    string? RefreshToken = null, DateTime? RefreshExpiresAt = null);
+
+public sealed record RefreshSessionRequest([param: Required, MaxLength(128)] string RefreshToken);
 
 public sealed record MessageResponse(string Message);

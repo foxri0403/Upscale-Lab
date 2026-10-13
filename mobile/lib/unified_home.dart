@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'image_registration_page.dart';
 import 'models/gallery.dart';
 import 'models/local_image.dart';
+import 'models/library_order.dart';
 import 'services/api_client.dart';
 import 'services/local_image_store.dart';
 import 'theme/app_theme.dart';
@@ -41,7 +43,65 @@ class UnifiedHomePage extends StatefulWidget {
 class _UnifiedHomePageState extends State<UnifiedHomePage> {
   late final _localImageStore =
       LocalImageStore(scope: widget.apiClient.storageScope);
-  late Future<List<LocalImageItem>> _images = _localImageStore.getAll();
+  late Future<List<LocalImageItem>> _images = _loadLibrary();
+  LibraryOrder _order = const LibraryOrder();
+  bool _orderLoaded = false;
+  Future<void> _orderWrites = Future.value();
+  final _libraryScroll = ScrollController();
+  final _libraryViewport = GlobalKey();
+  Timer? _dragScroll;
+  double _scrollVelocity = 0;
+
+  Future<List<LocalImageItem>> _loadLibrary() async {
+    final images = await _localImageStore.getAll();
+    if (!_orderLoaded) {
+      _order = await _localImageStore.getOrder();
+      _orderLoaded = true;
+    }
+    return images;
+  }
+
+  void _saveOrder() {
+    final order = _order;
+    _orderWrites = _orderWrites
+        .then((_) => _localImageStore.saveOrder(order))
+        .catchError((Object error) {
+      _message('이미지 순서를 저장하지 못했습니다. 다시 시도해 주세요.');
+    });
+  }
+
+  void _beginDrag(List<LocalImageItem> displayed) {
+    setState(() => _order = _order.beginDrag(displayed));
+    _saveOrder();
+    _dragScroll?.cancel();
+    _dragScroll = Timer.periodic(const Duration(milliseconds: 20), (_) {
+      if (!_libraryScroll.hasClients || _scrollVelocity == 0) return;
+      final position = _libraryScroll.position;
+      _libraryScroll.jumpTo((_libraryScroll.offset + _scrollVelocity)
+          .clamp(position.minScrollExtent, position.maxScrollExtent));
+    });
+  }
+
+  void _updateDrag(DragUpdateDetails details) {
+    final box =
+        _libraryViewport.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    final y = box.globalToLocal(details.globalPosition).dy;
+    _scrollVelocity = y < 72 ? -10 : (y > box.size.height - 72 ? 10 : 0);
+  }
+
+  void _endDrag() {
+    _dragScroll?.cancel();
+    _scrollVelocity = 0;
+  }
+
+  @override
+  void dispose() {
+    _endDrag();
+    _libraryScroll.dispose();
+    super.dispose();
+  }
+
   final Set<String> _busyIds = {};
   bool _creating = false;
   bool _isGrid = true;
@@ -50,7 +110,18 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
   int _galleryRevision = 0;
   final _gallerySelection = GallerySearchSelection();
 
-  void _reload() => setState(() => _images = _localImageStore.getAll());
+  void _reload() => setState(() => _images = _loadLibrary());
+
+  Future<void> _previewHomeWallpaper(LocalImageItem image) async {
+    try {
+      if (await _localImageStore.previewWallpaper(image.id)) return;
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(MaterialPageRoute(
+          builder: (_) => WallpaperPreviewPage(filePath: image.path)));
+    } catch (error) {
+      _message('배경화면 미리보기를 열지 못했습니다.\n$error');
+    }
+  }
 
   void _message(String message) {
     if (!mounted) return;
@@ -314,7 +385,8 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
               ]),
             ));
           }
-          final images = snapshot.data ?? const <LocalImageItem>[];
+          final images =
+              _order.arrange(snapshot.data ?? const <LocalImageItem>[]);
           Widget item(int index) {
             if (index == 0) {
               return NewImageCard(
@@ -324,21 +396,45 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
               );
             }
             final image = images[index - 1];
-            return LocalImageCard(
+            final card = LocalImageCard(
               key: ValueKey(image.id),
               image: image,
               isGrid: _isGrid,
               busy: _busyIds.contains(image.id),
-              onTap: () => Navigator.of(context).push<void>(MaterialPageRoute(
-                builder: (_) => WallpaperPreviewPage(
-                  filePath: image.path,
-                  finishLabel: '메인으로 돌아가기',
-                ),
-              )),
+              onTap: () => _previewHomeWallpaper(image),
               onShare: () => _share(image),
               onUnshare: () => _unshare(image),
               onEdit: () => _editImage(image),
               onDelete: () => _delete(image),
+            );
+            return DragTarget<String>(
+              key: ValueKey('reorder-${image.id}'),
+              onWillAcceptWithDetails: (details) => details.data != image.id,
+              onAcceptWithDetails: (details) {
+                setState(() => _order = _order.move(details.data, image.id));
+                _saveOrder();
+              },
+              builder: (context, candidates, rejected) => DecoratedBox(
+                decoration: BoxDecoration(
+                    border: candidates.isEmpty
+                        ? null
+                        : Border.all(color: AppTheme.primary, width: 2)),
+                child: LongPressDraggable<String>(
+                  data: image.id,
+                  maxSimultaneousDrags: _busyIds.contains(image.id) ? 0 : 1,
+                  onDragStarted: () => _beginDrag(images),
+                  onDragUpdate: _updateDrag,
+                  onDragEnd: (_) => _endDrag(),
+                  feedback: Material(
+                      elevation: 8,
+                      child: SizedBox(
+                          width: _isGrid ? 160 : 260,
+                          height: _isGrid ? 228 : 104,
+                          child: card)),
+                  childWhenDragging: Opacity(opacity: 0.25, child: card),
+                  child: card,
+                ),
+              ),
             );
           }
 
@@ -347,18 +443,43 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
             final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
             return RefreshIndicator(
               onRefresh: () async {
-                final refreshed = _localImageStore.getAll();
+                final refreshed = _loadLibrary();
                 setState(() => _images = refreshed);
                 await refreshed;
               },
               child: CustomScrollView(
+                key: _libraryViewport,
+                controller: _libraryScroll,
                 physics: const AlwaysScrollableScrollPhysics(),
                 slivers: [
                   SliverToBoxAdapter(
                       child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                    child:
-                        AppSectionTitle('내 이미지', trailing: '${images.length}개'),
+                    child: Row(children: [
+                      Expanded(
+                          child: Text('내 이미지 (${images.length})',
+                              style: const TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.w700))),
+                      PopupMenuButton<LibrarySort>(
+                        tooltip: '이미지 정렬',
+                        initialValue: _order.sort,
+                        onSelected: (sort) {
+                          setState(() => _order =
+                              LibraryOrder(sort: sort, ids: _order.ids));
+                          _saveOrder();
+                        },
+                        itemBuilder: (_) => LibrarySort.values
+                            .map((sort) => PopupMenuItem(
+                                value: sort, child: Text(sort.label)))
+                            .toList(),
+                        child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            child: Text(_order.sort.label,
+                                style: const TextStyle(
+                                    color: AppTheme.primary,
+                                    fontWeight: FontWeight.w600))),
+                      ),
+                    ]),
                   )),
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
@@ -369,7 +490,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
                               crossAxisCount: 2,
                               crossAxisSpacing: 12,
                               mainAxisSpacing: 12,
-                              mainAxisExtent: cellWidth * 0.8 + 68 * scale,
+                              mainAxisExtent: cellWidth + 68 * scale,
                             ),
                             delegate: SliverChildBuilderDelegate(
                               (context, index) => item(index),
@@ -416,7 +537,11 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
                 leading: const Icon(Icons.logout),
                 title: const Text('로그아웃'),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () => widget.onLogout(context),
+                onTap: () async {
+                  await _orderWrites;
+                  if (!mounted) return;
+                  await widget.onLogout(context);
+                },
               ),
             ]),
           ),
@@ -874,11 +999,11 @@ class WallpaperPreviewPage extends StatefulWidget {
   const WallpaperPreviewPage({
     super.key,
     required this.filePath,
-    required this.finishLabel,
+    this.finishLabel,
   });
 
   final String filePath;
-  final String finishLabel;
+  final String? finishLabel;
 
   @override
   State<WallpaperPreviewPage> createState() => _WallpaperPreviewPageState();
@@ -941,14 +1066,17 @@ class _WallpaperPreviewPageState extends State<WallpaperPreviewPage> {
                           : Icon(_applied ? Icons.check : Icons.wallpaper),
                       label: Text(_applied ? '배경화면 적용됨' : '홈 화면에 적용'),
                     )),
-                const SizedBox(height: 10),
-                SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed:
-                          _applying ? null : () => Navigator.pop(context, true),
-                      child: Text(widget.finishLabel),
-                    )),
+                if (widget.finishLabel != null) ...[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: _applying
+                            ? null
+                            : () => Navigator.pop(context, true),
+                        child: Text(widget.finishLabel!),
+                      )),
+                ],
               ]),
             ),
           ),

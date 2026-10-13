@@ -22,12 +22,12 @@ EC2 홈 quota 때문에 .NET 8 SDK 전체 설치는 불가능했고, 실제 실�
 - EC2 instance profile/IAM Role 연결 여부
 - Replicate API token
 - 충분히 긴 JWT signing secret
-- Cognito User Pool app client ID와 선택적인 client secret
+- Cognito User Pool ID, app client ID와 선택적인 client secret
 - 운영 Web origin 목록
 
 권장 S3 권한은 대상 bucket/prefix에 대한 `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`로 제한합니다. bucket 삭제, policy 전체 변경, public 공개는 필요하지 않습니다.
 
-Secrets Manager를 사용할 경우 DB connection, JWT secret, Replicate token, Cognito app client secret을 별도 secret으로 만들고 EC2 Role에 필요한 `secretsmanager:GetSecretValue`만 부여합니다. Cognito의 `SignUp`, `ConfirmSignUp`, `ResendConfirmationCode`는 공개 사용자 작업이라 별도의 Cognito IAM 권한이 필요하지 않습니다. 현재 EC2에는 IAM Role이 없으므로 비용과 권한 범위를 합의하기 전에는 구성하지 않았습니다.
+Secrets Manager를 사용할 경우 DB connection, JWT secret, Replicate token, Cognito app client secret을 별도 secret으로 만들고 EC2 Role에 필요한 `secretsmanager:GetSecretValue`만 부여합니다. Cognito의 `SignUp`, `ConfirmSignUp`, `ResendConfirmationCode`는 공개 사용자 작업입니다. 만료된 미인증 계정 정리는 IAM 인증을 사용하는 `AdminGetUser`, `AdminDeleteUser`가 필요하므로, 대상 User Pool ARN으로 제한한 `cognito-idp:AdminGetUser`, `cognito-idp:AdminDeleteUser` 권한을 서버 Role 또는 로컬 AWS credential provider에 설정해야 합니다. 이 코드 변경은 IAM Role이나 운영 서버 설정을 자동으로 변경하지 않습니다.
 
 ## Publish
 
@@ -61,6 +61,7 @@ AWS__Region=ap-northeast-2
 AWS__S3BucketName=YOUR_S3_BUCKET
 Cognito__Region=ap-northeast-2
 Cognito__ClientId=YOUR_COGNITO_APP_CLIENT_ID
+Cognito__UserPoolId=YOUR_COGNITO_USER_POOL_ID
 # Cognito__ClientSecret=YOUR_COGNITO_APP_CLIENT_SECRET
 Replicate__ApiToken=YOUR_REPLICATE_TOKEN
 SeeThrough__Enabled=false

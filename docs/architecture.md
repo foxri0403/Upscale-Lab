@@ -57,6 +57,8 @@ erDiagram
 | POST | `/api/auth/verify-email` | 없음 | 6자리 이메일 인증 후 JWT 발급 |
 | POST | `/api/auth/resend-verification` | 없음 | 이메일 인증 코드 재전송 |
 | POST | `/api/auth/login` | 없음 | 로그인 및 JWT 발급 |
+| POST | `/api/auth/refresh` | 갱신 자격 | 만료된 액세스 토큰 갱신 |
+| POST | `/api/auth/logout` | 갱신 자격 | 해당 기기의 자동 로그인 자격 폐기 |
 | GET | `/api/auth/me` | 필요 | 현재 사용자 조회 |
 | GET/POST | `/api/devices` | 필요 | 내 디바이스 목록/등록 |
 | PUT/DELETE | `/api/devices/{id}` | 필요 | 내 디바이스 수정/삭제 |

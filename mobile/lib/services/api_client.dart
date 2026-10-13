@@ -11,6 +11,9 @@ class ApiClient {
 
   String _baseUrl;
   String? _accessToken;
+  AuthSession? _session;
+  Future<void>? _refreshing;
+  Future<void> Function(AuthSession)? onSessionChanged;
 
   String get baseUrl => _baseUrl;
 
@@ -31,11 +34,14 @@ class ApiClient {
 
   void restoreSession(AuthSession session) {
     _accessToken = session.accessToken;
+    _session = session;
   }
 
   void updateBaseUrl(String value) {
     _baseUrl = _normalize(value);
     _accessToken = null;
+    _session = null;
+    onSessionChanged = null;
   }
 
   static String _normalize(String value) =>
@@ -47,7 +53,7 @@ class ApiClient {
       };
 
   Future<AuthSession> login(String identifier, String password) async {
-    final response = await http.post(
+    final response = await _post(
       Uri.parse('$baseUrl/api/auth/login'),
       headers: _headers,
       // The API keeps the legacy "email" key for existing clients, but accepts
@@ -58,12 +64,12 @@ class ApiClient {
     final session = AuthSession.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
-    _accessToken = session.accessToken;
+    restoreSession(session);
     return session;
   }
 
   Future<void> validateSession() async {
-    final response = await http.get(
+    final response = await _get(
       Uri.parse('$baseUrl/api/auth/me'),
       headers: _headers,
     );
@@ -72,7 +78,94 @@ class ApiClient {
 
   void logout() {
     _accessToken = null;
+    _session = null;
+    onSessionChanged = null;
   }
+
+  Future<void> revokeSession() async {
+    final refreshToken = _session?.refreshToken;
+    final server = baseUrl;
+    logout();
+    if (refreshToken == null) return;
+    try {
+      await http
+          .post(Uri.parse('$server/api/auth/logout'),
+              headers: {'content-type': 'application/json'},
+              body: jsonEncode({'refreshToken': refreshToken}))
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {/* Local logout remains available offline. */}
+  }
+
+  Future<void> _renew({bool force = false}) async {
+    final current = _session;
+    if (current?.refreshToken == null ||
+        (!force &&
+            current!.expiresAt.isAfter(
+                DateTime.now().toUtc().add(const Duration(minutes: 1))))) {
+      return;
+    }
+    if (_refreshing != null) return _refreshing!;
+    final operation = _refresh(current!);
+    _refreshing = operation;
+    try {
+      await operation;
+    } finally {
+      if (identical(_refreshing, operation)) _refreshing = null;
+    }
+  }
+
+  Future<void> _refresh(AuthSession previous) async {
+    final server = baseUrl;
+    final response = await http
+        .post(Uri.parse('$server/api/auth/refresh'),
+            headers: {'content-type': 'application/json'},
+            body: jsonEncode({'refreshToken': previous.refreshToken}))
+        .timeout(const Duration(seconds: 15));
+    _ensureSuccess(response);
+    // A response from the previous login/server must never restore a logged-out session.
+    if (!identical(_session, previous) || baseUrl != server) return;
+    final renewed =
+        AuthSession.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    restoreSession(renewed);
+    await onSessionChanged?.call(renewed);
+  }
+
+  Future<http.Response> _request(String method, Uri uri,
+      {Map<String, String>? headers, Object? body}) async {
+    final server = baseUrl;
+    final authenticated =
+        !uri.path.startsWith('/api/auth/') || uri.path == '/api/auth/me';
+    if (authenticated) await _renew();
+    Future<http.Response> send() {
+      if (baseUrl != server) throw StateError('서버 주소가 변경되었습니다. 다시 시도해 주세요.');
+      final request = http.Request(method, uri)..headers.addAll(_headers);
+      if (body != null) request.body = body as String;
+      return request.send().then(http.Response.fromStream);
+    }
+
+    var response = await send();
+    if (authenticated &&
+        response.statusCode == 401 &&
+        _session?.refreshToken != null) {
+      await _renew(force: true);
+      response = await send();
+    }
+    return response;
+  }
+
+  Future<http.Response> _get(Uri uri, {Map<String, String>? headers}) =>
+      _request('GET', uri, headers: headers);
+  Future<http.Response> _post(Uri uri,
+          {Map<String, String>? headers, Object? body}) =>
+      _request('POST', uri, headers: headers, body: body);
+  Future<http.Response> _patch(Uri uri,
+          {Map<String, String>? headers, Object? body}) =>
+      _request('PATCH', uri, headers: headers, body: body);
+  Future<http.Response> _put(Uri uri,
+          {Map<String, String>? headers, Object? body}) =>
+      _request('PUT', uri, headers: headers, body: body);
+  Future<http.Response> _delete(Uri uri, {Map<String, String>? headers}) =>
+      _request('DELETE', uri, headers: headers);
 
   // 회원가입: 성공하면 Cognito가 이메일로 6자리 인증 코드를 전송한다.
   Future<void> register({
@@ -80,7 +173,7 @@ class ApiClient {
     required String username,
     required String password,
   }) async {
-    final response = await http.post(
+    final response = await _post(
       Uri.parse('$baseUrl/api/auth/register'),
       headers: _headers,
       body: jsonEncode({
@@ -97,19 +190,19 @@ class ApiClient {
     required String email,
     required String code,
   }) async {
-    final response = await http.post(
+    final response = await _post(
       Uri.parse('$baseUrl/api/auth/verify-email'),
       headers: _headers,
       body: jsonEncode({'email': email, 'code': code}),
     );
     _ensureSuccess(response);
-    _accessToken = (jsonDecode(response.body)
-        as Map<String, dynamic>)['accessToken'] as String;
+    restoreSession(AuthSession.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>));
   }
 
   // Cognito 이메일 인증 코드 재전송.
   Future<void> resendVerification(String email) async {
-    final response = await http.post(
+    final response = await _post(
       Uri.parse('$baseUrl/api/auth/resend-verification'),
       headers: _headers,
       body: jsonEncode({'email': email}),
@@ -119,7 +212,7 @@ class ApiClient {
 
   // 이메일과 일치하는 인증 완료 계정의 사용자 아이디 전체를 반환한다.
   Future<String?> findId(String email) async {
-    final response = await http.post(
+    final response = await _post(
       Uri.parse('$baseUrl/api/auth/find-id'),
       headers: _headers,
       body: jsonEncode({'email': email}),
@@ -131,7 +224,7 @@ class ApiClient {
 
   // 계정 존재 여부와 관계없이 서버는 동일한 응답을 반환한다.
   Future<void> startPasswordReset(String email) async {
-    final response = await http.post(
+    final response = await _post(
       Uri.parse('$baseUrl/api/auth/forgot-password'),
       headers: _headers,
       body: jsonEncode({'email': email}),
@@ -144,7 +237,7 @@ class ApiClient {
     required String code,
     required String newPassword,
   }) async {
-    final response = await http.post(
+    final response = await _post(
       Uri.parse('$baseUrl/api/auth/reset-password'),
       headers: _headers,
       body: jsonEncode({
@@ -157,7 +250,7 @@ class ApiClient {
   }
 
   Future<List<LiveLayerProject>> getProjects() async {
-    final response = await http.get(
+    final response = await _get(
       Uri.parse('$baseUrl/api/projects'),
       headers: _headers,
     );
@@ -168,7 +261,7 @@ class ApiClient {
   }
 
   Future<LiveLayerProject> getProject(String id) async {
-    final response = await http.get(
+    final response = await _get(
       Uri.parse('$baseUrl/api/projects/$id'),
       headers: _headers,
     );
@@ -184,6 +277,7 @@ class ApiClient {
     required int width,
     required int height,
   }) async {
+    await _renew();
     final request =
         http.MultipartRequest('POST', Uri.parse('$baseUrl/api/projects'))
           ..headers.addAll({
@@ -204,7 +298,7 @@ class ApiClient {
   }
 
   Future<void> startProcessing(String projectId) async {
-    final response = await http.post(
+    final response = await _post(
       Uri.parse('$baseUrl/api/projects/$projectId/process'),
       headers: _headers,
     );
@@ -219,7 +313,7 @@ class ApiClient {
   }) async {
     final selected =
         GalleryTagCodec.normalize(tags ?? [tag ?? unspecifiedGalleryTag]);
-    final response = await http.post(
+    final response = await _post(
       Uri.parse('$baseUrl/api/gallery'),
       headers: _headers,
       body: jsonEncode({
@@ -248,7 +342,7 @@ class ApiClient {
       if (tag != null && tag.isNotEmpty) 'tag': tag,
       if (tags != null && tags.isNotEmpty) 'tags': tags,
     };
-    final response = await http.get(
+    final response = await _get(
       Uri.parse('$baseUrl/api/gallery').replace(queryParameters: parameters),
       headers: _headers,
     );
@@ -271,7 +365,7 @@ class ApiClient {
     required String postId,
     required List<String> tags,
   }) async {
-    final response = await http.patch(
+    final response = await _patch(
       Uri.parse('$baseUrl/api/gallery/$postId/tag'),
       headers: _headers,
       body: jsonEncode({'tag': tags.first, 'tags': tags}),
@@ -303,7 +397,7 @@ class ApiClient {
     required String title,
     required List<String> tags,
   }) async {
-    final response = await http.patch(
+    final response = await _patch(
       Uri.parse('$baseUrl/api/gallery/$postId'),
       headers: _headers,
       body: jsonEncode({'title': title, 'tags': tags}),
@@ -321,7 +415,7 @@ class ApiClient {
   }
 
   Future<String> getGalleryDownloadUrl(String postId) async {
-    final response = await http.post(
+    final response = await _post(
         Uri.parse('$baseUrl/api/gallery/$postId/download-url'),
         headers: _headers);
     _ensureSuccess(response);
@@ -331,7 +425,7 @@ class ApiClient {
   }
 
   Future<String> getGalleryImageUrl(String postId) async {
-    final response = await http.get(
+    final response = await _get(
       Uri.parse('$baseUrl/api/gallery/$postId/preview-url'),
       headers: _headers,
     );
@@ -347,7 +441,7 @@ class ApiClient {
   }
 
   Future<void> deleteGalleryPost(String id) async {
-    final response = await http.delete(
+    final response = await _delete(
       Uri.parse('$baseUrl/api/gallery/$id'),
       headers: _headers,
     );
@@ -355,7 +449,7 @@ class ApiClient {
   }
 
   Future<void> deleteProject(String id) async {
-    final response = await http.delete(
+    final response = await _delete(
       Uri.parse('$baseUrl/api/projects/$id'),
       headers: _headers,
     );
@@ -363,7 +457,7 @@ class ApiClient {
   }
 
   Future<double> getSensorSensitivity() async {
-    final response = await http.get(
+    final response = await _get(
       Uri.parse('$baseUrl/api/settings'),
       headers: _headers,
     );
@@ -373,13 +467,13 @@ class ApiClient {
   }
 
   Future<void> updateSensorSensitivity(double sensitivity) async {
-    final current = await http.get(
+    final current = await _get(
       Uri.parse('$baseUrl/api/settings'),
       headers: _headers,
     );
     _ensureSuccess(current);
     final settings = jsonDecode(current.body) as Map<String, dynamic>;
-    final response = await http.put(
+    final response = await _put(
       Uri.parse('$baseUrl/api/settings'),
       headers: _headers,
       body: jsonEncode({
@@ -400,14 +494,31 @@ class ApiClient {
 }
 
 class AuthSession {
-  const AuthSession({required this.accessToken, required this.expiresAt});
+  const AuthSession(
+      {required this.accessToken,
+      required this.expiresAt,
+      this.refreshToken,
+      this.refreshExpiresAt});
 
   final String accessToken;
   final DateTime expiresAt;
+  final String? refreshToken;
+  final DateTime? refreshExpiresAt;
+
+  Map<String, dynamic> toJson() => {
+        'accessToken': accessToken,
+        'expiresAt': expiresAt.toUtc().toIso8601String(),
+        'refreshToken': refreshToken,
+        'refreshExpiresAt': refreshExpiresAt?.toUtc().toIso8601String(),
+      };
 
   factory AuthSession.fromJson(Map<String, dynamic> json) => AuthSession(
         accessToken: json['accessToken'] as String,
         expiresAt: DateTime.parse(json['expiresAt'] as String).toUtc(),
+        refreshToken: json['refreshToken'] as String?,
+        refreshExpiresAt:
+            DateTime.tryParse(json['refreshExpiresAt'] as String? ?? '')
+                ?.toUtc(),
       );
 }
 

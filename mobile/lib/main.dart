@@ -13,7 +13,7 @@ const _configChannel = MethodChannel('live_layer/config');
 final _authSessionStore = AuthSessionStore();
 
 Future<void> _logoutToLogin(BuildContext context, ApiClient apiClient) async {
-  apiClient.logout();
+  final revocation = apiClient.revokeSession();
   try {
     await _authSessionStore.clear();
   } on PlatformException {
@@ -21,6 +21,7 @@ Future<void> _logoutToLogin(BuildContext context, ApiClient apiClient) async {
   } on MissingPluginException {
     // Secure storage is not available on every development target.
   }
+  await revocation;
   if (!context.mounted) return;
   Navigator.of(context).pushAndRemoveUntil(
     MaterialPageRoute(builder: (_) => LoginPage(apiClient: apiClient)),
@@ -56,8 +57,9 @@ Future<void> main() async {
     final savedSession = await _authSessionStore.read();
     if (savedSession != null) {
       apiClient.restoreSession(savedSession);
+      apiClient.onSessionChanged = _authSessionStore.save;
       try {
-        await apiClient.validateSession();
+        await apiClient.validateSession().timeout(const Duration(seconds: 15));
         isAutoLoggedIn = true;
       } on ApiException catch (error) {
         if (error.statusCode == 401) {
@@ -67,13 +69,13 @@ Future<void> main() async {
           isAutoLoggedIn = true;
         }
       } catch (_) {
-        // An unexpired saved session still opens the local library offline.
+        // Keep the private library available offline while refresh is retried.
         isAutoLoggedIn = true;
       }
     }
   } catch (_) {
     apiClient.logout();
-    await _authSessionStore.clear();
+    // A temporary secure-storage failure must not destroy saved credentials.
   }
   runApp(
     LiveLayerApp(
@@ -325,7 +327,9 @@ class _LoginPageState extends State<LoginPage> {
           await widget.apiClient.login(_identifier.text.trim(), _password.text);
       if (_autoLogin) {
         await _authSessionStore.save(session);
+        widget.apiClient.onSessionChanged = _authSessionStore.save;
       } else {
+        widget.apiClient.onSessionChanged = null;
         await _authSessionStore.clear();
       }
       if (!mounted) return;
@@ -443,7 +447,6 @@ class _LoginPageState extends State<LoginPage> {
                         controlAffinity: ListTileControlAffinity.leading,
                         dense: true,
                         title: const Text('자동 로그인'),
-                        subtitle: const Text('앱을 다시 열어도 로그인 상태를 유지합니다.'),
                       ),
                       const SizedBox(height: 12),
                       LiveLayerButton(
@@ -1228,7 +1231,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
               const SizedBox(height: 24),
               const AppSectionTitle('인증 코드를 입력해 주세요'),
               const SizedBox(height: 12),
-              const Text('입력하신 이메일로 전송된 인증 코드를 입력해 주세요.',
+              const Text('가입 후 15분 이내에 이메일 인증을 완료해 주세요. 인증하지 않은 계정은 자동 삭제됩니다.',
                   style: TextStyle(color: AppTheme.muted, height: 1.5)),
               const SizedBox(height: 8),
               Text(widget.email,

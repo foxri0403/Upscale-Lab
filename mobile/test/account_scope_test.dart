@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:live_layer/services/api_client.dart';
 import 'package:live_layer/services/local_image_store.dart';
+import 'package:live_layer/models/library_order.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -46,6 +47,9 @@ void main() {
         .setMockMethodCallHandler(channel, null));
     const store = LocalImageStore(scope: 'server\naccount-a');
     await store.getAll();
+    await store.getOrder();
+    await store.saveOrder(const LibraryOrder(ids: ['a']));
+    await store.previewWallpaper('a');
     await store.updateTags(id: 'a', tags: ['동물', '레트로']);
     await store.updateDetails(id: 'a', title: '새 이름', tags: ['동물', '풍경']);
     await store.markShared(id: 'a', cloudProjectId: 'p', galleryPostId: 'g');
@@ -53,6 +57,9 @@ void main() {
     await store.delete('a');
     expect(calls, [
       'listLocalImages',
+      'getLibraryOrder',
+      'saveLibraryOrder',
+      'previewLocalWallpaper',
       'updateLocalImageTag',
       'updateLocalImageDetails',
       'markLocalImageShared',

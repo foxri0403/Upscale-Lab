@@ -51,6 +51,7 @@ dotnet tool restore
 dotnet user-secrets set --project src/UpscaleLab.Api "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=upscale_lab;Username=upscale_lab;Password=YOUR_LOCAL_PASSWORD"
 dotnet user-secrets set --project src/UpscaleLab.Api "Jwt:Secret" "YOUR_RANDOM_SECRET_AT_LEAST_32_CHARACTERS"
 dotnet user-secrets set --project src/UpscaleLab.Api "Cognito:ClientId" "YOUR_COGNITO_APP_CLIENT_ID"
+dotnet user-secrets set --project src/UpscaleLab.Api "Cognito:UserPoolId" "YOUR_COGNITO_USER_POOL_ID"
 # App client에 secret을 생성한 경우에만 설정합니다.
 dotnet user-secrets set --project src/UpscaleLab.Api "Cognito:ClientSecret" "YOUR_COGNITO_APP_CLIENT_SECRET"
 dotnet ef database update --project src/UpscaleLab.Infrastructure --startup-project src/UpscaleLab.Api
@@ -104,6 +105,7 @@ dotnet ef database update --project src/UpscaleLab.Infrastructure --startup-proj
 - `ConnectionStrings__DefaultConnection`
 - `Jwt__Secret`
 - `Cognito__ClientId`
+- `Cognito__UserPoolId` (만료된 미인증 계정 정리에 필요)
 - `Cognito__ClientSecret` (app client에 secret이 없는 경우 생략)
 - `Cognito__Region` (기본 `ap-northeast-2`)
 - `AWS__S3BucketName`

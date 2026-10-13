@@ -35,3 +35,9 @@ public interface IPasswordRecoveryProvider
         string newPassword,
         CancellationToken cancellationToken);
 }
+
+public interface IUnverifiedAccountCleaner
+{
+    // False protects a Cognito account that was already confirmed outside this API.
+    Task<bool> DeleteUnconfirmedAsync(string email, CancellationToken cancellationToken);
+}

@@ -154,7 +154,7 @@ class LocalImageCard extends StatelessWidget {
   Widget build(BuildContext context) => Material(
         color: isGrid ? AppTheme.surface : Colors.transparent,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.zero,
           side: isGrid
               ? const BorderSide(color: AppTheme.border)
               : BorderSide.none,
@@ -165,28 +165,26 @@ class LocalImageCard extends StatelessWidget {
           child: Stack(children: [
             if (isGrid)
               Column(children: [
-                Expanded(
+                AspectRatio(
+                    aspectRatio: 1,
                     child: Stack(fit: StackFit.expand, children: [
-                  _thumbnail(),
-                  Positioned(
-                      top: 4,
-                      right: 4,
-                      child: Material(
-                        color: Colors.black45,
-                        shape: const CircleBorder(),
-                        child: _menu(),
-                      )),
-                ])),
+                      _thumbnail(),
+                      Positioned(
+                          top: 4,
+                          right: 4,
+                          child: Material(
+                            color: Colors.black45,
+                            shape: const CircleBorder(),
+                            child: _menu(),
+                          )),
+                    ])),
                 Padding(padding: const EdgeInsets.all(10), child: _details()),
               ])
             else
               Padding(
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   child: Row(children: [
-                    ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: SizedBox.square(
-                            dimension: 80, child: _thumbnail())),
+                    SizedBox.square(dimension: 80, child: _thumbnail()),
                     const SizedBox(width: 14),
                     Expanded(child: _details()),
                     _menu(),

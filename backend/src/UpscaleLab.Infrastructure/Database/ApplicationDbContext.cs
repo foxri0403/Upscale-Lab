@@ -6,6 +6,7 @@ namespace UpscaleLab.Infrastructure.Database;
 public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
+    public DbSet<AuthSession> AuthSessions => Set<AuthSession>();
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<Image> Images => Set<Image>();
     public DbSet<OptimizedImage> OptimizedImages => Set<OptimizedImage>();
@@ -22,6 +23,14 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         base.OnModelCreating(modelBuilder);
 
         ConfigureUser(modelBuilder);
+        var session = modelBuilder.Entity<AuthSession>();
+        session.ToTable("auth_sessions");
+        session.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
+        session.Property(x => x.PasswordFingerprint).HasMaxLength(64).IsRequired();
+        session.Property(x => x.RevokedAt).IsConcurrencyToken();
+        session.HasIndex(x => x.TokenHash).IsUnique();
+        session.HasIndex(x => x.ExpiresAt);
+        session.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         ConfigureDevice(modelBuilder);
         ConfigureImage(modelBuilder);
         ConfigureOptimizedImage(modelBuilder);
