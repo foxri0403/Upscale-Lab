@@ -1,15 +1,37 @@
-# See-through adapter
+# Local GPU worker
 
-LiveLayer keeps the existing ASP.NET Core API and runs AI inference as an external Python process. The adapter calls the official See-through entry point, `inference/scripts/inference_psd.py`, and exports each visible PSD pixel layer as PNG plus `manifest.json`.
+Separate LAN GPU service for the existing .NET backend. See [setup, model requirements, API examples and limitations](../../docs/local-gpu.md).
 
-## Setup
+| File | Responsibility |
+|---|---|
+| `worker.py` | Authenticated multipart HTTP boundary, request size limit, one GPU job at a time |
+| `worker_pipeline.py` | Image normalization, separate model processes, deadline/tree termination, bounded ZIP packaging |
+| `worker_config.py` | GPU-host-only environment settings (`UPSCALE_WORKER_*`) |
+| `realesrgan_adapter.py` | Local Real-ESRGAN x4plus weights, 2x/4x output, tiled CUDA inference |
+| `partglee_adapter.py` | PartGLEE PACO instance/part masks, approximate depth, inpainted background, full-canvas PNGs |
+| `see_through_adapter.py` | Official See-through PSD command and full-canvas PNG export |
+| `layer_export.py` | Renderer-compatible manifest metadata |
 
-1. Clone `https://github.com/shitagaki-lab/see-through` outside this repository.
-2. Follow its README to create a Python 3.12 environment, install the matching CUDA/PyTorch build and `requirements.txt`, and make the `assets` link.
-3. Verify the official command directly with a test image.
-4. Configure `SeeThrough__RepositoryPath`, `SeeThrough__PythonExecutable`, and the absolute `SeeThrough__AdapterScriptPath`.
-5. Set `SeeThrough__Enabled=true` only on a host with the required models and GPU resources.
+Use Python 3.12 for the HTTP host and **independent upstream environments for each model**. Install only HTTP dependencies in the worker environment:
 
-The upstream default pipeline needs roughly 12–16 GB of VRAM at 1280 resolution. Its documented group-offload and quantized variants require upstream-specific command changes; this adapter intentionally uses the standard pipeline until an operational profile is chosen and tested.
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+# Export API key and model paths first; see .env.example (not auto-loaded).
+.venv/bin/python -m uvicorn worker:create_app --factory --host 0.0.0.0 --port 8090 --workers 1
+```
 
-No model weights or See-through source files are committed here.
+All requests require `X-Worker-Key`. `GET /health` reports configured capabilities, not successful model inference. `POST /v1/process` requires multipart `file`, `operation=upscale|layers|upscale_layers`, `engine=partglee|see-through` (default see-through), `scale=2|4` (default 2). Response is `application/zip` with `manifest.json` and PNGs. Client-supplied URLs/paths/commands are never executed.
+
+Manifest schema version 1 uses `operation`, `engine`, `width`, `height`, `layers`. Each layer has `file`, `layerType`, `layerOrder`, `depth`, `positionX`, `positionY`, `rotation`, `scale`, `movementX`, `movementY`. Upscale results also include `imageFile`, `imageWidth`, `imageHeight`. In combined mode these can differ from the layer canvas size because layer engines have their own resolution limits. Layer order is back-to-front and all layer PNGs cover the whole canvas.
+
+CPU-only tests (no model weights):
+
+```bash
+.venv/bin/python -m pip install -r requirements-test.txt
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+PartGLEE segmentation is converted to approximate parallax, not true geometry or hidden-surface reconstruction. No fake inference fallback is used. Actual CUDA/model compatibility, quality and performance need a smoke test on the GPU host. See-through's group offload is available through `UPSCALE_WORKER_SEE_THROUGH_GROUP_OFFLOAD=true`; quantized variants are not selected by this adapter. Models/sources are external and must be used under their upstream licenses.
+
+Legacy mode still allows the .NET API host to call `see_through_adapter.py` directly when `LocalGpu:Enabled=false` and `SeeThrough` is configured.

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using UpscaleLab.Domain.Entities;
+using UpscaleLab.Domain.Enums;
 
 namespace UpscaleLab.Infrastructure.Database;
 
@@ -164,6 +165,11 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         job.ToTable("processing_jobs");
         job.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
         job.Property(x => x.ErrorMessage).HasMaxLength(2000);
+        job.Property(x => x.Operation).HasConversion<string>().HasMaxLength(30).HasDefaultValue(ProcessingOperation.Layers);
+        job.Property(x => x.LayerEngine).HasConversion<string>().HasMaxLength(30).HasDefaultValue(LayerEngine.SeeThrough);
+        job.Property(x => x.UpscaleFactor).HasDefaultValue(2);
+        job.Property(x => x.UpscaledObjectKey).HasMaxLength(1024);
+        job.HasIndex(x => x.ProjectId).IsUnique().HasFilter("\"Status\" IN ('Queued', 'Processing')");
         job.HasIndex(x => new { x.ProjectId, x.CreatedAt });
         job.HasOne(x => x.Project).WithMany(x => x.ProcessingJobs).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
     }

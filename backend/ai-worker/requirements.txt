@@ -1,0 +1,5 @@
+# HTTP host only. Install each model's dependencies in its own upstream environment.
+fastapi==0.143.0
+uvicorn==0.54.0
+python-multipart==0.0.32
+Pillow==12.3.0

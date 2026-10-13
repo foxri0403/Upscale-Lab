@@ -2,7 +2,7 @@
 
 기존 Upscale Lab의 ASP.NET Core 8 백엔드, PostgreSQL 스키마, 인증, S3 이미지 저장소와 갤러리를 보존하면서 AI 레이어 분해 기반 2.5D 라이브 배경화면 서비스로 확장한 저장소입니다. 이미지 바이너리는 S3에, 사용자·프로젝트·레이어 메타데이터는 PostgreSQL(RDS)에 저장합니다.
 
-기존 저장소가 FastAPI가 아닌 .NET 계층형 구조로 이미 구현되어 있어 API를 전면 교체하지 않았습니다. See-through AI만 공식 Python CLI를 별도 프로세스로 호출하며, 모바일 클라이언트는 Flutter/Android Kotlin으로 구성합니다.
+API는 기존 .NET 계층형 구조를 유지하며, 별도 로컬 GPU 컴퓨터의 Python 워커를 통해 Real-ESRGAN 업스케일링과 PartGLEE/See-through 레이어 변환을 실행할 수 있습니다. 모바일 클라이언트는 Flutter/Android Kotlin으로 구성합니다.
 
 ## 저장소 구조
 
@@ -18,7 +18,7 @@ backend/
     UpscaleLab.Tests/
   compose.yaml                  # 선택 사항: 로컬 PostgreSQL
   .env.example                  # 변수 이름만 포함하는 예시
-  ai-worker/                    # 공식 See-through CLI/PSD 변환 어댑터
+  ai-worker/                    # LAN GPU HTTP 워커와 세 모델 어댑터
 mobile/                         # Flutter 클라이언트 + Android WallpaperService
 docs/
   architecture.md
@@ -74,18 +74,18 @@ dotnet build UpscaleLab.sln
 dotnet test UpscaleLab.sln
 ```
 
-모바일 실행 방법은 [mobile/README.md](mobile/README.md), AI 환경 구성은 [backend/ai-worker/README.md](backend/ai-worker/README.md)를 참고하세요.
+모바일 실행 방법은 [mobile/README.md](mobile/README.md), **별도 GPU 컴퓨터 설치·API 사용·테스트는 [로컬 GPU 가이드](docs/local-gpu.md)**를 참고하세요. 일반 사진은 PartGLEE 기반 시차 레이어, 캐릭터는 See-through 레이어를 사용합니다. PartGLEE 깊이/배경은 시차 효과를 위한 근사이며 실제 3D 복원이 아닙니다.
 
 ## LiveLayer 처리 흐름
 
 1. `POST /api/projects`가 원본을 `users/{userId}/projects/{projectId}/original/`에 저장합니다.
-2. `POST /api/projects/{id}/process`가 DB에 `ProcessingJob`을 만들고 인메모리 queue에 등록합니다.
-3. 백그라운드 worker가 재시작 시 대기 작업을 복구하고 See-through 어댑터를 실행합니다.
-4. 어댑터는 공식 `inference_psd.py --save_to_psd` 결과를 PNG 레이어와 manifest로 변환합니다.
-5. 레이어는 `users/{userId}/projects/{projectId}/layers/`에 업로드되고 메타데이터는 PostgreSQL에 저장됩니다.
+2. `POST /api/projects/{id}/process`가 선택한 작업(`Upscale`/`Layers`/`UpscaleAndLayers`)과 엔진, 배율을 DB `ProcessingJob`에 보존하고 queue에 등록합니다. 본문 없는 기존 호출은 See-through 레이어 처리를 유지합니다.
+3. 백그라운드 worker가 재시작 시 대기 작업을 복구하고 인증된 LAN GPU 워커로 원본 바이트를 전송합니다.
+4. 워커가 로컬 Real-ESRGAN 및 PartGLEE/See-through 모델을 실행하고 PNG/manifest ZIP을 반환합니다.
+5. API가 결과를 검증한 뒤 레이어는 `users/{userId}/projects/{projectId}/layers/`, 업스케일 PNG는 `.../upscaled/`에 업로드합니다. PostgreSQL에는 메타데이터만 저장합니다.
 6. Flutter 미리보기는 레이어별 depth/movement와 필터링한 가속도 값을 결합해 parallax를 렌더링합니다.
 
-See-through가 비활성화되었거나 GPU 환경이 준비되지 않은 경우 job은 `failed`로 기록되고 사용자에게 설정 오류를 노출합니다. HTTP 요청은 추론 완료를 기다리지 않습니다.
+GPU 환경이 준비되지 않으면 job은 `Failed`로 기록됩니다. 클라이언트 HTTP 요청은 추론 완료를 기다리지 않습니다. `LocalGpu:Enabled=false`이면 기존 API 컴퓨터에서의 See-through 실행 설정을 사용하며 업스케일/PartGLEE는 비활성입니다. 클라우드 GPU로 자동 전환하지 않습니다. 실행 전 새 `AddLocalGpuProcessing` migration을 로컬 DB에 적용하세요.
 
 ## EF Core Migration
 
@@ -110,6 +110,10 @@ dotnet ef database update --project src/UpscaleLab.Infrastructure --startup-proj
 - `Cognito__Region` (기본 `ap-northeast-2`)
 - `AWS__S3BucketName`
 - `Replicate__ApiToken`
+- `LocalGpu__Enabled`
+- `LocalGpu__BaseUrl`
+- `LocalGpu__ApiKey`
+- `LocalGpu__TimeoutMinutes`
 - `SeeThrough__Enabled`
 - `SeeThrough__RepositoryPath`
 - `SeeThrough__PythonExecutable`

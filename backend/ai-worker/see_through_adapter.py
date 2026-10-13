@@ -8,12 +8,13 @@ manifest consumed by the ASP.NET Core worker.
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 import subprocess
 import sys
 
 from psd_tools import PSDImage
+from PIL import Image
+from layer_export import write_manifest
 
 
 def classify_layer(name: str) -> str:
@@ -48,7 +49,13 @@ def main() -> None:
     parser.add_argument("--repository", required=True)
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--resolution", type=int, default=1280)
+    parser.add_argument("--group-offload", action="store_true")
     args = parser.parse_args()
+
+    import torch
+    if not torch.cuda.is_available():
+        raise RuntimeError("See-through requires an available CUDA GPU")
 
     repository = Path(args.repository).resolve()
     input_path = Path(args.input).resolve()
@@ -67,7 +74,11 @@ def main() -> None:
         "--save_dir",
         str(raw_output),
         "--save_to_psd",
+        "--resolution",
+        str(args.resolution),
     ]
+    if args.group_offload:
+        command.append("--group_offload")
     subprocess.run(command, cwd=repository, check=True)
 
     psd_candidates = sorted(raw_output.rglob("*.psd"), key=lambda path: path.stat().st_mtime, reverse=True)
@@ -78,12 +89,16 @@ def main() -> None:
     extracted = list(pixel_layers(psd))
     if not extracted:
         raise RuntimeError("The generated PSD contains no visible pixel layers")
+    if len(extracted) > 64:
+        raise RuntimeError("The generated PSD exceeds the supported 64 layers")
 
     manifest_layers = []
     denominator = max(1, len(extracted) - 1)
     for order, (layer, image) in enumerate(extracted):
         file_name = f"{order:03d}.png"
-        image.save(layers_output / file_name, format="PNG")
+        canvas = Image.new("RGBA", psd.size, (0, 0, 0, 0))
+        canvas.paste(image.convert("RGBA"), (layer.left, layer.top))
+        canvas.save(layers_output / file_name, format="PNG")
         depth = order / denominator
         manifest_layers.append(
             {
@@ -100,10 +115,8 @@ def main() -> None:
             }
         )
 
-    (output / "manifest.json").write_text(
-        json.dumps({"layers": manifest_layers}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    write_manifest(output, psd.width, psd.height, "see-through", manifest_layers,
+                   depthMethod="psd-drawing-order")
 
 
 if __name__ == "__main__":

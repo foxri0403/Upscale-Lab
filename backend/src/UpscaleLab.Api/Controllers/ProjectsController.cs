@@ -68,11 +68,17 @@ public sealed class ProjectsController(
     [HttpPost("{projectId:guid}/process")]
     public async Task<ActionResult<ProcessingStatusResponse>> Process(
         Guid projectId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] ProcessProjectRequest? request = null)
     {
-        var response = await processingService.StartAsync(User.GetRequiredUserId(), projectId, cancellationToken);
+        var response = await processingService.StartAsync(User.GetRequiredUserId(), projectId, cancellationToken, request);
         return Accepted(response);
     }
+
+    [HttpPost("{projectId:guid}/jobs/{jobId:guid}/download-url")]
+    public async Task<ActionResult<ProcessingDownloadResponse>> GetProcessingDownload(
+        Guid projectId, Guid jobId, CancellationToken cancellationToken) =>
+        Ok(await processingService.GetDownloadAsync(User.GetRequiredUserId(), projectId, jobId, cancellationToken));
 
     [HttpGet("{projectId:guid}/processing-status")]
     public async Task<ActionResult<ProcessingStatusResponse>> GetProcessingStatus(
