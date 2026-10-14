@@ -8,6 +8,7 @@ public sealed class User : BaseEntity
     public bool IsEmailVerified { get; set; }
     public DateTime? EmailVerifiedAt { get; set; }
     public DateTime? EmailVerificationSentAt { get; set; }
+    public DateTime? EmailVerificationExpiresAt { get; set; }
 
     public UserSetting? Setting { get; set; }
     public ICollection<Device> Devices { get; set; } = new List<Device>();

@@ -22,6 +22,50 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.AuthSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PasswordFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .IsConcurrencyToken()
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("auth_sessions", (string)null);
+                });
+
             modelBuilder.Entity("UpscaleLab.Domain.Entities.Comment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -164,6 +208,10 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .HasColumnType("character varying(50)")
                         .HasDefaultValue("장르 설정되지 않음");
 
+                    b.Property<string[]>("Tags")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(160)
@@ -182,6 +230,10 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.HasIndex("ImageId");
 
                     b.HasIndex("ProjectId");
+
+                    b.HasIndex("Tags");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Tags"), "gin");
 
                     b.HasIndex("UserId");
 
@@ -446,6 +498,9 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .HasMaxLength(320)
                         .HasColumnType("character varying(320)");
 
+                    b.Property<DateTime?>("EmailVerificationExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime?>("EmailVerificationSentAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -514,6 +569,17 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .IsUnique();
 
                     b.ToTable("user_settings", (string)null);
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.AuthSession", b =>
+                {
+                    b.HasOne("UpscaleLab.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("UpscaleLab.Domain.Entities.Comment", b =>

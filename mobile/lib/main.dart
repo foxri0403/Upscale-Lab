@@ -4,14 +4,16 @@ import 'package:flutter/services.dart';
 import 'models/live_layer_models.dart';
 import 'services/api_client.dart';
 import 'services/auth_session_store.dart';
+import 'theme/app_theme.dart';
 import 'unified_home.dart';
+import 'widgets/app_components.dart';
 import 'widgets/parallax_preview.dart';
 
 const _configChannel = MethodChannel('live_layer/config');
 final _authSessionStore = AuthSessionStore();
 
 Future<void> _logoutToLogin(BuildContext context, ApiClient apiClient) async {
-  apiClient.logout();
+  final revocation = apiClient.revokeSession();
   try {
     await _authSessionStore.clear();
   } on PlatformException {
@@ -19,6 +21,7 @@ Future<void> _logoutToLogin(BuildContext context, ApiClient apiClient) async {
   } on MissingPluginException {
     // Secure storage is not available on every development target.
   }
+  await revocation;
   if (!context.mounted) return;
   Navigator.of(context).pushAndRemoveUntil(
     MaterialPageRoute(builder: (_) => LoginPage(apiClient: apiClient)),
@@ -28,6 +31,10 @@ Future<void> _logoutToLogin(BuildContext context, ApiClient apiClient) async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Keep both system bars visible. Android chooses three-button or gesture
+  // navigation according to the device settings; SafeArea reserves its insets.
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(AppTheme.systemOverlay);
   const apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'http://10.0.2.2:5080',
@@ -50,8 +57,9 @@ Future<void> main() async {
     final savedSession = await _authSessionStore.read();
     if (savedSession != null) {
       apiClient.restoreSession(savedSession);
+      apiClient.onSessionChanged = _authSessionStore.save;
       try {
-        await apiClient.validateSession();
+        await apiClient.validateSession().timeout(const Duration(seconds: 15));
         isAutoLoggedIn = true;
       } on ApiException catch (error) {
         if (error.statusCode == 401) {
@@ -61,13 +69,13 @@ Future<void> main() async {
           isAutoLoggedIn = true;
         }
       } catch (_) {
-        // An unexpired saved session still opens the local library offline.
+        // Keep the private library available offline while refresh is retried.
         isAutoLoggedIn = true;
       }
     }
   } catch (_) {
     apiClient.logout();
-    await _authSessionStore.clear();
+    // A temporary secure-storage failure must not destroy saved credentials.
   }
   runApp(
     LiveLayerApp(
@@ -103,9 +111,10 @@ class LiveLayerApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Upscale Lab',
-      theme: ThemeData(
-        scaffoldBackgroundColor: Colors.white,
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF536DFE)),
+      theme: AppTheme.light,
+      builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+        value: AppTheme.systemOverlay,
+        child: child!,
       ),
       home: isAutoLoggedIn
           ? UnifiedHomePage(
@@ -150,31 +159,8 @@ class LiveLayerTextField extends StatelessWidget {
       decoration: InputDecoration(
         hintText: hintText,
         errorText: errorText,
-        hintStyle: const TextStyle(color: Color(0xFF9299AA), fontSize: 15),
-        prefixIcon: Icon(icon, color: const Color(0xFF6F7789)),
+        prefixIcon: Icon(icon),
         suffixIcon: suffixIcon,
-        filled: true,
-        fillColor: const Color(0xFFFAFAFC),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 18,
-          vertical: 18,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFFE3E5EB)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFF536DFE), width: 1.5),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFFD93025), width: 1.5),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFFD93025), width: 1.5),
-        ),
       ),
     );
   }
@@ -195,16 +181,8 @@ class LiveLayerButton extends StatelessWidget {
     return SizedBox(
       width: double.infinity,
       height: 54,
-      child: ElevatedButton(
+      child: FilledButton(
         onPressed: onPressed,
-        style: ElevatedButton.styleFrom(
-          elevation: 0,
-          backgroundColor: const Color(0xFF536DFE),
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
         child: Text(
           text,
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
@@ -349,7 +327,9 @@ class _LoginPageState extends State<LoginPage> {
           await widget.apiClient.login(_identifier.text.trim(), _password.text);
       if (_autoLogin) {
         await _authSessionStore.save(session);
+        widget.apiClient.onSessionChanged = _authSessionStore.save;
       } else {
+        widget.apiClient.onSessionChanged = null;
         await _authSessionStore.clear();
       }
       if (!mounted) return;
@@ -383,136 +363,168 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28),
-          child: Column(
-            children: [
-              const Spacer(flex: 3),
-              const Text(
-                'Upscale Lab',
-                style: TextStyle(
-                  fontSize: 38,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: -1,
-                ),
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                '당신의 이미지를,\n움직이는 배경화면으로',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 16,
-                  height: 1.5,
-                  color: Color(0xFF6F7789),
-                ),
-              ),
-              const SizedBox(height: 55),
-              LiveLayerTextField(
-                controller: _identifier,
-                hintText: '이메일 또는 사용자 아이디',
-                icon: Icons.person_outline,
-              ),
-              const SizedBox(height: 14),
-              LiveLayerTextField(
-                controller: _password,
-                hintText: '비밀번호',
-                icon: Icons.lock_outline,
-                obscureText: !_showPassword,
-                suffixIcon: IconButton(
-                  tooltip: _showPassword ? '비밀번호 숨기기' : '비밀번호 보기',
-                  onPressed: () =>
-                      setState(() => _showPassword = !_showPassword),
-                  icon: Icon(
-                    _showPassword
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
-                    color: const Color(0xFF6F7789),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              CheckboxListTile(
-                value: _autoLogin,
-                onChanged: _busy
-                    ? null
-                    : (value) => setState(() => _autoLogin = value ?? false),
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                dense: true,
-                title: const Text('자동 로그인'),
-                subtitle: const Text('앱을 다시 열어도 로그인 상태를 유지합니다.'),
-              ),
-              const SizedBox(height: 12),
-              LiveLayerButton(
-                text: _busy ? '로그인 중...' : '로그인',
-                onPressed: _busy ? null : _login,
-              ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  TextButton(
-                    onPressed: _busy
-                        ? null
-                        : () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    FindIdPage(apiClient: widget.apiClient),
-                              ),
-                            ),
-                    child: const Text('아이디 찾기'),
-                  ),
-                  const Text('|', style: TextStyle(color: Color(0xFFD0D3DB))),
-                  TextButton(
-                    onPressed: _busy
-                        ? null
-                        : () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => PasswordResetPage(
-                                  apiClient: widget.apiClient,
-                                ),
-                              ),
-                            ),
-                    child: const Text('비밀번호 재설정'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 2),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text(
-                    '계정이 없으신가요?',
-                    style: TextStyle(color: Color(0xFF777E8E)),
-                  ),
-                  TextButton(
-                    onPressed: _busy
-                        ? null
-                        : () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    SignUpPage(apiClient: widget.apiClient),
-                              ),
-                            ),
-                    child: const Text(
-                      '회원가입하기',
-                      style: TextStyle(
-                        color: Color(0xFF536DFE),
-                        fontWeight: FontWeight.w600,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+            final topGap = keyboardOpen
+                ? 16.0
+                : (constraints.maxHeight * 0.12).clamp(24.0, 100.0).toDouble();
+            return AppFormScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight, maxWidth: 440),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(height: topGap),
+                      const DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: AppTheme.tint,
+                          borderRadius: BorderRadius.all(Radius.circular(20)),
+                        ),
+                        child: Padding(
+                          padding: EdgeInsets.all(18),
+                          child: Icon(Icons.auto_awesome_mosaic_outlined,
+                              color: AppTheme.primary, size: 34),
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 20),
+                      const Text(
+                        'Upscale Lab',
+                        style: TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: -1,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        '당신의 이미지를,\n움직이는 배경화면으로',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 16,
+                          height: 1.5,
+                          color: Color(0xFF6F7789),
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      LiveLayerTextField(
+                        controller: _identifier,
+                        hintText: '이메일 또는 사용자 아이디',
+                        icon: Icons.person_outline,
+                      ),
+                      const SizedBox(height: 14),
+                      LiveLayerTextField(
+                        controller: _password,
+                        hintText: '비밀번호',
+                        icon: Icons.lock_outline,
+                        obscureText: !_showPassword,
+                        suffixIcon: IconButton(
+                          tooltip: _showPassword ? '비밀번호 숨기기' : '비밀번호 보기',
+                          onPressed: () =>
+                              setState(() => _showPassword = !_showPassword),
+                          icon: Icon(
+                            _showPassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                            color: const Color(0xFF6F7789),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      CheckboxListTile(
+                        value: _autoLogin,
+                        onChanged: _busy
+                            ? null
+                            : (value) =>
+                                setState(() => _autoLogin = value ?? false),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        dense: true,
+                        title: const Text('자동 로그인'),
+                      ),
+                      const SizedBox(height: 12),
+                      LiveLayerButton(
+                        text: _busy ? '로그인 중...' : '로그인',
+                        onPressed: _busy ? null : _login,
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          TextButton(
+                            onPressed: _busy
+                                ? null
+                                : () => Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => FindIdPage(
+                                            apiClient: widget.apiClient),
+                                      ),
+                                    ),
+                            child: const Text('아이디 찾기'),
+                          ),
+                          const Text('|',
+                              style: TextStyle(color: Color(0xFFD0D3DB))),
+                          TextButton(
+                            onPressed: _busy
+                                ? null
+                                : () => Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => PasswordResetPage(
+                                          apiClient: widget.apiClient,
+                                        ),
+                                      ),
+                                    ),
+                            child: const Text('비밀번호 재설정'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          const Text(
+                            '계정이 없으신가요?',
+                            style: TextStyle(color: Color(0xFF777E8E)),
+                          ),
+                          TextButton(
+                            onPressed: _busy
+                                ? null
+                                : () => Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => SignUpPage(
+                                            apiClient: widget.apiClient),
+                                      ),
+                                    ),
+                            child: const Text(
+                              '회원가입하기',
+                              style: TextStyle(
+                                color: Color(0xFF536DFE),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      TextButton.icon(
+                        onPressed: _busy ? null : _configureServer,
+                        icon: const Icon(Icons.dns_outlined, size: 18),
+                        label: const Text('서버 주소 설정'),
+                      ),
+                      SizedBox(height: keyboardOpen ? 24 : 36),
+                    ],
                   ),
-                ],
+                ),
               ),
-              TextButton.icon(
-                onPressed: _busy ? null : _configureServer,
-                icon: const Icon(Icons.dns_outlined, size: 18),
-                label: const Text('서버 주소 설정'),
-              ),
-              const Spacer(flex: 4),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
@@ -574,12 +586,12 @@ class _FindIdPageState extends State<FindIdPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: AppTheme.background,
         elevation: 0,
         title: const Text('아이디 찾기'),
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
+        child: AppFormScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -723,12 +735,12 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: AppTheme.background,
         elevation: 0,
         title: const Text('비밀번호 재설정'),
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
+        child: AppFormScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 30),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -973,7 +985,7 @@ class _SignUpPageState extends State<SignUpPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: AppTheme.background,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black),
@@ -981,135 +993,141 @@ class _SignUpPageState extends State<SignUpPage> {
         ),
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 25),
-              const Text(
-                'Upscale Lab',
-                style: TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: -1,
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                '계정을 생성하고\n나만의 Live2D 배경화면을 만들어보세요.',
-                style: TextStyle(
-                  fontSize: 15,
-                  height: 1.5,
-                  color: Color(0xFF6F7789),
-                ),
-              ),
-              const SizedBox(height: 40),
-              LiveLayerTextField(
-                controller: _email,
-                hintText: '이메일 주소',
-                icon: Icons.mail_outline,
-                keyboardType: TextInputType.emailAddress,
-                errorText: _emailError,
-                onChanged: (_) => _clearFieldError('email'),
-              ),
-              const SizedBox(height: 14),
-              LiveLayerTextField(
-                controller: _username,
-                hintText: '사용자 아이디',
-                icon: Icons.person_outline,
-                errorText: _usernameError,
-                onChanged: (_) => _clearFieldError('username'),
-              ),
-              const SizedBox(height: 14),
-              LiveLayerTextField(
-                controller: _password,
-                hintText: '비밀번호',
-                icon: Icons.lock_outline,
-                obscureText: !_showPassword,
-                errorText: _passwordError,
-                onChanged: (_) => _clearFieldError('password'),
-                suffixIcon: IconButton(
-                  tooltip: _showPassword ? '비밀번호 숨기기' : '비밀번호 보기',
-                  onPressed: () =>
-                      setState(() => _showPassword = !_showPassword),
-                  icon: Icon(
-                    _showPassword
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
-                    color: const Color(0xFF6F7789),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Padding(
-                padding: EdgeInsets.only(left: 5),
-                child: Text(
-                  '10자 이상 · 대문자 · 숫자 · 특수문자를 포함해주세요.',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF9299AA)),
-                ),
-              ),
-              const SizedBox(height: 14),
-              LiveLayerTextField(
-                controller: _passwordCheck,
-                hintText: '비밀번호 확인',
-                icon: Icons.lock_outline,
-                obscureText: !_showPasswordCheck,
-                errorText: _passwordCheckError,
-                onChanged: (_) => _clearFieldError('passwordCheck'),
-                suffixIcon: IconButton(
-                  tooltip: _showPasswordCheck ? '비밀번호 숨기기' : '비밀번호 보기',
-                  onPressed: () =>
-                      setState(() => _showPasswordCheck = !_showPasswordCheck),
-                  icon: Icon(
-                    _showPasswordCheck
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
-                    color: const Color(0xFF6F7789),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-              LiveLayerButton(
-                text: _busy ? '회원가입 중...' : '회원가입하기',
-                onPressed: _busy ? null : _signUp,
-              ),
-              if (_submitError != null) ...[
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: Text(
-                    _submitError!,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Color(0xFFD93025),
-                      fontSize: 13,
-                      height: 1.4,
+        child: AppFormScrollView(
+          padding: const EdgeInsets.fromLTRB(28, 0, 28, 48),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 25),
+                  const Text(
+                    'Upscale Lab',
+                    style: TextStyle(
+                      fontSize: 36,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: -1,
                     ),
                   ),
-                ),
-              ],
-              const SizedBox(height: 25),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
+                  const SizedBox(height: 12),
                   const Text(
-                    '이미 계정이 있으신가요?',
-                    style: TextStyle(color: Color(0xFF777E8E)),
+                    '계정을 생성하고\n나만의 Live2D 배경화면을 만들어보세요.',
+                    style: TextStyle(
+                      fontSize: 15,
+                      height: 1.5,
+                      color: Color(0xFF6F7789),
+                    ),
                   ),
-                  TextButton(
-                    onPressed: _busy ? null : () => Navigator.pop(context),
-                    child: const Text(
-                      '로그인하기',
-                      style: TextStyle(
-                        color: Color(0xFF536DFE),
-                        fontWeight: FontWeight.w600,
+                  const SizedBox(height: 40),
+                  LiveLayerTextField(
+                    controller: _email,
+                    hintText: '이메일 주소',
+                    icon: Icons.mail_outline,
+                    keyboardType: TextInputType.emailAddress,
+                    errorText: _emailError,
+                    onChanged: (_) => _clearFieldError('email'),
+                  ),
+                  const SizedBox(height: 14),
+                  LiveLayerTextField(
+                    controller: _username,
+                    hintText: '사용자 아이디',
+                    icon: Icons.person_outline,
+                    errorText: _usernameError,
+                    onChanged: (_) => _clearFieldError('username'),
+                  ),
+                  const SizedBox(height: 14),
+                  LiveLayerTextField(
+                    controller: _password,
+                    hintText: '비밀번호',
+                    icon: Icons.lock_outline,
+                    obscureText: !_showPassword,
+                    errorText: _passwordError,
+                    onChanged: (_) => _clearFieldError('password'),
+                    suffixIcon: IconButton(
+                      tooltip: _showPassword ? '비밀번호 숨기기' : '비밀번호 보기',
+                      onPressed: () =>
+                          setState(() => _showPassword = !_showPassword),
+                      icon: Icon(
+                        _showPassword
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        color: const Color(0xFF6F7789),
                       ),
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  const Padding(
+                    padding: EdgeInsets.only(left: 5),
+                    child: Text(
+                      '10자 이상 · 대문자 · 숫자 · 특수문자를 포함해주세요.',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF9299AA)),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  LiveLayerTextField(
+                    controller: _passwordCheck,
+                    hintText: '비밀번호 확인',
+                    icon: Icons.lock_outline,
+                    obscureText: !_showPasswordCheck,
+                    errorText: _passwordCheckError,
+                    onChanged: (_) => _clearFieldError('passwordCheck'),
+                    suffixIcon: IconButton(
+                      tooltip: _showPasswordCheck ? '비밀번호 숨기기' : '비밀번호 보기',
+                      onPressed: () => setState(
+                          () => _showPasswordCheck = !_showPasswordCheck),
+                      icon: Icon(
+                        _showPasswordCheck
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        color: const Color(0xFF6F7789),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  LiveLayerButton(
+                    text: _busy ? '회원가입 중...' : '회원가입하기',
+                    onPressed: _busy ? null : _signUp,
+                  ),
+                  if (_submitError != null) ...[
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: Text(
+                        _submitError!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xFFD93025),
+                          fontSize: 13,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 25),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      const Text(
+                        '이미 계정이 있으신가요?',
+                        style: TextStyle(color: Color(0xFF777E8E)),
+                      ),
+                      TextButton(
+                        onPressed: _busy ? null : () => Navigator.pop(context),
+                        child: const Text(
+                          '로그인하기',
+                          style: TextStyle(
+                            color: Color(0xFF536DFE),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -1192,111 +1210,81 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28),
-          child: Column(
-            children: [
-              const SizedBox(height: 60),
-              const Icon(
-                Icons.mail_outline_rounded,
-                size: 75,
-                color: Color(0xFF7C8497),
-              ),
-              const SizedBox(height: 25),
-              const Text(
-                '이메일 인증',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                '입력하신 이메일로 전송된\n인증 코드를 입력해주세요.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 15,
-                  height: 1.5,
-                  color: Color(0xFF747B8C),
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('이메일 인증')),
+        body: SafeArea(
+          child: AppFormScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  color: AppTheme.tint,
+                  borderRadius: BorderRadius.all(Radius.circular(18)),
                 ),
+                child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Icon(Icons.mail_outline_rounded,
+                        size: 32, color: AppTheme.primary)),
               ),
+              const SizedBox(height: 24),
+              const AppSectionTitle('인증 코드를 입력해 주세요'),
               const SizedBox(height: 12),
-              Text(
-                widget.email,
-                style: const TextStyle(color: Color(0xFF536DFE)),
-              ),
-              const SizedBox(height: 35),
+              const Text('가입 후 15분 이내에 이메일 인증을 완료해 주세요. 인증하지 않은 계정은 자동 삭제됩니다.',
+                  style: TextStyle(color: AppTheme.muted, height: 1.5)),
+              const SizedBox(height: 8),
+              Text(widget.email,
+                  style: const TextStyle(color: AppTheme.primary)),
+              const SizedBox(height: 28),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: List.generate(6, (index) {
-                  return SizedBox(
-                    width: 45,
-                    height: 58,
-                    child: TextField(
-                      controller: _controllers[index],
-                      focusNode: _focusNodes[index],
-                      textAlign: TextAlign.center,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      maxLength: 1,
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      onChanged: (value) {
-                        if (value.isNotEmpty && index < 5) {
-                          _focusNodes[index + 1].requestFocus();
-                        } else if (value.isEmpty && index > 0) {
-                          _focusNodes[index - 1].requestFocus();
-                        }
-                      },
-                      decoration: InputDecoration(
-                        counterText: '',
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(
-                            color: Color(0xFFDCE0E9),
-                          ),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(
-                            color: Color(0xFF536DFE),
-                            width: 1.5,
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }),
-              ),
-              const SizedBox(height: 32),
+                  children: List.generate(
+                      6,
+                      (index) => Expanded(
+                            child: Padding(
+                              padding:
+                                  EdgeInsets.only(right: index == 5 ? 0 : 8),
+                              child: TextField(
+                                controller: _controllers[index],
+                                focusNode: _focusNodes[index],
+                                textAlign: TextAlign.center,
+                                keyboardType: TextInputType.number,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly
+                                ],
+                                maxLength: 1,
+                                style: const TextStyle(
+                                    fontSize: 22, fontWeight: FontWeight.w600),
+                                onChanged: (value) {
+                                  if (value.isNotEmpty && index < 5) {
+                                    _focusNodes[index + 1].requestFocus();
+                                  } else if (value.isEmpty && index > 0) {
+                                    _focusNodes[index - 1].requestFocus();
+                                  }
+                                },
+                                decoration: const InputDecoration(
+                                  counterText: '',
+                                  contentPadding:
+                                      EdgeInsets.symmetric(vertical: 14),
+                                ),
+                              ),
+                            ),
+                          ))),
+              const SizedBox(height: 28),
               LiveLayerButton(
-                text: _busy ? '인증 중...' : '인증하기',
-                onPressed: _busy ? null : _verify,
-              ),
-              const SizedBox(height: 18),
-              TextButton(
+                  text: _busy ? '인증 중...' : '인증하기',
+                  onPressed: _busy ? null : _verify),
+              const SizedBox(height: 12),
+              Center(
+                  child: TextButton(
                 onPressed: _busy ? null : _resend,
-                child: const Text(
-                  '인증 코드를 받지 못하셨나요?  다시 보내기',
-                  style: TextStyle(color: Color(0xFF536DFE)),
-                ),
-              ),
-            ],
+                child: const Text('인증 코드를 받지 못하셨나요?  다시 보내기',
+                    textAlign: TextAlign.center),
+              )),
+            ]),
           ),
         ),
-      ),
-    );
-  }
+      );
 }
 
 class PreviewPage extends StatefulWidget {
@@ -1403,73 +1391,109 @@ class _PreviewPageState extends State<PreviewPage> {
       appBar: AppBar(
         title: Text(widget.project.title),
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: widget.project.layers.isEmpty
-                ? Center(
-                    child: Text('처리 상태: ${widget.project.status}'),
-                  )
-                : AspectRatio(
-                    aspectRatio: 9 / 16,
-                    child: ParallaxPreview(
-                      layers: widget.project.layers,
-                      sensitivity: _sensitivity,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: widget.project.layers.isEmpty
+                  ? Center(child: Text('처리 상태: ${widget.project.status}'))
+                  : Center(
+                      child: AspectRatio(
+                        aspectRatio: 9 / 16,
+                        child: ParallaxPreview(
+                          layers: widget.project.layers,
+                          sensitivity: _sensitivity,
+                        ),
+                      ),
                     ),
-                  ),
-          ),
-          ListTile(
-            title: const Text('센서 반응 감도'),
-            subtitle: Slider(
-              value: _sensitivity,
-              min: 0,
-              max: 2,
-              divisions: 20,
-              onChanged: (value) => setState(() => _sensitivity = value),
-              onChangeEnd: widget.apiClient.updateSensorSensitivity,
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _applyingLive ? null : _applyLiveWallpaper,
-                icon: _applyingLive
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.wallpaper),
-                label: Text(
-                  _applyingLive ? '레이어 다운로드 중...' : '라이브 배경화면 적용',
+            Flexible(
+              fit: FlexFit.loose,
+              child: AppFormScrollView(
+                padding: const EdgeInsets.only(bottom: 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ListTile(
+                      title: const Text('센서 반응 감도'),
+                      subtitle: Slider(
+                        value: _sensitivity,
+                        min: 0,
+                        max: 2,
+                        divisions: 20,
+                        onChanged: (value) =>
+                            setState(() => _sensitivity = value),
+                        onChangeEnd: widget.apiClient.updateSensorSensitivity,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF536DFE),
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size.fromHeight(48),
+                          ),
+                          onPressed: _applyingLive ? null : _applyLiveWallpaper,
+                          icon: _applyingLive
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.wallpaper),
+                          label: Text(
+                            _applyingLive ? '레이어 다운로드 중...' : '라이브 배경화면 적용',
+                          ),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF536DFE),
+                                side:
+                                    const BorderSide(color: Color(0xFF536DFE)),
+                                minimumSize: const Size.fromHeight(48),
+                              ),
+                              onPressed:
+                                  _downloading ? null : _downloadOriginal,
+                              icon: const Icon(Icons.download_outlined),
+                              label: Text(_downloading ? '준비 중...' : '원본 다운로드'),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF536DFE),
+                                side:
+                                    const BorderSide(color: Color(0xFF536DFE)),
+                                minimumSize: const Size.fromHeight(48),
+                              ),
+                              onPressed: _applyingStatic
+                                  ? null
+                                  : _applyStaticWallpaper,
+                              icon: const Icon(Icons.phone_android),
+                              label: Text(
+                                  _applyingStatic ? '적용 중...' : '원본 바로 적용'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _downloading ? null : _downloadOriginal,
-                    icon: const Icon(Icons.download_outlined),
-                    label: Text(_downloading ? '준비 중...' : '원본 다운로드'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _applyingStatic ? null : _applyStaticWallpaper,
-                    icon: const Icon(Icons.phone_android),
-                    label: Text(_applyingStatic ? '적용 중...' : '원본 바로 적용'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

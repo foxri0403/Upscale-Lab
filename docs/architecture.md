@@ -57,6 +57,8 @@ erDiagram
 | POST | `/api/auth/verify-email` | 없음 | 6자리 이메일 인증 후 JWT 발급 |
 | POST | `/api/auth/resend-verification` | 없음 | 이메일 인증 코드 재전송 |
 | POST | `/api/auth/login` | 없음 | 로그인 및 JWT 발급 |
+| POST | `/api/auth/refresh` | 갱신 자격 | 만료된 액세스 토큰 갱신 |
+| POST | `/api/auth/logout` | 갱신 자격 | 해당 기기의 자동 로그인 자격 폐기 |
 | GET | `/api/auth/me` | 필요 | 현재 사용자 조회 |
 | GET/POST | `/api/devices` | 필요 | 내 디바이스 목록/등록 |
 | PUT/DELETE | `/api/devices/{id}` | 필요 | 내 디바이스 수정/삭제 |
@@ -66,6 +68,8 @@ erDiagram
 | POST | `/api/images/{id}/download-url` | 필요 | 내 원본 pre-signed URL 발급 |
 | GET/POST | `/api/gallery` | 조회 공개, 등록 필요 | 갤러리 목록/등록 |
 | GET/DELETE | `/api/gallery/{id}` | 조회 공개, 삭제 필요 | 상세/본인 게시글 삭제 |
+| GET | `/api/gallery/{id}/preview-url` | 공개 게시글 또는 소유자 | 미리보기용 서명 URL, 다운로드 횟수 유지 |
+| PATCH | `/api/gallery/{id}/tag` | 필요 | 본인 게시글 태그 수정 |
 | POST | `/api/gallery/{id}/comments` | 필요 | 댓글 등록 |
 | DELETE | `/api/comments/{id}` | 필요 | 댓글 작성자/게시글 작성자 삭제 |
 | POST/DELETE | `/api/gallery/{id}/likes` | 필요 | 좋아요/취소 |

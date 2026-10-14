@@ -7,6 +7,9 @@ import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.ClipData
+import android.content.ActivityNotFoundException
+import androidx.core.content.FileProvider
 import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
 import android.net.Uri
@@ -29,6 +32,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
+import java.security.MessageDigest
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -112,34 +116,63 @@ class MainActivity : FlutterActivity() {
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "live_layer/storage")
             .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "saveImageToGallery" -> enqueueLocalImageSave(
-                        call.argument<String>("sourcePath"),
-                        call.argument<String>("fileName"),
-                        result,
-                    )
-                    "listLocalImages" -> result.success(readLocalImages())
-                    "importLocalImage" -> importLocalImage(
-                        call.arguments as? Map<*, *>,
-                        result,
-                    )
-                    "markLocalImageShared" -> markLocalImageShared(
-                        call.arguments as? Map<*, *>,
-                        result,
-                    )
-                    "markLocalImageUnshared" -> markLocalImageUnshared(
-                        call.argument<String>("id"),
-                        result,
-                    )
-                    "updateLocalImageTag" -> updateLocalImageTag(
-                        call.arguments as? Map<*, *>,
-                        result,
-                    )
-                    "deleteLocalImage" -> deleteLocalImage(
-                        call.argument<String>("id"),
-                        result,
-                    )
-                    else -> result.notImplemented()
+                try {
+                    val rawScope = call.argument<String>("scope")
+                    // Photo-album export is explicit and independent of the private library.
+                    val scope = if (call.method == "saveImageToGallery") "" else {
+                        require(!rawScope.isNullOrBlank()) { "로그인 계정 정보가 필요합니다." }
+                        MessageDigest.getInstance("SHA-256").digest(rawScope.toByteArray(Charsets.UTF_8))
+                            .joinToString("") { "%02x".format(it) }
+                    }
+                    when (call.method) {
+                        "saveImageToGallery" -> enqueueLocalImageSave(
+                            call.argument<String>("sourcePath"),
+                            call.argument<String>("fileName"),
+                            result,
+                        )
+                        "listLocalImages" -> result.success(readLocalImages(scope))
+                        "getLibraryOrder" -> {
+                            val value = JSONObject(getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE)
+                                .getString("order_$scope", "{}") ?: "{}")
+                            val ids = value.optJSONArray("ids") ?: JSONArray()
+                            result.success(mapOf("sort" to value.optString("sort", "manual"),
+                                "ids" to (0 until ids.length()).map { ids.getString(it) }))
+                        }
+                        "saveLibraryOrder" -> saveLibraryOrder(scope, call.arguments as? Map<*, *>, result)
+                        "previewLocalWallpaper" -> previewLocalWallpaper(scope, call.argument<String>("id"), result)
+                        "downloadSharedImage" -> downloadSharedImage(call.arguments as? Map<*, *>, scope, result)
+                        "importLocalImage" -> importLocalImage(
+                            call.arguments as? Map<*, *>,
+                            scope,
+                            result,
+                        )
+                        "markLocalImageShared" -> markLocalImageShared(
+                            call.arguments as? Map<*, *>,
+                            scope,
+                            result,
+                        )
+                        "markLocalImageUnshared" -> markLocalImageUnshared(
+                            call.argument<String>("id"),
+                            scope,
+                            result,
+                        )
+                        "updateLocalImageTag" -> updateLocalImageTag(
+                            call.arguments as? Map<*, *>,
+                            scope,
+                            result,
+                        )
+                        "updateLocalImageDetails" -> updateLocalImageDetails(
+                            call.arguments as? Map<*, *>, scope, result,
+                        )
+                        "deleteLocalImage" -> deleteLocalImage(
+                            call.argument<String>("id"),
+                            scope,
+                            result,
+                        )
+                        else -> result.notImplemented()
+                    }
+                } catch (error: Exception) {
+                    result.error("local_storage_failed", error.message, null)
                 }
             }
     }
@@ -280,11 +313,12 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun importLocalImage(arguments: Map<*, *>?, result: MethodChannel.Result) {
+    private fun importLocalImage(arguments: Map<*, *>?, scope: String, result: MethodChannel.Result) {
         val sourcePath = arguments?.get("sourcePath") as? String
         val requestedFileName = arguments?.get("fileName") as? String
         val requestedTitle = (arguments?.get("title") as? String)?.trim()
-        val tag = (arguments?.get("tag") as? String)?.trim().orEmpty()
+        val tags = (arguments?.get("tags") as? List<*>)?.filterIsInstance<String>()?.distinct()
+            ?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() } ?: listOf("장르 설정되지 않음")
         val width = (arguments?.get("width") as? Number)?.toInt()
         val height = (arguments?.get("height") as? Number)?.toInt()
         val mode = arguments?.get("mode") as? String ?: "original"
@@ -313,7 +347,9 @@ class MainActivity : FlutterActivity() {
                 val item = JSONObject()
                     .put("id", id)
                     .put("title", requestedTitle.take(160))
-                    .put("tag", tag.ifBlank { "장르 설정되지 않음" })
+                    .put("tag", tags.first())
+                    .put("tags", JSONArray(tags))
+                    .put("ownerScope", scope)
                     .put("path", destination.absolutePath)
                     .put("width", width)
                     .put("height", height)
@@ -322,9 +358,9 @@ class MainActivity : FlutterActivity() {
                     .put("cloudProjectId", JSONObject.NULL)
                     .put("galleryPostId", JSONObject.NULL)
                 synchronized(localImagesLock) {
-                    val items = readLocalImagesJson()
+                    val items = readLocalImagesJson(scope)
                     items.put(item)
-                    writeLocalImagesJson(items)
+                    writeLocalImagesJson(scope, items)
                 }
                 runOnUiThread { result.success(jsonObjectToMap(item)) }
             } catch (error: Exception) {
@@ -339,8 +375,32 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun readLocalImages(): List<Map<String, Any?>> = synchronized(localImagesLock) {
-        val items = readLocalImagesJson()
+    private fun downloadSharedImage(arguments: Map<*, *>?, scope: String, result: MethodChannel.Result) {
+        val url = arguments?.get("url") as? String
+        if (url.isNullOrBlank() || Uri.parse(url).scheme !in listOf("https", "http")) {
+            result.error("invalid_url", "공유 이미지 주소가 올바르지 않습니다.", null)
+            return
+        }
+        ioExecutor.execute {
+            var destination: File? = null
+            try {
+                val directory = File(cacheDir, "shared_imports")
+                check(directory.exists() || directory.mkdirs())
+                val name = ensureImageExtension(sanitizeFileName(arguments?.get("fileName") as? String ?: "image"), url)
+                destination = File(directory, "$scope-${UUID.randomUUID()}.${name.substringAfterLast('.')}")
+                downloadToFile(url, destination)
+                val path = destination.absolutePath
+                runOnUiThread { result.success(path) }
+            } catch (error: Exception) {
+                destination?.delete()
+                destination?.let { File(it.parentFile, "${it.name}.part").delete() }
+                runOnUiThread { result.error("shared_download_failed", "공유 이미지를 받지 못했습니다.", error.message) }
+            }
+        }
+    }
+
+    private fun readLocalImages(scope: String): List<Map<String, Any?>> = synchronized(localImagesLock) {
+        val items = readLocalImagesJson(scope)
         buildList {
             for (index in items.length() - 1 downTo 0) {
                 add(jsonObjectToMap(items.getJSONObject(index)))
@@ -348,7 +408,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun markLocalImageShared(arguments: Map<*, *>?, result: MethodChannel.Result) {
+    private fun markLocalImageShared(arguments: Map<*, *>?, scope: String, result: MethodChannel.Result) {
         val id = arguments?.get("id") as? String
         val cloudProjectId = arguments?.get("cloudProjectId") as? String
         val galleryPostId = arguments?.get("galleryPostId") as? String
@@ -357,13 +417,13 @@ class MainActivity : FlutterActivity() {
             return
         }
         synchronized(localImagesLock) {
-            val items = readLocalImagesJson()
+            val items = readLocalImagesJson(scope)
             for (index in 0 until items.length()) {
                 val item = items.getJSONObject(index)
                 if (item.optString("id") == id) {
                     item.put("cloudProjectId", cloudProjectId)
                     item.put("galleryPostId", galleryPostId)
-                    writeLocalImagesJson(items)
+                    writeLocalImagesJson(scope, items)
                     result.success(null)
                     return
                 }
@@ -372,19 +432,19 @@ class MainActivity : FlutterActivity() {
         result.error("local_image_not_found", "로컬 이미지를 찾을 수 없습니다.", null)
     }
 
-    private fun markLocalImageUnshared(id: String?, result: MethodChannel.Result) {
+    private fun markLocalImageUnshared(id: String?, scope: String, result: MethodChannel.Result) {
         if (id.isNullOrBlank()) {
             result.error("invalid_local_image", "공유를 취소할 이미지가 없습니다.", null)
             return
         }
         synchronized(localImagesLock) {
-            val items = readLocalImagesJson()
+            val items = readLocalImagesJson(scope)
             for (index in 0 until items.length()) {
                 val item = items.getJSONObject(index)
                 if (item.optString("id") == id) {
                     item.put("cloudProjectId", JSONObject.NULL)
                     item.put("galleryPostId", JSONObject.NULL)
-                    writeLocalImagesJson(items)
+                    writeLocalImagesJson(scope, items)
                     result.success(null)
                     return
                 }
@@ -393,20 +453,21 @@ class MainActivity : FlutterActivity() {
         result.error("local_image_not_found", "로컬 이미지를 찾을 수 없습니다.", null)
     }
 
-    private fun updateLocalImageTag(arguments: Map<*, *>?, result: MethodChannel.Result) {
+    private fun updateLocalImageTag(arguments: Map<*, *>?, scope: String, result: MethodChannel.Result) {
         val id = arguments?.get("id") as? String
-        val tag = (arguments?.get("tag") as? String)?.trim()
-        if (id.isNullOrBlank() || tag.isNullOrBlank()) {
+        val tags = (arguments?.get("tags") as? List<*>)?.filterIsInstance<String>()?.distinct()
+        if (id.isNullOrBlank() || tags.isNullOrEmpty() || tags.any { it.isBlank() }) {
             result.error("invalid_local_image", "수정할 태그 정보가 올바르지 않습니다.", null)
             return
         }
         synchronized(localImagesLock) {
-            val items = readLocalImagesJson()
+            val items = readLocalImagesJson(scope)
             for (index in 0 until items.length()) {
                 val item = items.getJSONObject(index)
                 if (item.optString("id") == id) {
-                    item.put("tag", tag)
-                    writeLocalImagesJson(items)
+                    item.put("tag", tags.first())
+                    item.put("tags", JSONArray(tags))
+                    writeLocalImagesJson(scope, items)
                     result.success(null)
                     return
                 }
@@ -415,7 +476,34 @@ class MainActivity : FlutterActivity() {
         result.error("local_image_not_found", "로컬 이미지를 찾을 수 없습니다.", null)
     }
 
-    private fun deleteLocalImage(id: String?, result: MethodChannel.Result) {
+    private fun updateLocalImageDetails(arguments: Map<*, *>?, scope: String, result: MethodChannel.Result) {
+        val id = arguments?.get("id") as? String
+        val title = (arguments?.get("title") as? String)?.trim()
+        val tags = (arguments?.get("tags") as? List<*>)?.filterIsInstance<String>()?.distinct()
+        if (id.isNullOrBlank() || title.isNullOrBlank() || title.length > 160 ||
+            tags.isNullOrEmpty() || tags.any { it.isBlank() }) {
+            result.error("invalid_local_image", "이름과 태그를 확인해 주세요.", null)
+            return
+        }
+        synchronized(localImagesLock) {
+            val items = readLocalImagesJson(scope)
+            for (index in 0 until items.length()) {
+                val item = items.getJSONObject(index)
+                if (item.optString("id") == id) {
+                    item.put("title", title)
+                    item.put("tag", tags.first())
+                    item.put("tags", JSONArray(tags))
+                    item.put("updatedAt", utcTimestamp())
+                    writeLocalImagesJson(scope, items)
+                    result.success(null)
+                    return
+                }
+            }
+        }
+        result.error("local_image_not_found", "로컬 이미지를 찾을 수 없습니다.", null)
+    }
+
+    private fun deleteLocalImage(id: String?, scope: String, result: MethodChannel.Result) {
         if (id.isNullOrBlank()) {
             result.error("invalid_local_image", "삭제할 이미지가 없습니다.", null)
             return
@@ -423,7 +511,7 @@ class MainActivity : FlutterActivity() {
         ioExecutor.execute {
             try {
                 synchronized(localImagesLock) {
-                    val items = readLocalImagesJson()
+                    val items = readLocalImagesJson(scope)
                     val remaining = JSONArray()
                     var found = false
                     for (index in 0 until items.length()) {
@@ -437,7 +525,7 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                     check(found) { "로컬 이미지를 찾을 수 없습니다." }
-                    writeLocalImagesJson(remaining)
+                    writeLocalImagesJson(scope, remaining)
                 }
                 runOnUiThread { result.success(null) }
             } catch (error: Exception) {
@@ -448,17 +536,67 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun readLocalImagesJson(): JSONArray {
+    private fun readAllLocalImagesJson(): JSONArray {
         val value = getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE)
             .getString(LOCAL_IMAGES_KEY, "[]") ?: "[]"
-        return runCatching { JSONArray(value) }.getOrElse { JSONArray() }
+        return JSONArray(value)
     }
 
-    private fun writeLocalImagesJson(items: JSONArray) {
-        getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE)
+    private fun saveLibraryOrder(scope: String, arguments: Map<*, *>?, result: MethodChannel.Result) {
+        val sort = arguments?.get("sort") as? String ?: "manual"
+        require(sort in setOf("manual", "newest", "oldest", "korean", "english")) { "올바르지 않은 정렬 방식입니다." }
+        val ids = (arguments?.get("ids") as? List<*>)?.filterIsInstance<String>()?.distinct() ?: emptyList()
+        ioExecutor.execute {
+            try {
+                synchronized(localImagesLock) {
+                    val owned = readLocalImagesJson(scope)
+                    val ownedIds = (0 until owned.length()).map { owned.getJSONObject(it).getString("id") }.toSet()
+                    val value = JSONObject().put("sort", sort).put("ids", JSONArray(ids.filter { it in ownedIds }))
+                    check(getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE).edit()
+                        .putString("order_$scope", value.toString()).commit()) { "이미지 순서를 저장할 수 없습니다." }
+                }
+                runOnUiThread { result.success(null) }
+            } catch (error: Exception) {
+                runOnUiThread { result.error("order_save_failed", error.message, null) }
+            }
+        }
+    }
+
+    private fun previewLocalWallpaper(scope: String, id: String?, result: MethodChannel.Result) {
+        val path = synchronized(localImagesLock) {
+            val owned = readLocalImagesJson(scope)
+            (0 until owned.length()).map { owned.getJSONObject(it) }.firstOrNull {
+                it.getString("id") == id
+            }?.getString("path") ?: error("등록된 이미지가 없습니다.")
+        }
+        val source = File(path).canonicalFile
+        check(source.isFile) { "이미지 파일을 찾을 수 없습니다." }
+        check(source.path.startsWith(File(filesDir, LOCAL_IMAGES_DIRECTORY).canonicalPath + File.separator))
+        val uri = FileProvider.getUriForFile(this, "$packageName.wallpaper_images", source)
+        try {
+            // Prefer the user's default launcher's crop/preview UI when supported.
+            val intent = WallpaperManager.getInstance(this).getCropAndSetWallpaperIntent(uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            intent.clipData = ClipData.newRawUri("wallpaper", uri)
+            startActivity(intent)
+            result.success(true)
+        } catch (_: ActivityNotFoundException) {
+            result.success(false)
+        } catch (_: IllegalArgumentException) {
+            result.success(false)
+        }
+    }
+
+    private fun readLocalImagesJson(scope: String): JSONArray {
+        return LocalImageOwnership.owned(readAllLocalImagesJson(), scope)
+    }
+
+    private fun writeLocalImagesJson(scope: String, items: JSONArray) {
+        val merged = LocalImageOwnership.replaceOwned(readAllLocalImagesJson(), scope, items)
+        check(getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE)
             .edit()
-            .putString(LOCAL_IMAGES_KEY, items.toString())
-            .commit()
+            .putString(LOCAL_IMAGES_KEY, merged.toString())
+            .commit()) { "이미지 기록을 저장할 수 없습니다." }
     }
 
     private fun jsonObjectToMap(item: JSONObject): Map<String, Any?> = mapOf(
@@ -469,6 +607,9 @@ class MainActivity : FlutterActivity() {
         "height" to item.getInt("height"),
         "mode" to item.optString("mode", "original"),
         "tag" to item.optString("tag", "장르 설정되지 않음"),
+        "tags" to (item.optJSONArray("tags")?.let { values ->
+            (0 until values.length()).map { values.getString(it) }
+        } ?: listOf(item.optString("tag", "장르 설정되지 않음"))),
         "createdAt" to item.getString("createdAt"),
         "cloudProjectId" to if (item.isNull("cloudProjectId")) {
             null

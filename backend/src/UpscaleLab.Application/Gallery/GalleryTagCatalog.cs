@@ -24,6 +24,15 @@ public static class GalleryTagCatalog
         Unspecified
     ];
 
+    public static string[] NormalizeMany(IEnumerable<string>? tags, string? legacyTag = null)
+    {
+        var values = tags?.Select(Normalize).Distinct(StringComparer.Ordinal).ToArray()
+            ?? [Normalize(legacyTag)];
+        if (values.Length > All.Count) throw new ValidationException("태그가 너무 많습니다.");
+        if (values.Length == 0) return [Unspecified];
+        return values.Length > 1 ? values.Where(x => x != Unspecified).ToArray() : values;
+    }
+
     public static string Normalize(string? tag)
     {
         var normalized = string.IsNullOrWhiteSpace(tag) ? Unspecified : tag.Trim();

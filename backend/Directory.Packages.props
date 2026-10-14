@@ -3,6 +3,7 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
+    <PackageVersion Include="Magick.NET-Q8-AnyCPU" Version="14.17.2" />
     <PackageVersion Include="AWSSDK.S3" Version="4.0.103.4" />
     <PackageVersion Include="AWSSDK.CognitoIdentityProvider" Version="4.0.4" />
     <PackageVersion Include="BCrypt.Net-Next" Version="4.2.0" />

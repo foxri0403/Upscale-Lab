@@ -75,7 +75,8 @@ public sealed class ImageService(ApplicationDbContext dbContext, IStorageService
     public async Task DeleteAsync(Guid userId, Guid imageId, CancellationToken cancellationToken)
     {
         var image = await FindOwnedAsync(userId, imageId, true, cancellationToken);
-        var objectKeys = image.OptimizedImages.Select(x => x.ObjectKey).Append(image.OriginalObjectKey).ToArray();
+        var objectKeys = image.OptimizedImages.Select(x => x.ObjectKey)
+            .Append(image.OriginalObjectKey).Append(image.OriginalObjectKey + ".gallery-480.jpg").ToArray();
 
         dbContext.Images.Remove(image);
         await dbContext.SaveChangesAsync(cancellationToken);

@@ -11,13 +11,25 @@ namespace UpscaleLab.Api.Controllers;
 public sealed class GalleryController(IGalleryService galleryService) : ControllerBase
 {
     [AllowAnonymous]
+    [HttpGet("{id:guid}/thumbnail")]
+    public async Task<IActionResult> Thumbnail(Guid id,
+        [FromServices] IGalleryThumbnailService thumbnails, CancellationToken cancellationToken)
+    {
+        var bytes = await thumbnails.GetAsync(id, User.GetOptionalUserId(), cancellationToken);
+        if (bytes is null) return Redirect((await galleryService.CreatePreviewUrlAsync(
+            id, User.GetOptionalUserId(), cancellationToken)).Url);
+        Response.Headers.CacheControl = "private, max-age=300";
+        return File(bytes, "image/jpeg");
+    }
+    [AllowAnonymous]
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<GalleryPostResponse>>> GetAll(
         [FromQuery] string? search,
         [FromQuery] string? tag,
+        [FromQuery] string[]? tags,
         CancellationToken cancellationToken)
     {
-        return Ok(await galleryService.GetAllAsync(User.GetOptionalUserId(), search, tag, cancellationToken));
+        return Ok(await galleryService.GetAllAsync(User.GetOptionalUserId(), search, tag, cancellationToken, tags));
     }
 
     [AllowAnonymous]
@@ -49,6 +61,15 @@ public sealed class GalleryController(IGalleryService galleryService) : Controll
             id,
             request,
             cancellationToken));
+    }
+
+    [Authorize]
+    [HttpPatch("{id:guid}")]
+    public async Task<ActionResult<GalleryPostResponse>> Update(
+        Guid id, UpdateGalleryPostRequest request, CancellationToken cancellationToken)
+    {
+        return Ok(await galleryService.UpdateAsync(
+            User.GetRequiredUserId(), id, request, cancellationToken));
     }
 
     [Authorize]
@@ -84,6 +105,14 @@ public sealed class GalleryController(IGalleryService galleryService) : Controll
     {
         await galleryService.UnlikeAsync(User.GetRequiredUserId(), id, cancellationToken);
         return NoContent();
+    }
+
+    [AllowAnonymous]
+    [HttpGet("{id:guid}/preview-url")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<ActionResult<DownloadUrlResponse>> PreviewUrl(Guid id, CancellationToken cancellationToken)
+    {
+        return Ok(await galleryService.CreatePreviewUrlAsync(id, User.GetOptionalUserId(), cancellationToken));
     }
 
     [AllowAnonymous]

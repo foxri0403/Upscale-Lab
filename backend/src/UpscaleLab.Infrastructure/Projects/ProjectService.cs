@@ -130,6 +130,7 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
         var objectKeys = project.Layers.Select(x => x.ObjectKey)
             .Concat(project.OriginalImage.OptimizedImages.Select(x => x.ObjectKey))
             .Append(project.OriginalImage.OriginalObjectKey)
+            .Append(project.OriginalImage.OriginalObjectKey + ".gallery-480.jpg")
             .Distinct()
             .ToArray();
 

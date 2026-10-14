@@ -68,6 +68,9 @@ if (string.IsNullOrWhiteSpace(cognitoOptions.ClientId))
         "Cognito:ClientId is required. Use user-secrets or an environment variable.");
 }
 
+if (string.IsNullOrWhiteSpace(cognitoOptions.UserPoolId))
+    throw new InvalidOperationException("Cognito:UserPoolId is required for expired account cleanup.");
+
 if (string.IsNullOrWhiteSpace(cognitoOptions.Region) || cognitoOptions.ResendCooldownSeconds < 0)
 {
     throw new InvalidOperationException("Cognito settings must contain a region and valid positive numeric values.");
@@ -78,6 +81,7 @@ builder.Services.AddSingleton(s3Options);
 builder.Services.AddSingleton(replicateOptions);
 builder.Services.AddSingleton(seeThroughOptions);
 builder.Services.AddSingleton(cognitoOptions);
+builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure(3)));
@@ -100,10 +104,14 @@ builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IEmailVerificationProvider, CognitoEmailVerificationProvider>();
 builder.Services.AddScoped<IPasswordRecoveryProvider, CognitoEmailVerificationProvider>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IUnverifiedAccountCleaner, CognitoAccountCleaner>();
+builder.Services.AddHostedService<ExpiredAccountWorker>();
 builder.Services.AddScoped<IDeviceService, DeviceService>();
 builder.Services.AddScoped<IUserSettingService, UserSettingService>();
 builder.Services.AddScoped<IImageService, ImageService>();
 builder.Services.AddScoped<IGalleryService, GalleryService>();
+builder.Services.AddScoped<IGalleryThumbnailService, GalleryThumbnailService>();
+builder.Services.AddSingleton<GalleryThumbnailCache>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IProjectProcessingService, ProjectProcessingService>();
 builder.Services.AddSingleton<IProcessingJobQueue, ProcessingJobQueue>();

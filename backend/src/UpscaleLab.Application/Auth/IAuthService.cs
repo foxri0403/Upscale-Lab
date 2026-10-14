@@ -15,5 +15,8 @@ public interface IAuthService
         PasswordResetConfirmRequest request,
         CancellationToken cancellationToken);
     Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken);
+    Task<AuthResponse> RefreshAsync(RefreshSessionRequest request, CancellationToken cancellationToken);
+    Task RevokeSessionAsync(RefreshSessionRequest request, CancellationToken cancellationToken);
+    Task DeleteExpiredAccountsAsync(CancellationToken cancellationToken);
     Task<UserResponse> GetMeAsync(Guid userId, CancellationToken cancellationToken);
 }

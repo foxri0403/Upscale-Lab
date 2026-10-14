@@ -64,13 +64,15 @@ These are expected to come from local user secrets, environment variables, or a 
 
 ## Mobile versioning
 
+- Current APK version: **0.6.0** (Android build **13**). Keep only this latest version entry; replace it after every generated APK and never append a version history here.
 - Use semantic version numbers in `major.minor.patch` form for every new APK release.
-- Increment `major` for a large feature or major product update.
-- Increment `minor` for a smaller feature update.
-- Increment `patch` for bug fixes only.
+- Increase the first number (`major`) by exactly 1 for a large feature or major product update.
+- Increase the second number (`minor`) by exactly 1 for a smaller feature update.
+- Increase the third number (`patch`) by exactly 1 for UI refinements, bug fixes, and other small adjustments.
 - Reset the less-significant components when incrementing a higher component (for example, `0.3.4` → `0.4.0` or `1.0.0`).
 - Increment the Android build number after every newly generated APK, independently of the semantic version component selected.
 - Keep the APK filename and mobile documentation synchronized with the version in `mobile/pubspec.yaml`.
+- Whenever an APK is generated, update the single current-version entry above, `mobile/pubspec.yaml`, and `mobile/README.md` together. Read the latest recorded version before assigning a new release; feature releases that also include fixes use the feature increment.
 - Verify every generated APK with Android `apksigner` before delivery; never deliver an unsigned release APK.
 - Existing team APKs are signed with the current development machine's Android debug certificate. Preserve that certificate for upgrade-compatible test APKs until an explicit production signing configuration is supplied.
 

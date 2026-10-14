@@ -15,6 +15,13 @@ android {
     }
     kotlinOptions { jvmTarget = JavaVersion.VERSION_17.toString() }
 
+    // Team test releases must remain upgrade-compatible with the existing APKs.
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
     defaultConfig {
         applicationId = "com.livelayer.app"
         minSdk = flutter.minSdkVersion
@@ -25,3 +32,8 @@ android {
 }
 
 flutter { source = "../.." }
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
+}

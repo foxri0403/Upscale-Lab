@@ -1,21 +1,7 @@
-const unspecifiedGalleryTag = '장르 설정되지 않음';
+import 'gallery_tag_codec.dart';
+import 'gallery_tags.dart';
 
-const galleryTags = <String>[
-  '동물',
-  '애니',
-  '게임',
-  '여자',
-  '남자',
-  '풍경',
-  '픽셀 아트',
-  '레트로',
-  'SF',
-  '스포츠',
-  '자동차',
-  '비행기',
-  '밀리터리',
-  unspecifiedGalleryTag,
-];
+export 'gallery_tags.dart';
 
 class GalleryPostItem {
   const GalleryPostItem({
@@ -24,6 +10,9 @@ class GalleryPostItem {
     required this.title,
     required this.imageUrl,
     required this.tag,
+    this.selectedTags,
+    this.thumbnailUrl,
+    this.fileName,
     required this.createdAt,
   });
 
@@ -32,23 +21,38 @@ class GalleryPostItem {
   final String title;
   final String imageUrl;
   final String tag;
+  final List<String>? selectedTags;
+  final String? thumbnailUrl;
+  final String? fileName;
+  List<String> get tags => selectedTags ?? [tag];
   final DateTime createdAt;
 
-  bool matches({String? search, String? selectedTag}) {
-    if (selectedTag != null && tag != selectedTag) return false;
+  bool matches(
+      {String? search, String? selectedTag, Iterable<String>? selectedTags}) {
+    if (selectedTag != null && !tags.contains(selectedTag)) return false;
+    if (selectedTags != null &&
+        selectedTags.isNotEmpty &&
+        !selectedTags.any(tags.contains)) {
+      return false;
+    }
     final normalizedSearch = search?.trim().toLowerCase();
     return normalizedSearch == null ||
         normalizedSearch.isEmpty ||
         title.toLowerCase().contains(normalizedSearch);
   }
 
-  factory GalleryPostItem.fromJson(Map<String, dynamic> json) =>
-      GalleryPostItem(
-        id: json['id'] as String,
-        username: json['username'] as String,
-        title: json['title'] as String,
-        imageUrl: json['imageUrl'] as String,
-        tag: json['tag'] as String? ?? unspecifiedGalleryTag,
-        createdAt: DateTime.parse(json['createdAt'] as String).toLocal(),
-      );
+  factory GalleryPostItem.fromJson(Map<String, dynamic> json) {
+    final tags = GalleryTagCodec.fromPost(json);
+    return GalleryPostItem(
+      id: json['id'] as String,
+      username: json['username'] as String,
+      title: json['title'] as String,
+      imageUrl: json['imageUrl'] as String,
+      tag: json['tag'] as String? ?? unspecifiedGalleryTag,
+      selectedTags: tags.isEmpty ? [unspecifiedGalleryTag] : tags,
+      thumbnailUrl: json['thumbnailUrl'] as String?,
+      fileName: json['fileName'] as String?,
+      createdAt: DateTime.parse(json['createdAt'] as String).toLocal(),
+    );
+  }
 }
