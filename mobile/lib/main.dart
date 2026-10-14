@@ -77,6 +77,7 @@ Future<void> main() async {
     apiClient.logout();
     // A temporary secure-storage failure must not destroy saved credentials.
   }
+  await AppTheme.loadMode();
   runApp(
     LiveLayerApp(
       apiClient: apiClient,
@@ -108,10 +109,14 @@ class LiveLayerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: AppTheme.mode,
+      builder: (context, selectedMode, _) => MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Upscale Lab',
       theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: selectedMode,
       builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
         value: AppTheme.systemOverlay,
         child: child!,
@@ -122,7 +127,7 @@ class LiveLayerApp extends StatelessWidget {
               onLogout: (context) => _logoutToLogin(context, apiClient),
             )
           : LoginPage(apiClient: apiClient),
-    );
+    ));
   }
 }
 

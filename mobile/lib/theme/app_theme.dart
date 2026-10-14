@@ -1,7 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 abstract final class AppTheme {
+  static final mode = ValueNotifier<ThemeMode>(ThemeMode.system);
+  static const _storage = FlutterSecureStorage();
+  static const _themeKey = 'upscale_lab_theme_mode';
+
+  static Future<void> loadMode() async {
+    try {
+      final saved = await _storage.read(key: _themeKey);
+      mode.value = ThemeMode.values.firstWhere((m) => m.name == saved, orElse: () => ThemeMode.system);
+    } catch (_) { mode.value = ThemeMode.system; }
+  }
+
+  static Future<void> setMode(ThemeMode value) async {
+    mode.value = value;
+    try { await _storage.write(key: _themeKey, value: value.name); } catch (_) {}
+  }
+
   static const primary = Color(0xFF536DFE);
   static const background = Color(0xFFFAFBFF);
   static const surface = Colors.white;
@@ -151,4 +168,37 @@ abstract final class AppTheme {
       ),
     );
   }
+  static ThemeData get dark {
+    final base = ThemeData.dark(useMaterial3: true);
+    final scheme = ColorScheme.fromSeed(seedColor: primary, brightness: Brightness.dark);
+    return base.copyWith(
+      colorScheme: scheme,
+      scaffoldBackgroundColor: const Color(0xFF13151B),
+      appBarTheme: const AppBarThemeData(
+        backgroundColor: Color(0xFF13151B),
+        foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: false,
+        titleSpacing: 20,
+        titleTextStyle: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: const Color(0xFF1D1F27),
+        indicatorColor: primary.withValues(alpha: 0.3),
+        height: 70,
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: const Color(0xFF242833),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: Color(0xFF1D1F27),
+        surfaceTintColor: Colors.transparent,
+        showDragHandle: true,
+      ),
+    );
+  }
+
 }

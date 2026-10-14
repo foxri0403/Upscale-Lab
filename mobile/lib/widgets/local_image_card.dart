@@ -27,7 +27,7 @@ class NewImageCard extends StatelessWidget {
     return Material(
       color: AppTheme.tint.withValues(alpha: 0.35),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.zero,
         side: const BorderSide(color: AppTheme.border),
       ),
       clipBehavior: Clip.antiAlias,
