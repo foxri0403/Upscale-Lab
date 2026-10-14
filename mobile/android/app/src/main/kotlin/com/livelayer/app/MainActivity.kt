@@ -50,6 +50,12 @@ class MainActivity : FlutterActivity() {
     )
 
     private val ioExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val wallpaperController by lazy {
+        StaticWallpaperController(
+            File(filesDir, APPLIED_WALLPAPER_DIRECTORY),
+            AndroidWallpaperPlatform(applicationContext),
+        )
+    }
     private var pendingDownload: PendingDownload? = null
     private var pendingLocalSave: PendingLocalSave? = null
 
@@ -87,13 +93,16 @@ class MainActivity : FlutterActivity() {
                     )
                     "applyStaticWallpaper" -> applyStaticWallpaper(
                         call.argument<String>("url"),
+                        call.argument<Any>("target"),
                         result,
                     )
                     "applyLocalStaticWallpaper" -> applyLocalStaticWallpaper(
                         call.argument<String>("sourcePath"),
+                        call.argument<Any>("target"),
                         result,
                     )
-                    "clearHomeWallpaper" -> clearHomeWallpaper(result)
+                    "clearWallpaper" -> clearWallpaper(call.argument<Any>("target"), result)
+                    "clearHomeWallpaper" -> clearWallpaper("home", result)
                     "prepareLiveWallpaper" -> prepareLiveWallpaper(
                         call.arguments as? Map<*, *>,
                         result,
@@ -140,6 +149,11 @@ class MainActivity : FlutterActivity() {
                         }
                         "saveLibraryOrder" -> saveLibraryOrder(scope, call.arguments as? Map<*, *>, result)
                         "previewLocalWallpaper" -> previewLocalWallpaper(scope, call.argument<String>("id"), result)
+                        "applyLocalWallpaper" -> applyLocalStaticWallpaper(
+                            localWallpaperSource(scope, call.argument<String>("id")).absolutePath,
+                            call.argument<Any>("target"),
+                            result,
+                        )
                         "downloadSharedImage" -> downloadSharedImage(call.arguments as? Map<*, *>, scope, result)
                         "importLocalImage" -> importLocalImage(
                             call.arguments as? Map<*, *>,
@@ -562,7 +576,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun previewLocalWallpaper(scope: String, id: String?, result: MethodChannel.Result) {
+    private fun localWallpaperSource(scope: String, id: String?): File {
         val path = synchronized(localImagesLock) {
             val owned = readLocalImagesJson(scope)
             (0 until owned.length()).map { owned.getJSONObject(it) }.firstOrNull {
@@ -572,6 +586,11 @@ class MainActivity : FlutterActivity() {
         val source = File(path).canonicalFile
         check(source.isFile) { "이미지 파일을 찾을 수 없습니다." }
         check(source.path.startsWith(File(filesDir, LOCAL_IMAGES_DIRECTORY).canonicalPath + File.separator))
+        return source
+    }
+
+    private fun previewLocalWallpaper(scope: String, id: String?, result: MethodChannel.Result) {
+        val source = localWallpaperSource(scope, id)
         val uri = FileProvider.getUriForFile(this, "$packageName.wallpaper_images", source)
         try {
             // Prefer the user's default launcher's crop/preview UI when supported.
@@ -720,62 +739,57 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun applyStaticWallpaper(url: String?, result: MethodChannel.Result) {
+    private fun wallpaperTarget(rawTarget: Any?, result: MethodChannel.Result): WallpaperTarget? {
+        return try {
+            WallpaperTarget.fromArgument(rawTarget).also { it.requireSupported(Build.VERSION.SDK_INT) }
+        } catch (error: IllegalArgumentException) {
+            result.error("invalid_target", error.message, null)
+            null
+        } catch (error: UnsupportedOperationException) {
+            result.error("unsupported_target", error.message, null)
+            null
+        }
+    }
+
+    private fun applyStaticWallpaper(url: String?, rawTarget: Any?, result: MethodChannel.Result) {
         if (url.isNullOrBlank()) {
             result.error("invalid_url", "배경화면 URL이 없습니다.", null)
             return
         }
 
-        ioExecutor.execute {
-            try {
-                openHttpStream(url).use { input ->
-                    val manager = WallpaperManager.getInstance(applicationContext)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        manager.setStream(input, null, true, WallpaperManager.FLAG_SYSTEM)
-                    } else {
-                        manager.setStream(input)
-                    }
-                }
-                runOnUiThread { result.success(null) }
-            } catch (error: Exception) {
-                runOnUiThread {
-                    result.error("wallpaper_failed", "배경화면을 적용하지 못했습니다.", error.message)
-                }
-            }
-        }
+        val target = wallpaperTarget(rawTarget, result) ?: return
+        applyWallpaperSource(target, result) { openHttpStream(url) }
     }
 
-    private fun applyLocalStaticWallpaper(sourcePath: String?, result: MethodChannel.Result) {
+    private fun applyLocalStaticWallpaper(sourcePath: String?, rawTarget: Any?, result: MethodChannel.Result) {
         if (sourcePath.isNullOrBlank()) {
             result.error("invalid_source", "배경화면 이미지가 없습니다.", null)
             return
         }
+        val target = wallpaperTarget(rawTarget, result) ?: return
+        applyWallpaperSource(target, result) {
+            val source = File(sourcePath)
+            check(source.isFile) { "배경화면 이미지 파일을 찾을 수 없습니다." }
+            source.inputStream()
+        }
+    }
+
+    private fun applyWallpaperSource(
+        target: WallpaperTarget,
+        result: MethodChannel.Result,
+        openSource: () -> InputStream,
+    ) {
         ioExecutor.execute {
             try {
-                val source = File(sourcePath)
-                check(source.isFile) { "배경화면 이미지 파일을 찾을 수 없습니다." }
-                val directory = File(filesDir, APPLIED_WALLPAPER_DIRECTORY)
-                check(directory.exists() || directory.mkdirs()) { "배경화면 저장 폴더를 만들 수 없습니다." }
-                val persistent = File(directory, "current.img")
-                val temporary = File(directory, "current.img.part")
-                source.inputStream().use { input ->
-                    FileOutputStream(temporary).use { output -> input.copyTo(output) }
+                wallpaperController.apply(target, openSource)
+                val preferences = getSharedPreferences("live_layer", MODE_PRIVATE).edit()
+                target.screens.forEach { screen ->
+                    preferences.putString(
+                        staticWallpaperPathKey(screen),
+                        File(File(filesDir, APPLIED_WALLPAPER_DIRECTORY), screen.cacheFileName).absolutePath,
+                    )
                 }
-                if (persistent.exists()) check(persistent.delete()) { "기존 배경화면 파일을 교체할 수 없습니다." }
-                check(temporary.renameTo(persistent)) { "배경화면 파일을 보관할 수 없습니다." }
-
-                persistent.inputStream().use { input ->
-                    val manager = WallpaperManager.getInstance(applicationContext)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        manager.setStream(input, null, true, WallpaperManager.FLAG_SYSTEM)
-                    } else {
-                        manager.setStream(input)
-                    }
-                }
-                getSharedPreferences("live_layer", MODE_PRIVATE)
-                    .edit()
-                    .putString("static_wallpaper_path", persistent.absolutePath)
-                    .commit()
+                check(preferences.commit()) { "배경화면 설정 정보를 저장하지 못했습니다." }
                 runOnUiThread { result.success(null) }
             } catch (error: Exception) {
                 runOnUiThread {
@@ -785,26 +799,24 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun clearHomeWallpaper(result: MethodChannel.Result) {
+    private fun staticWallpaperPathKey(screen: WallpaperTarget): String = when (screen) {
+        WallpaperTarget.HOME -> "static_wallpaper_path"
+        WallpaperTarget.LOCK -> "static_lock_wallpaper_path"
+        WallpaperTarget.BOTH -> error("A source path belongs to one screen.")
+    }
+
+    private fun clearWallpaper(rawTarget: Any?, result: MethodChannel.Result) {
+        val target = wallpaperTarget(rawTarget, result) ?: return
         ioExecutor.execute {
             try {
-                val manager = WallpaperManager.getInstance(applicationContext)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    manager.clear(WallpaperManager.FLAG_SYSTEM)
-                } else {
-                    manager.clear()
-                }
-
-                val persistent = File(File(filesDir, APPLIED_WALLPAPER_DIRECTORY), "current.img")
-                check(!persistent.exists() || persistent.delete()) { "보관된 배경화면 파일을 삭제할 수 없습니다." }
-                getSharedPreferences("live_layer", MODE_PRIVATE)
-                    .edit()
-                    .remove("static_wallpaper_path")
-                    .commit()
+                wallpaperController.clear(target)
+                val preferences = getSharedPreferences("live_layer", MODE_PRIVATE).edit()
+                target.screens.forEach { preferences.remove(staticWallpaperPathKey(it)) }
+                check(preferences.commit()) { "배경화면 설정 정보를 저장하지 못했습니다." }
                 runOnUiThread { result.success(null) }
             } catch (error: Exception) {
                 runOnUiThread {
-                    result.error("wallpaper_clear_failed", "홈 배경화면을 제거하지 못했습니다.", error.message)
+                    result.error("wallpaper_clear_failed", "배경화면을 제거하지 못했습니다.", error.message)
                 }
             }
         }

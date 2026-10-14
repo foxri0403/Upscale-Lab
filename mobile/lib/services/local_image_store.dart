@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 
 import '../models/local_image.dart';
 import '../models/library_order.dart';
+import 'wallpaper_service.dart';
 
 class LocalImageStore {
   const LocalImageStore({required this.scope});
@@ -22,6 +23,16 @@ class LocalImageStore {
       await _channel.invokeMethod<bool>(
           'previewLocalWallpaper', {'scope': scope, 'id': id}) ??
       false;
+
+  /// Applies an image owned by the captured account to the selected screen(s).
+  /// Use this after the UI chooses a target; the system preview controls its own
+  /// target selection and cannot enforce this option.
+  Future<void> applyWallpaper(String id, {required WallpaperTarget target}) =>
+      _channel.invokeMethod<void>('applyLocalWallpaper', {
+        'scope': scope,
+        'id': id,
+        'target': target.name,
+      });
 
   Future<List<LocalImageItem>> getAll() async {
     final values = await _channel
