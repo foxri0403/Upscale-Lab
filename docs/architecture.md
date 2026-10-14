@@ -42,11 +42,11 @@ erDiagram
 
 1. 인증된 클라이언트가 `POST /api/images`로 이미지와 크기 메타데이터를 전송합니다.
 2. API가 S3에 원본을 저장하고 PostgreSQL에 `Image`를 기록합니다.
-3. 향후 업스케일 작업자가 S3 입력 URL로 Replicate Real-ESRGAN prediction을 생성합니다.
-4. 완료 결과를 S3로 복사하고 `OptimizedImage`에 대상 Device/방향/크기를 기록합니다.
-5. 클라이언트는 짧은 수명의 pre-signed download URL을 API로 발급받습니다.
+3. 새 처리 기능은 `POST /api/projects`로 업로드한 이미지에 `POST /api/projects/{id}/process`를 호출해 시작합니다. 원본 바이트를 LAN GPU 워커에 보내 Real-ESRGAN 업스케일, PartGLEE/See-through 레이어 변환 또는 두 작업을 실행합니다.
+4. API가 PNG/manifest ZIP을 검증하고 S3에 결과를 저장합니다. `ProcessingJob`에 옵션과 업스케일 결과 키/크기를 기록하고 레이어는 `ImageLayer`로 저장합니다.
+5. 클라이언트는 상태·레이어를 조회하고, jobId에 해당하는 짧은 수명의 업스케일 다운로드 URL을 발급받습니다.
 
-현재 1~2단계와 다운로드 URL 발급은 구현되어 있습니다. Replicate 호출 서비스는 구현되어 있으나 prediction polling, 결과 S3 복사, `OptimizedImage` 기록을 하나의 내구성 있는 background job으로 묶는 작업은 아직 남아 있습니다.
+기존 `/api/images`와 장치별 `OptimizedImage` 흐름은 보존합니다. 새 GPU 기능은 프로젝트 단위이며 장치별 화면 맞춤 처리는 하지 않습니다. 기존 Replicate 서비스는 새 처리 경로에서 호출하지 않습니다. [로컬 GPU 가이드](local-gpu.md)에 모델 선택, API 및 두 컴퓨터 설정이 있습니다.
 
 ## API
 
@@ -77,7 +77,8 @@ erDiagram
 | SignalR | `/hubs/notifications` | 필요 | 향후 실시간 알림 기반 |
 | GET/POST | `/api/projects` | 필요 | 내 LiveLayer 목록/원본 업로드 |
 | GET/DELETE | `/api/projects/{id}` | 필요 | 프로젝트 상세/삭제 |
-| POST | `/api/projects/{id}/process` | 필요 | 비동기 See-through 처리 시작 |
+| POST | `/api/projects/{id}/process` | 필요 | 비동기 업스케일/레이어 처리 시작, 본문 생략 시 See-through |
+| POST | `/api/projects/{id}/jobs/{jobId}/download-url` | 필요 | 완료된 본인 업스케일 결과의 서명 URL |
 | GET | `/api/projects/{id}/processing-status` | 필요 | 최신 처리 상태 조회 |
 | GET | `/api/projects/{id}/layers` | 필요 | 렌더링 레이어 조회 |
 | PATCH | `/api/projects/{id}/layers/{layerId}` | 필요 | depth/transform/movement 수정 |
@@ -86,7 +87,11 @@ erDiagram
 
 - API와 영속성은 기존 ASP.NET Core/EF Core 구조를 유지합니다.
 - `ProcessingJob`이 queue 상태를 DB에 보존하고 단일 background worker가 처리합니다. 프로세스 재시작 시 `Queued`/`Processing` 작업을 다시 queue에 넣습니다.
-- Python 어댑터는 See-through 저장소를 vendoring하지 않고 공식 `inference/scripts/inference_psd.py`를 실행합니다.
+- `LocalGpu:Enabled=true`일 때 API는 공유 키로 인증된 GPU HTTP 워커에 multipart 바이트를 전송합니다. S3 URL/DB 자격 증명을 GPU에 전달하지 않습니다.
+- 모델별 Python 프로세스에서 공식 See-through CLI, PartGLEE의 Detectron2 모델 API, Real-ESRGAN 라이브러리를 호출합니다. 모델 코드/가중치는 vendoring하지 않습니다.
+- PartGLEE 일반 사진 결과의 깊이는 세로 위치 추정, 배경은 OpenCV 보간입니다. 기하학적 3D 재구성은 아닙니다.
+- 처리 옵션을 DB에 보존하며 프로젝트별 활성 작업은 unique index로 제한합니다. 단일 API와 단일 GPU 워커 프로세스 구성을 대상으로 합니다.
+- 업스케일 단독 작업은 기존 레이어를 유지합니다. 결과 URL은 projectId/jobId/UserId를 모두 확인하며, 처리 중 프로젝트 삭제는 409입니다.
 - 성공 결과만 기존 레이어와 원자적으로 교체하며, 실패 시 기존 완료 레이어는 보존합니다.
 - Project, Layer, 비공개 GalleryPost 조회는 항상 인증 UserId 또는 공개 여부를 확인합니다.
 

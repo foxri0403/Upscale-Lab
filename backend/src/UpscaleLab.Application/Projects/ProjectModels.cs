@@ -67,4 +67,10 @@ public sealed record ProcessingStatusResponse(
     string? ErrorMessage,
     DateTime? StartedAt,
     DateTime? CompletedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    ProcessingOperation Operation = ProcessingOperation.Layers,
+    LayerEngine LayerEngine = LayerEngine.SeeThrough,
+    int UpscaleFactor = 2,
+    bool HasUpscaledImage = false,
+    int? OutputWidth = null,
+    int? OutputHeight = null);

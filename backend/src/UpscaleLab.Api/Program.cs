@@ -58,6 +58,8 @@ if (Encoding.UTF8.GetByteCount(jwtOptions.Secret) < 32)
 var s3Options = builder.Configuration.GetSection("AWS").Get<S3StorageOptions>() ?? new S3StorageOptions();
 var replicateOptions = builder.Configuration.GetSection("Replicate").Get<ReplicateOptions>() ?? new ReplicateOptions();
 var seeThroughOptions = builder.Configuration.GetSection("SeeThrough").Get<SeeThroughOptions>() ?? new SeeThroughOptions();
+var localGpuOptions = builder.Configuration.GetSection("LocalGpu").Get<LocalGpuOptions>() ?? new LocalGpuOptions();
+localGpuOptions.Validate();
 var cognitoOptions = builder.Configuration
     .GetSection(CognitoOptions.SectionName)
     .Get<CognitoOptions>() ?? new CognitoOptions();
@@ -80,6 +82,7 @@ builder.Services.AddSingleton(jwtOptions);
 builder.Services.AddSingleton(s3Options);
 builder.Services.AddSingleton(replicateOptions);
 builder.Services.AddSingleton(seeThroughOptions);
+builder.Services.AddSingleton(localGpuOptions);
 builder.Services.AddSingleton(cognitoOptions);
 builder.Services.AddSingleton(TimeProvider.System);
 
@@ -116,6 +119,9 @@ builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IProjectProcessingService, ProjectProcessingService>();
 builder.Services.AddSingleton<IProcessingJobQueue, ProcessingJobQueue>();
 builder.Services.AddSingleton<IImageLayerProcessor, SeeThroughImageLayerProcessor>();
+builder.Services.AddHttpClient<IProjectImageProcessor, LocalGpuImageProcessor>(client => client.Timeout = Timeout.InfiniteTimeSpan)
+    .RedactLoggedHeaders(["X-Worker-Key"])
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddHostedService<LiveLayerProcessingWorker>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

@@ -46,4 +46,7 @@ mobile/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.ja
 
 # Local test deliverables
 artifacts/
+**/__pycache__/
+backend/ai-worker/.venv/
+backend/ai-worker/workspace/
 mobile/test_assets/

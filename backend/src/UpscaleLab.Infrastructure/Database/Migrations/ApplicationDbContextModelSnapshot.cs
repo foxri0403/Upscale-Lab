@@ -460,6 +460,26 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<string>("LayerEngine")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasDefaultValue("SeeThrough");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasDefaultValue("Layers");
+
+                    b.Property<int?>("OutputHeight")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("OutputWidth")
+                        .HasColumnType("integer");
+
                     b.Property<int>("Progress")
                         .HasColumnType("integer");
 
@@ -477,7 +497,20 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("UpscaleFactor")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(2);
+
+                    b.Property<string>("UpscaledObjectKey")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("ProjectId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" IN ('Queued', 'Processing')");
 
                     b.HasIndex("ProjectId", "CreatedAt");
 
