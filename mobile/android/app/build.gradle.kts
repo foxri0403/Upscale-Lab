@@ -34,6 +34,7 @@ android {
 flutter { source = "../.." }
 
 dependencies {
+    implementation("androidx.exifinterface:exifinterface:1.4.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }

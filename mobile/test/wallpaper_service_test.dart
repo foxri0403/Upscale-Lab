@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:live_layer/services/local_image_store.dart';
 import 'package:live_layer/services/wallpaper_service.dart';
+import 'package:live_layer/models/image_editor.dart';
+import 'package:live_layer/models/image_ratio.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -49,6 +51,10 @@ void main() {
         );
         expect((calls[0].arguments as Map)['sourcePath'], '/private/image.png');
         expect(
+            ((calls[0].arguments as Map)['ratio'] as Map)['mode'], 'automatic');
+        expect(
+            ((calls[1].arguments as Map)['ratio'] as Map)['mode'], 'automatic');
+        expect(
           (calls[1].arguments as Map)['url'],
           'https://example.test/image.png',
         );
@@ -71,6 +77,27 @@ void main() {
       });
     });
   }
+
+  test('explicit manual ratio travels with the chosen local and remote targets',
+      () async {
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(wallpaperChannel, (call) async {
+      calls.add(call);
+      return null;
+    });
+    const ratio = ImageRatioSettings(
+        automatic: false, preset: CropPreset.standard, portrait: false);
+    await service.applyLocal(
+        sourcePath: '/image.png', target: WallpaperTarget.lock, ratio: ratio);
+    await service.applyRemote(
+        url: 'https://example.test/image.png',
+        target: WallpaperTarget.both,
+        ratio: ratio);
+    expect((calls[0].arguments as Map)['target'], 'lock');
+    expect((calls[1].arguments as Map)['target'], 'both');
+    expect(calls.map((call) => (call.arguments as Map)['ratio']),
+        everyElement(ratio.toMap()));
+  });
 
   test(
     'UI cannot report completion before the native operation finishes',

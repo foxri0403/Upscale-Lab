@@ -9,15 +9,14 @@ import 'package:live_layer/services/image_editor_service.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const sourceSize = ui.Size(400, 200);
-  const screen = ui.Size(412, 892);
 
   test('orientation changes labels and actual preset ratios in both directions',
       () {
     for (final portrait in [true, false, true, false]) {
-      final wide = CropPreset.wide
-          .aspectRatio(portrait: portrait, source: sourceSize, screen: screen)!;
+      final wide =
+          CropPreset.wide.aspectRatio(portrait: portrait, source: sourceSize)!;
       final standard = CropPreset.standard
-          .aspectRatio(portrait: portrait, source: sourceSize, screen: screen)!;
+          .aspectRatio(portrait: portrait, source: sourceSize)!;
       expect(CropPreset.wide.label(portrait), portrait ? '9:16' : '16:9');
       expect(CropPreset.standard.label(portrait), portrait ? '3:4' : '4:3');
       expect(wide, portrait ? 9 / 16 : 16 / 9);
@@ -26,20 +25,14 @@ void main() {
         ..layout(const ui.Size(360, 360), standard);
       expect(geometry.sourceRect.size.aspectRatio, closeTo(standard, .000001));
       expect(
-          CropPreset.screen.aspectRatio(
-              portrait: portrait, source: sourceSize, screen: screen),
-          portrait ? 412 / 892 : 892 / 412);
-      expect(
-          CropPreset.original.aspectRatio(
-              portrait: portrait, source: sourceSize, screen: screen),
+          CropPreset.original
+              .aspectRatio(portrait: portrait, source: sourceSize),
           2);
       expect(
-          CropPreset.square.aspectRatio(
-              portrait: portrait, source: sourceSize, screen: screen),
+          CropPreset.square.aspectRatio(portrait: portrait, source: sourceSize),
           1);
       expect(
-          CropPreset.free.aspectRatio(
-              portrait: portrait, source: sourceSize, screen: screen),
+          CropPreset.free.aspectRatio(portrait: portrait, source: sourceSize),
           isNull);
     }
   });

@@ -1,8 +1,9 @@
 # Wallpaper operations for UI integration
 
 The static wallpaper API accepts `WallpaperTarget.home`, `.lock`, or `.both` for
-application and removal. These source changes add no target selection UI and do
-not require an APK release or version change.
+application and removal. Image registration and editing expose automatic/manual
+ratios, and the app preview preserves its existing target selection sheet.
+These source changes do not require an APK release or version change.
 
 ## Dart API
 
@@ -22,10 +23,13 @@ await store.applyWallpaper(image.id, target: WallpaperTarget.both);
 For a downloaded shared image, editor result, or refreshed remote image URL:
 
 ```dart
+import 'models/image_ratio.dart';
+
 const wallpaper = WallpaperService();
 await wallpaper.applyLocal(
   sourcePath: downloadedPath,
   target: WallpaperTarget.lock,
+  ratio: const ImageRatioSettings(),
 );
 await wallpaper.applyRemote(
   url: refreshedProject.originalImageUrl,
@@ -54,14 +58,23 @@ screen when the OS supports it.
 | Channel | Method | Arguments |
 | --- | --- | --- |
 | `live_layer/storage` | `applyLocalWallpaper` | `scope`, `id`, `target` |
-| `live_layer/wallpaper` | `applyLocalStaticWallpaper` | `sourcePath`, `target` |
-| `live_layer/wallpaper` | `applyStaticWallpaper` | `url`, `target` |
+| `live_layer/wallpaper` | `applyLocalStaticWallpaper` | `sourcePath`, `target`, optional `ratio` |
+| `live_layer/wallpaper` | `applyStaticWallpaper` | `url`, `target`, optional `ratio` |
 | `live_layer/wallpaper` | `clearWallpaper` | `target` |
 
 The wire target is exactly `home`, `lock`, or `both`. An omitted/null target defaults
 to `home` for existing callers. Invalid values fail with `invalid_target`.
 `clearHomeWallpaper` remains a home-only compatibility alias. No UI files need to
 change to preserve existing behavior.
+
+Local and remote application also accept an optional `ratio` map. An omitted
+ratio defaults to automatic, which detects the full applying display and center
+crops without stretching. The typed Dart service accepts `ImageRatioSettings`;
+import `models/image_ratio.dart` to construct it. A manual ratio stores a
+`preset` and `portrait` setting; editor free crops also store
+`freeAspectRatio`. Account-scoped `applyWallpaper` and `previewWallpaper`
+read the image's saved ratio from owned metadata. Automatic settings are resolved
+on each applying device and work with home, lock, or both targets.
 
 Lock-only and both-screen operations require Android 7.0/API 24 or newer. An older
 device returns `unsupported_target` before downloading, applying, or removing
@@ -81,6 +94,9 @@ arguments use `invalid_url`/`invalid_source`.
 - App-private source copies are kept separately in `applied_wallpaper/home.img`
   and `applied_wallpaper/lock.img`. Removal deletes only selected copies, including
   the legacy home `current.img` when home is selected. Library images are retained.
+- Ratio processing prepares a temporary cropped image for Android while keeping
+  the original bytes in each selected screen's source cache. Crop or application
+  failures preserve previous caches and remove staging files.
 - Android persists the actual applied wallpaper across app exits and reboots.
   A failed source read or rejected Android operation preserves previous copies
   and cleans up temporary files.

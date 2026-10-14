@@ -3,18 +3,26 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import 'models/image_editor.dart';
+import 'models/image_ratio.dart';
 import 'services/image_editor_service.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_components.dart';
+import 'widgets/device_display_builder.dart';
+import 'widgets/image_ratio_selector.dart';
 
 class ImageEditorResult {
-  const ImageEditorResult(this.editedFile);
+  const ImageEditorResult(this.editedFile, this.ratio);
   final EditedImageFile? editedFile;
+  final ImageRatioSettings ratio;
 }
 
 class ImageEditorPage extends StatefulWidget {
-  const ImageEditorPage({super.key, required this.filePath});
+  const ImageEditorPage(
+      {super.key,
+      required this.filePath,
+      this.initialRatio = const ImageRatioSettings()});
   final String filePath;
+  final ImageRatioSettings initialRatio;
 
   @override
   State<ImageEditorPage> createState() => _ImageEditorPageState();
@@ -24,9 +32,8 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
   EditorImageSource? _source;
   CropGeometry? _geometry;
   String? _error;
-  CropPreset _preset = CropPreset.original;
+  late ImageRatioSettings _ratio = widget.initialRatio;
   PhotoFilter _filter = PhotoFilter.original;
-  bool _portrait = true;
   bool _cropTab = true;
   bool _saving = false;
   int? _corner;
@@ -53,7 +60,6 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
       setState(() {
         _source = source;
         _geometry = CropGeometry(source.size);
-        _portrait = source.size.height >= source.size.width;
       });
     } catch (_) {
       if (mounted) setState(() => _error = '이미지를 불러오지 못했습니다.');
@@ -89,7 +95,14 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
       setState(() => _saving = false);
       await WidgetsBinding.instance.endOfFrame;
       if (mounted && ModalRoute.of(context)?.isCurrent == true) {
-        Navigator.pop(context, ImageEditorResult(edited));
+        Navigator.pop(
+            context,
+            ImageEditorResult(
+                edited,
+                _ratio.preset == CropPreset.free && !_ratio.automatic
+                    ? _ratio.copyWith(
+                        freeAspectRatio: geometry.sourceRect.size.aspectRatio)
+                    : _ratio));
       } else {
         await edited?.dispose();
       }
@@ -151,7 +164,9 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => DeviceDisplayBuilder(builder: _build);
+
+  Widget _build(BuildContext context, Size display) {
     final source = _source;
     final screen = MediaQuery.sizeOf(context);
     return PopScope(
@@ -163,10 +178,12 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
               onPressed: source == null || _saving
                   ? null
                   : () => setState(() {
-                        _preset = CropPreset.original;
+                        _ratio = widget.initialRatio;
                         _filter = PhotoFilter.original;
                         _geometry!.layout(
-                            _geometry!.viewport, source.size.aspectRatio,
+                            _geometry!.viewport,
+                            _ratio.aspectRatio(source.size, display,
+                                editing: true),
                             reset: true);
                       }),
               icon: const Icon(Icons.restart_alt)),
@@ -208,10 +225,8 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                             final geometry = _geometry!;
                             geometry.layout(
                                 constraints.biggest,
-                                _preset.aspectRatio(
-                                    portrait: _portrait,
-                                    source: source.size,
-                                    screen: screen));
+                                _ratio.aspectRatio(source.size, display,
+                                    editing: true));
                             return ClipRRect(
                               borderRadius: BorderRadius.circular(16),
                               child: Semantics(
@@ -250,39 +265,13 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                   ]),
                   const Divider(height: 24),
                   if (_cropTab) ...[
-                    const AppSectionTitle('비율'),
-                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      _orientation(true),
-                      const SizedBox(width: 12),
-                      _orientation(false),
-                    ]),
-                    SingleChildScrollView(
-                      key: const ValueKey('crop-ratios'),
-                      scrollDirection: Axis.horizontal,
-                      child: Row(children: [
-                        for (final preset in CropPreset.values)
-                          Padding(
-                              padding: const EdgeInsets.only(right: 6),
-                              child: Semantics(
-                                  selected: _preset == preset,
-                                  child: TextButton(
-                                    key: ValueKey(preset),
-                                    style: TextButton.styleFrom(
-                                        foregroundColor: _preset == preset
-                                            ? AppTheme.primary
-                                            : AppTheme.muted,
-                                        backgroundColor: _preset == preset
-                                            ? AppTheme.tint
-                                            : Colors.transparent,
-                                        shape: const StadiumBorder()),
-                                    onPressed: source == null || _saving
-                                        ? null
-                                        : () =>
-                                            setState(() => _preset = preset),
-                                    child: Text(preset.label(_portrait)),
-                                  ))),
-                      ]),
-                    ),
+                    ImageRatioSelector(
+                        value: _ratio,
+                        display: display,
+                        allowFree: true,
+                        onChanged: source == null || _saving
+                            ? null
+                            : (ratio) => setState(() => _ratio = ratio)),
                     const SizedBox(height: 8),
                     const Text('모서리를 드래그해 자르기 영역을 조절하세요.',
                         textAlign: TextAlign.center,
@@ -343,33 +332,6 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
               _cropTab == crop ? AppTheme.primary : AppTheme.muted),
       icon: Icon(icon),
       label: Text(label));
-
-  Widget _orientation(bool portrait) => Semantics(
-      selected: _portrait == portrait,
-      child: IconButton(
-        tooltip: portrait ? '세로 방향' : '가로 방향',
-        onPressed: _source == null || _saving
-            ? null
-            : () => setState(() => _portrait = portrait),
-        icon: SizedBox(
-            width: 56,
-            height: 44,
-            child: Center(
-                child: Container(
-                    width: portrait ? 24 : 40,
-                    height: portrait ? 36 : 25,
-                    decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(5),
-                        color: _portrait == portrait ? AppTheme.primary : null,
-                        border: Border.all(
-                            color: _portrait == portrait
-                                ? AppTheme.primary
-                                : AppTheme.muted,
-                            width: 2)),
-                    child: _portrait == portrait
-                        ? const Icon(Icons.check, color: Colors.white, size: 18)
-                        : null))),
-      ));
 
   Widget _filterItem(ui.Image image, PhotoFilter filter) => Padding(
         padding: const EdgeInsets.only(right: 10),

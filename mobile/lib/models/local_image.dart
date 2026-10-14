@@ -1,3 +1,5 @@
+import 'image_ratio.dart';
+
 class LocalImageItem {
   const LocalImageItem({
     required this.id,
@@ -11,6 +13,7 @@ class LocalImageItem {
     required this.createdAt,
     this.cloudProjectId,
     this.galleryPostId,
+    this.ratio = const ImageRatioSettings(),
   });
 
   final String id;
@@ -25,6 +28,7 @@ class LocalImageItem {
   final DateTime createdAt;
   final String? cloudProjectId;
   final String? galleryPostId;
+  final ImageRatioSettings ratio;
 
   bool get isShared => cloudProjectId != null && galleryPostId != null;
 
@@ -41,6 +45,8 @@ class LocalImageItem {
       createdAt: DateTime.parse(map['createdAt']! as String),
       cloudProjectId: map['cloudProjectId'] as String?,
       galleryPostId: map['galleryPostId'] as String?,
+      ratio: ImageRatioSettings.fromMap(
+          (map['ratio'] as Map?)?.cast<Object?, Object?>()),
     );
   }
 }

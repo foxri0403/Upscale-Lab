@@ -42,6 +42,44 @@ class StaticWallpaperControllerTest {
         }
     }
 
+    @Test fun preparedCropsUseSelectedTargetsAndKeepTheOriginalCache() {
+        for (target in WallpaperTarget.entries) {
+            val directory = temporary.newFolder()
+            val source = temporary.newFile().apply { writeText("original") }
+            val prepared = temporary.newFile()
+            val platform = FakePlatform()
+            val controller = StaticWallpaperController(directory, platform)
+            controller.apply(target, prepareSource = { input ->
+                assertEquals("original", input.readText())
+                prepared.apply { writeText("screen crop") }
+            }) { source.inputStream() }
+            assertEquals(listOf(target.flags), platform.calls)
+            for (screen in target.screens) {
+                assertEquals("screen crop", platform.applied[screen])
+                assertEquals("original", File(directory, screen.cacheFileName).readText())
+            }
+            assertEquals("original", source.readText())
+            assertFalse(prepared.exists())
+            assertFalse(directory.listFiles()!!.any { it.name.endsWith(".part") })
+        }
+    }
+
+    @Test fun cropFailurePreservesPreviousWallpapersAndSourceCopies() {
+        val directory = temporary.newFolder()
+        val platform = FakePlatform()
+        val controller = StaticWallpaperController(directory, platform)
+        controller.apply(WallpaperTarget.BOTH) { "previous".byteInputStream() }
+        assertThrows(IOException::class.java) {
+            controller.apply(WallpaperTarget.BOTH, prepareSource = {
+                throw IOException("crop failed")
+            }) { "new original".byteInputStream() }
+        }
+        assertEquals(listOf(WallpaperTarget.BOTH.flags), platform.calls)
+        assertEquals("previous", File(directory, "home.img").readText())
+        assertEquals("previous", File(directory, "lock.img").readText())
+        assertFalse(directory.listFiles()!!.any { it.name.endsWith(".part") })
+    }
+
     @Test fun settingEitherScreenPreservesTheOtherAndDoesNotChangeTheSource() {
         val directory = temporary.newFolder()
         val source = temporary.newFile().apply { writeText("home one") }

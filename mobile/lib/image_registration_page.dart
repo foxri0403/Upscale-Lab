@@ -4,19 +4,24 @@ import 'package:flutter/material.dart';
 
 import 'image_editor_page.dart';
 import 'models/gallery_tags.dart';
+import 'models/image_ratio.dart';
 import 'services/image_editor_service.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_components.dart';
+import 'widgets/device_display_builder.dart';
+import 'widgets/image_ratio_selector.dart';
 
 class ImageRegistrationOptions {
   const ImageRegistrationOptions({
     required this.title,
     required this.tags,
     this.editedFile,
+    this.ratio = const ImageRatioSettings(),
   });
   final String title;
   final List<String> tags;
   final EditedImageFile? editedFile;
+  final ImageRatioSettings ratio;
 }
 
 class ImageFeaturePage extends StatefulWidget {
@@ -37,6 +42,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   EditorImageSource? _source;
   String? _error;
   bool _editing = false;
+  ImageRatioSettings _ratio = const ImageRatioSettings();
 
   @override
   void initState() {
@@ -79,7 +85,8 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
       result = await Navigator.push<ImageEditorResult>(
           context,
           MaterialPageRoute(
-              builder: (_) => ImageEditorPage(filePath: widget.filePath)));
+              builder: (_) => ImageEditorPage(
+                  filePath: widget.filePath, initialRatio: _ratio)));
       if (!mounted) {
         await result?.editedFile?.dispose();
         return;
@@ -91,11 +98,16 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     Navigator.pop(
         context,
         ImageRegistrationOptions(
-            title: title, tags: tags, editedFile: result?.editedFile));
+            title: title,
+            tags: tags,
+            editedFile: result?.editedFile,
+            ratio: result?.ratio ?? _ratio));
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => DeviceDisplayBuilder(builder: _build);
+
+  Widget _build(BuildContext context, Size display) {
     final source = _source;
     final tileHeight =
         math.max(52.0, MediaQuery.textScalerOf(context).scale(14) * 2 + 20);
@@ -111,15 +123,20 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (source != null)
-                    ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: AspectRatio(
-                            aspectRatio: source.size.aspectRatio,
-                            child: RawImage(
-                                key: const ValueKey(
-                                    'registration-original-image'),
-                                image: source.preview,
-                                fit: BoxFit.contain)))
+                    SizedBox(
+                        height: (MediaQuery.sizeOf(context).height * .4)
+                            .clamp(180, 460),
+                        child: Center(
+                            child: ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: AspectRatio(
+                                    aspectRatio: _ratio.aspectRatio(
+                                        source.size, display)!,
+                                    child: RawImage(
+                                        key: const ValueKey(
+                                            'registration-original-image'),
+                                        image: source.preview,
+                                        fit: BoxFit.cover)))))
                   else
                     SizedBox(
                         height: 180,
@@ -134,6 +151,13 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                                             onPressed: _load,
                                             child: const Text('다시 시도')),
                                       ]))),
+                  const SizedBox(height: 18),
+                  ImageRatioSelector(
+                      value: _ratio,
+                      display: display,
+                      onChanged: _editing
+                          ? null
+                          : (ratio) => setState(() => _ratio = ratio)),
                   const SizedBox(height: 18),
                   const AppSectionTitle('이미지 이름'),
                   const SizedBox(height: 10),
@@ -192,7 +216,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                       icon: const Icon(Icons.image_outlined),
                       label: const Text('이미지 등록')),
                   const SizedBox(height: 8),
-                  const Text('원본 이미지로 저장',
+                  const Text('원본 이미지와 비율 설정을 저장합니다.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: AppTheme.muted, fontSize: 12)),
                 ]),
