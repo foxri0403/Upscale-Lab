@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 
 
 def main() -> None:
@@ -16,6 +17,13 @@ def main() -> None:
 
     import cv2
     import torch
+    # BasicSR 1.4.2 still imports torchvision's pre-0.17 module path.
+    # Keep the upstream package usable with current CUDA/Python builds.
+    try:
+        import torchvision.transforms.functional_tensor  # noqa: F401
+    except ModuleNotFoundError:
+        from torchvision.transforms import functional
+        sys.modules["torchvision.transforms.functional_tensor"] = functional
     from basicsr.archs.rrdbnet_arch import RRDBNet
     from realesrgan import RealESRGANer
 

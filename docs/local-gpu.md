@@ -1,5 +1,8 @@
 # 로컬 GPU 이미지 처리
 
+> 현재 학교 Windows/WSL2 워크스테이션의 설치 상태와 정확한 재개 절차는
+> [Local GPU workstation handoff](local-gpu-workstation-handoff.md)에 기록되어 있습니다.
+
 ## 구성과 구현 범위
 
 API 컴퓨터는 기존 .NET 8 API, PostgreSQL, S3 접근을 담당합니다. 같은 LAN의 별도 NVIDIA GPU 컴퓨터에서 Python HTTP 워커와 모델을 실행합니다. GPU 컴퓨터에 DB/AWS 자격 증명을 전달하지 않습니다. GPU 추론에 Replicate 토큰이나 클라우드 GPU는 필요하지 않습니다. 기존 인증(Cognito/JWT)과 이미지 저장소(S3)는 그대로 사용하므로 서비스 전체가 오프라인 구성인 것은 아닙니다.
