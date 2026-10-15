@@ -111,7 +111,9 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
   int _galleryRevision = 0;
   final _gallerySelection = GallerySearchSelection();
 
-  void _reload() => setState(() => _images = _loadLibrary());
+  void _reload() => setState(() {
+        _images = _loadLibrary();
+      });
 
   Future<void> _previewHomeWallpaper(LocalImageItem image) async {
     await Navigator.of(context).push<void>(MaterialPageRoute(
@@ -163,7 +165,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
         codec.dispose();
       }
       if (!mounted) return;
-      await _localImageStore.import(
+      final saved = await _localImageStore.import(
         sourcePath: sourcePath,
         fileName: edited == null ? picked.name : 'edited.png',
         title: options.title,
@@ -171,10 +173,21 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
         width: width,
         height: height,
         mode: 'original',
+        ratio: options.ratio,
       );
       if (!mounted) return;
       _reload();
-      _message('이미지를 로컬에 등록했습니다. 공유할 때만 클라우드에 업로드됩니다.');
+      final target = options.wallpaperTarget;
+      if (target != null) {
+        try {
+          await _localImageStore.applyWallpaper(saved.id, target: target);
+          _message('이미지를 저장하고 배경화면을 적용했습니다.');
+        } catch (error) {
+          _message('이미지는 저장했지만 배경화면을 적용하지 못했습니다. 홈에서 다시 적용해 주세요.\n$error');
+        }
+      } else {
+        _message('이미지를 저장했습니다. 배경화면은 변경하지 않았습니다.');
+      }
     } on PlatformException catch (error) {
       _message(error.message ?? '$error');
     } catch (error) {

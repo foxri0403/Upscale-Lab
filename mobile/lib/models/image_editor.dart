@@ -116,13 +116,14 @@ class CropGeometry {
         crop.right / source.width, crop.bottom / source.height);
   }
 
-  void layout(Size size, double? aspect, {bool reset = false}) {
+  void layout(Size size, double? aspect,
+      {bool reset = false, double padding = 24}) {
     if (!reset && size == viewport && aspect == _aspect) return;
     final previous =
         viewport.isEmpty || reset || aspect != _aspect ? null : sourceRect;
     viewport = size;
     _aspect = aspect;
-    final bounds = (Offset.zero & size).deflate(24);
+    final bounds = (Offset.zero & size).deflate(padding);
     final ratio = aspect ?? previous?.size.aspectRatio ?? source.aspectRatio;
     final width = math.min(bounds.width, bounds.height * ratio);
     frame = Rect.fromCenter(
