@@ -47,3 +47,25 @@ mobile/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.ja
 # Local test deliverables
 artifacts/
 mobile/test_assets/
+# ========================================
+# UpscaleLab Android Signing Secrets
+# ========================================
+
+# Signing key files
+*.jks
+*.keystore
+*.p12
+*.pfx
+
+# Environment variable files
+.env
+.env.*
+!.env.example
+
+# Android local configuration
+**/local.properties
+**/key.properties
+
+# Secret directories
+**/secrets/
+**/Secrets/

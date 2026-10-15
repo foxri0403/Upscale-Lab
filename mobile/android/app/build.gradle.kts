@@ -16,11 +16,26 @@ android {
     kotlinOptions { jvmTarget = JavaVersion.VERSION_17.toString() }
 
     // Team test releases must remain upgrade-compatible with the existing APKs.
-    buildTypes {
-        getByName("release") {
-            signingConfig = signingConfigs.getByName("debug")
-        }
+    signingConfigs {
+    create("teamRelease") {
+        val keystorePath = System.getenv("UPSCALELAB_KEYSTORE_PATH")
+            ?: error("UPSCALELAB_KEYSTORE_PATH 환경변수가 없습니다.")
+
+        val keystorePassword = System.getenv("UPSCALELAB_KEYSTORE_PASSWORD")
+            ?: error("UPSCALELAB_KEYSTORE_PASSWORD 환경변수가 없습니다.")
+
+        storeFile = file(keystorePath)
+        storePassword = keystorePassword
+        keyAlias = "upscalelab"
+        keyPassword = keystorePassword
     }
+}
+
+buildTypes {
+    getByName("release") {
+        signingConfig = signingConfigs.getByName("teamRelease")
+    }
+}
 
     defaultConfig {
         applicationId = "com.livelayer.app"
