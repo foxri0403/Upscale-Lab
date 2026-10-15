@@ -136,9 +136,13 @@ class CropGeometry {
 
   void transform(double nextScale, Offset nextOffset) {
     scale = nextScale.clamp(minimumScale, minimumScale * 8);
+    // Floating-point rounding can make a covered edge undershoot by a fraction
+    // of a pixel; never pass inverted translation bounds to clamp.
     offset = Offset(
-      nextOffset.dx.clamp(frame.right - source.width * scale, frame.left),
-      nextOffset.dy.clamp(frame.bottom - source.height * scale, frame.top),
+      nextOffset.dx.clamp(
+          math.min(frame.left, frame.right - source.width * scale), frame.left),
+      nextOffset.dy.clamp(
+          math.min(frame.top, frame.bottom - source.height * scale), frame.top),
     );
   }
 

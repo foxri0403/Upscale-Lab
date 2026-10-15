@@ -215,6 +215,51 @@ public sealed class GalleryServiceTests
     }
 
     [Fact]
+    public async Task CompletedDownloads_ArePersistedAndReturnedByListAndDetail()
+    {
+        await using var db = CreateDbContext();
+        var user = new User { Email = "downloads@example.com", Username = "artist", PasswordHash = "hash" };
+        var post = new GalleryPost { User = user, Image = CreateImage(user, "photo.png"), Title = "Photo" };
+        db.GalleryPosts.Add(post);
+        await db.SaveChangesAsync();
+        var service = new GalleryService(db, new FakeStorageService());
+
+        await service.CreateDownloadUrlAsync(post.Id, null, CancellationToken.None, countDownload: false);
+        await service.CreatePreviewUrlAsync(post.Id, null, CancellationToken.None);
+        Assert.Equal(0, (await db.GalleryPosts.SingleAsync()).DownloadCount);
+        Assert.Equal(1, (await service.RecordDownloadAsync(post.Id, null, CancellationToken.None)).DownloadCount);
+        Assert.Equal(2, (await service.RecordDownloadAsync(post.Id, user.Id, CancellationToken.None)).DownloadCount);
+
+        db.ChangeTracker.Clear();
+        var saved = await db.GalleryPosts.SingleAsync();
+        Assert.Equal(2, saved.DownloadCount);
+        Assert.Equal(DateTimeKind.Utc, saved.UpdatedAt.Kind);
+        Assert.Equal(2, Assert.Single(await service.GetAllAsync(null, null, null, CancellationToken.None)).DownloadCount);
+        Assert.Equal(2, (await service.GetAsync(post.Id, null, CancellationToken.None)).Post.DownloadCount);
+        await service.CreateDownloadUrlAsync(post.Id, null, CancellationToken.None);
+        Assert.Equal(3, (await service.GetAsync(post.Id, null, CancellationToken.None)).Post.DownloadCount);
+    }
+
+    [Fact]
+    public async Task DownloadCompletion_CannotCountAnInaccessibleOrMissingPost()
+    {
+        await using var db = CreateDbContext();
+        var user = new User { Email = "private@example.com", Username = "owner", PasswordHash = "hash" };
+        var post = new GalleryPost
+        {
+            User = user, Image = CreateImage(user, "private.png"), Title = "Private", IsPublic = false
+        };
+        db.GalleryPosts.Add(post);
+        await db.SaveChangesAsync();
+        var service = new GalleryService(db, new FakeStorageService());
+        await Assert.ThrowsAsync<NotFoundException>(() => service.RecordDownloadAsync(post.Id, null, CancellationToken.None));
+        await Assert.ThrowsAsync<NotFoundException>(() => service.RecordDownloadAsync(post.Id, Guid.NewGuid(), CancellationToken.None));
+        await Assert.ThrowsAsync<NotFoundException>(() => service.RecordDownloadAsync(Guid.NewGuid(), user.Id, CancellationToken.None));
+        Assert.Equal(0, (await db.GalleryPosts.SingleAsync()).DownloadCount);
+        Assert.Equal(1, (await service.RecordDownloadAsync(post.Id, user.Id, CancellationToken.None)).DownloadCount);
+    }
+
+    [Fact]
     public async Task Update_ChangesOwnedNameAndTagsTogether()
     {
         await using var db = CreateDbContext();

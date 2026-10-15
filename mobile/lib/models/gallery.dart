@@ -13,7 +13,7 @@ class GalleryPostItem {
     this.selectedTags,
     this.thumbnailUrl,
     this.fileName,
-    this.savedUserCount,
+    this.downloadCount = 0,
     required this.createdAt,
   });
 
@@ -25,8 +25,8 @@ class GalleryPostItem {
   final List<String>? selectedTags;
   final String? thumbnailUrl;
   final String? fileName;
-  /// Number of distinct users who saved this post, when supplied by the API.
-  final int? savedUserCount;
+  /// Cumulative downloads persisted by the API; older responses default to zero.
+  final int downloadCount;
   List<String> get tags => selectedTags ?? [tag];
   final DateTime createdAt;
 
@@ -44,10 +44,10 @@ class GalleryPostItem {
         title.toLowerCase().contains(normalizedSearch);
   }
 
-  static int? _readSavedUserCount(Map<String, dynamic> json) {
-    final value = json['savedUserCount'];
+  static int _readDownloadCount(Map<String, dynamic> json) {
+    final value = json['downloadCount'];
     if (value is int && value >= 0) return value;
-    return null;
+    return 0;
   }
 
   factory GalleryPostItem.fromJson(Map<String, dynamic> json) {
@@ -61,7 +61,7 @@ class GalleryPostItem {
       selectedTags: tags.isEmpty ? [unspecifiedGalleryTag] : tags,
       thumbnailUrl: json['thumbnailUrl'] as String?,
       fileName: json['fileName'] as String?,
-      savedUserCount: _readSavedUserCount(json),
+      downloadCount: _readDownloadCount(json),
       createdAt: DateTime.parse(json['createdAt'] as String).toLocal(),
     );
   }

@@ -119,8 +119,16 @@ public sealed class GalleryController(IGalleryService galleryService) : Controll
     [HttpPost("{id:guid}/download-url")]
     public async Task<ActionResult<DownloadUrlResponse>> CreateDownloadUrl(
         Guid id,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] bool countDownload = true)
     {
-        return Ok(await galleryService.CreateDownloadUrlAsync(id, User.GetOptionalUserId(), cancellationToken));
+        return Ok(await galleryService.CreateDownloadUrlAsync(id, User.GetOptionalUserId(), cancellationToken, countDownload));
+    }
+
+    [AllowAnonymous]
+    [HttpPost("{id:guid}/download-complete")]
+    public async Task<ActionResult<GalleryDownloadCountResponse>> RecordDownload(Guid id, CancellationToken cancellationToken)
+    {
+        return Ok(await galleryService.RecordDownloadAsync(id, User.GetOptionalUserId(), cancellationToken));
     }
 }

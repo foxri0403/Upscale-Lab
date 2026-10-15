@@ -714,7 +714,7 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
     widget.selection?.search = _searchController.text;
     return widget.apiClient.getGallery(
       search: _searchController.text,
-      tags: _selectedTags.length == galleryTags.length ? <String>[] : _selectedTags.toList(),
+      tags: _selectedTags.length == selectableGalleryTags.length ? <String>[] : _selectedTags.toList(),
     );
   }
 
@@ -741,7 +741,7 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
       useSafeArea: true,
       builder: (sheetContext) => StatefulBuilder(
         builder: (sheetContext, update) {
-          final allSelected = galleryTags.every(selected.contains);
+          final allSelected = selectableGalleryTags.every(selected.contains);
           return FractionallySizedBox(
             heightFactor: 0.78,
             child: Padding(
@@ -757,10 +757,10 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
                     value: allSelected,
                     onChanged: (value) => update(() {
                       selected.clear();
-                      if (value == true) selected.addAll(galleryTags);
+                      if (value == true) selected.addAll(selectableGalleryTags);
                     }),
                   ),
-                  ...galleryTags.map((tag) => CheckboxListTile(
+                  ...selectableGalleryTags.map((tag) => CheckboxListTile(
                     title: Text(tag),
                     value: selected.contains(tag),
                     onChanged: (value) => update(() {
@@ -944,6 +944,7 @@ class _GalleryPostCard extends StatefulWidget {
 
 class _GalleryPostCardState extends State<_GalleryPostCard> {
   late Future<String> _imageUrl = _initialImageUrl();
+  late int _downloadCount = widget.post.downloadCount;
   bool _importing = false;
 
   Future<String> _initialImageUrl() {
@@ -965,6 +966,9 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
   @override
   void didUpdateWidget(covariant _GalleryPostCard oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.post.downloadCount != widget.post.downloadCount) {
+      _downloadCount = widget.post.downloadCount;
+    }
     if (oldWidget.post.id != widget.post.id ||
         oldWidget.post.thumbnailUrl != widget.post.thumbnailUrl ||
         (widget.post.thumbnailUrl == null &&
@@ -984,11 +988,13 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
       path = await store.downloadShared(
           url: url,
           fileName: widget.post.fileName ?? Uri.parse(url).pathSegments.last);
+      final downloadCountUpdate = _recordDownload();
       if (!mounted) return;
       final ratio =
           await Navigator.of(context).push<ImageRatioSettings>(MaterialPageRoute(
         builder: (_) =>
-            WallpaperPreviewPage(filePath: path!, finishLabel: '내 보관함에 저장', savedUserCount: widget.post.savedUserCount),
+            WallpaperPreviewPage(filePath: path!, finishLabel: '내 보관함에 저장',
+                downloadCount: _downloadCount, downloadCountUpdate: downloadCountUpdate),
       ));
       if (ratio == null || !mounted) return;
       final bytes = await File(path).readAsBytes();
@@ -1040,6 +1046,18 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
         ),
       );
 
+  Future<int> _recordDownload() async {
+    try {
+      final count = await widget.apiClient.recordGalleryDownload(widget.post.id);
+      if (mounted) setState(() => _downloadCount = count);
+      return count;
+    } catch (_) {
+      // Counter availability must not block an already downloaded image. A
+      // refresh reads the persisted count again; never claim a local-only count.
+      return _downloadCount;
+    }
+  }
+
   Widget _previewImage() => FutureBuilder<String>(
         future: _imageUrl,
         builder: (context, snapshot) {
@@ -1049,7 +1067,7 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
           }
           return Image.network(
             snapshot.data!,
-            fit: BoxFit.cover,
+            fit: BoxFit.contain,
             cacheWidth: 480,
             frameBuilder: (context, child, frame, synchronous) =>
                 frame != null || synchronous
@@ -1076,10 +1094,10 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
               style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
           const SizedBox(height: 5),
           Row(children: [
-              Icon(Icons.bookmark_border, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              Icon(Icons.download_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
               const SizedBox(width: 4),
               Expanded(child: Text(
-                widget.post.savedUserCount == null ? '보관 인원 집계 준비 중' : '보관 ${widget.post.savedUserCount}명',
+                '$_downloadCount',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               )),
@@ -1128,13 +1146,15 @@ class WallpaperPreviewPage extends StatefulWidget {
     super.key,
     required this.filePath,
     this.finishLabel,
-    this.savedUserCount,
+    this.downloadCount = 0,
+    this.downloadCountUpdate,
     this.ratio = const ImageRatioSettings(),
   });
 
   final String filePath;
   final String? finishLabel;
-  final int? savedUserCount;
+  final int downloadCount;
+  final Future<int>? downloadCountUpdate;
   final ImageRatioSettings ratio;
 
   @override
@@ -1174,170 +1194,137 @@ class _WallpaperPreviewPageState extends State<WallpaperPreviewPage> {
     super.dispose();
   }
 
+  Future<void> _chooseRatio() async {
+    var selected = _ratio;
+    final ratio = await showModalBottomSheet<ImageRatioSettings>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: DeviceDisplayBuilder(builder: (context, display) => StatefulBuilder(
+          builder: (context, update) => Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ImageRatioSelector(value: selected, display: display,
+                onChanged: (ratio) => update(() => selected = ratio)),
+              const SizedBox(height: 16),
+              FilledButton(onPressed: () => Navigator.pop(sheetContext, selected),
+                child: const Text('설정 적용')),
+            ],
+          ),
+        )),
+      ),
+    );
+    if (ratio != null && mounted) {
+      setState(() {
+        _ratio = ratio;
+        _applied = false;
+      });
+    }
+  }
+
   Future<void> _apply() async {
     final target = await showModalBottomSheet<WallpaperTarget>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (sheetContext) => SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const ListTile(title: Text('배경화면 적용 위치 선택')),
-              ListTile(
-                title: const Text('홈 화면에 적용'),
-                onTap: () => Navigator.pop(sheetContext, WallpaperTarget.home),
-              ),
-              ListTile(
-                title: const Text('잠금 화면에 적용'),
-                onTap: () => Navigator.pop(sheetContext, WallpaperTarget.lock),
-              ),
-              ListTile(
-                title: const Text('전체 적용'),
-                onTap: () => Navigator.pop(sheetContext, WallpaperTarget.both),
-              ),
-            ],
-          ),
-        ),
-      ),
+      builder: (sheetContext) => SafeArea(child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const ListTile(title: Text('배경화면 적용 위치 선택')),
+          ListTile(title: const Text('홈 화면에 적용'),
+            onTap: () => Navigator.pop(sheetContext, WallpaperTarget.home)),
+          ListTile(title: const Text('잠금 화면에 적용'),
+            onTap: () => Navigator.pop(sheetContext, WallpaperTarget.lock)),
+          ListTile(title: const Text('전체 적용'),
+            onTap: () => Navigator.pop(sheetContext, WallpaperTarget.both)),
+        ]),
+      )),
     );
     if (target == null || !mounted) return;
     setState(() => _applying = true);
     try {
       await const WallpaperService().applyLocal(
-        sourcePath: widget.filePath,
-        target: target,
-        ratio: _ratio,
-      );
+        sourcePath: widget.filePath, target: target, ratio: _ratio);
       if (!mounted) return;
       setState(() => _applied = true);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('배경화면을 적용했습니다. 앱 종료와 재부팅 후에도 유지됩니다.')),
-      );
+        const SnackBar(content: Text('배경화면을 적용했습니다. 앱 종료와 재부팅 후에도 유지됩니다.')));
     } on PlatformException catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(error.message ?? '$error')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message ?? '$error')));
       }
     } finally {
       if (mounted) setState(() => _applying = false);
     }
   }
 
-  Widget _preview(Size display) {
+  Widget _preview() {
     final source = _source;
     if (source == null) {
-      return Center(
-        child: _error == null
-            ? const CircularProgressIndicator()
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(_error!),
-                  TextButton(onPressed: _load, child: const Text('다시 시도')),
-                ],
-              ),
-      );
+      return Center(child: _error == null
+        ? const CircularProgressIndicator()
+        : Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(_error!),
+            TextButton(onPressed: _load, child: const Text('다시 시도')),
+          ]));
     }
-    return Center(
-      child: ClipRect(
-        child: AspectRatio(
-          aspectRatio: _ratio.aspectRatio(source.size, display)!,
-          child: RawImage(
-            key: const ValueKey('wallpaper-preview-image'),
-            image: source.preview,
-            fit: BoxFit.cover,
-          ),
-        ),
-      ),
-    );
+    return Center(child: AspectRatio(
+      aspectRatio: source.size.aspectRatio,
+      child: RawImage(key: const ValueKey('wallpaper-preview-image'),
+        image: source.preview, fit: BoxFit.contain),
+    ));
   }
 
   @override
-  Widget build(BuildContext context) => DeviceDisplayBuilder(
-        builder: (context, display) => Scaffold(
-          appBar: AppBar(
-            title: const Text('배경화면 미리보기'),
-            actions: [
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 16),
-                  child: Text(
-                    widget.savedUserCount == null
-                        ? '보관 집계 준비 중'
-                        : '보관 ${widget.savedUserCount}명',
-                  ),
-                ),
-              ),
-            ],
-          ),
-          body: SafeArea(
-            child: Column(
-              children: [
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-                    child: _preview(display),
-                  ),
-                ),
-                Flexible(
-                  fit: FlexFit.loose,
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ImageRatioSelector(
-                          value: _ratio,
-                          display: display,
-                          onChanged: _applying
-                              ? null
-                              : (ratio) => setState(() {
-                                    _ratio = ratio;
-                                    _applied = false;
-                                  }),
-                        ),
-                        const SizedBox(height: 20),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed:
-                                _applying || _source == null ? null : _apply,
-                            icon: _applying
-                                ? const SizedBox.square(
-                                    dimension: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : Icon(
-                                    _applied ? Icons.check : Icons.wallpaper),
-                            label: Text(_applied ? '배경화면 적용됨' : '홈 화면에 적용'),
-                          ),
-                        ),
-                        if (widget.finishLabel != null) ...[
-                          const SizedBox(height: 10),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton(
-                              onPressed: _applying || _source == null
-                                  ? null
-                                  : () => Navigator.pop(context, _ratio),
-                              child: Text(widget.finishLabel!),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('배경화면 미리보기'), actions: [
+      Padding(padding: const EdgeInsets.only(right: 16),
+        child: FutureBuilder<int>(future: widget.downloadCountUpdate,
+          initialData: widget.downloadCount,
+          builder: (context, snapshot) => Tooltip(
+            message: '다운로드 ${snapshot.data ?? 0}회',
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.download_outlined, size: 18),
+              const SizedBox(width: 4),
+              Text('${snapshot.data ?? 0}'),
+            ]),
           ),
         ),
-      );
+      ),
+    ]),
+    body: SafeArea(child: SizedBox.expand(child: Padding(
+      padding: const EdgeInsets.all(8), child: _preview()))),
+    bottomNavigationBar: SafeArea(top: false, child: Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(children: [
+            Expanded(child: OutlinedButton.icon(
+              key: const ValueKey('wallpaper-ratio-settings'),
+              onPressed: _applying || _source == null ? null : _chooseRatio,
+              icon: const Icon(Icons.aspect_ratio),
+              label: Text(_ratio.automatic ? '비율 자동' : '비율 수동'))),
+            const SizedBox(width: 8),
+            Expanded(child: FilledButton(
+              onPressed: _applying || _source == null ? null : _apply,
+              child: _applying
+                ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : Text(_applied ? '적용됨' : '배경화면 적용'))),
+          ]),
+          if (widget.finishLabel != null) ...[
+            const SizedBox(height: 8),
+            OutlinedButton(onPressed: _applying || _source == null
+              ? null : () => Navigator.pop(context, _ratio), child: Text(widget.finishLabel!)),
+          ],
+        ],
+      ),
+    )),
+  );
 }
+
 
 /// App-owned preview. Unlike the Android system preview, this keeps our UI visible.
 class HomeWallpaperPreviewPage extends StatefulWidget {
@@ -1390,7 +1377,7 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
         builder: (context, display) => AnnotatedRegion<SystemUiOverlayStyle>(
           value: AppTheme.overlayFor(Brightness.dark),
           child: Scaffold(
-            extendBody: true,
+            extendBody: false,
             backgroundColor: Colors.black,
             bottomNavigationBar: SafeArea(
               top: false,
@@ -1459,23 +1446,10 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
               child: Stack(
                 children: [
                   Positioned.fill(
-                    child: Center(
-                      child: AspectRatio(
-                        aspectRatio: widget.image.ratio.aspectRatio(
-                          widget.image.width > 0 && widget.image.height > 0
-                              ? Size(
-                                  widget.image.width.toDouble(),
-                                  widget.image.height.toDouble(),
-                                )
-                              : display,
-                          display,
-                        )!,
-                        child: Image.file(
-                          File(widget.image.path),
-                          key: const ValueKey('wallpaper-preview-image'),
-                          fit: BoxFit.cover,
-                        ),
-                      ),
+                    child: Image.file(
+                      File(widget.image.path),
+                      key: const ValueKey('wallpaper-preview-image'),
+                      fit: BoxFit.contain,
                     ),
                   ),
                   Positioned(

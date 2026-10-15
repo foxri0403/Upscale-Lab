@@ -13,6 +13,30 @@ void main() {
         headers: {'content-type': 'application/json'},
       );
 
+  test('download URL skips counting and completion reads the persisted count', () async {
+    final requests = <http.Request>[];
+    await http.runWithClient(() async {
+      expect(await api.getGalleryDownloadUrl('post-id'), 'https://example.test/photo.png');
+      expect(await api.recordGalleryDownload('post-id'), 12);
+    }, () => MockClient((request) async {
+      requests.add(request);
+      expect(request.method, 'POST');
+      if (request.url.path.endsWith('/download-url')) {
+        expect(request.url.queryParameters['countDownload'], 'false');
+        return jsonResponse({'url': 'https://example.test/photo.png'});
+      }
+      expect(request.url.path, '/api/gallery/post-id/download-complete');
+      return jsonResponse({'downloadCount': 12});
+    }));
+    expect(requests, hasLength(2));
+  });
+
+  test('download completion rejects an invalid counter response', () async {
+    await http.runWithClient(() async {
+      await expectLater(api.recordGalleryDownload('post-id'), throwsStateError);
+    }, () => MockClient((_) async => jsonResponse({'downloadCount': -1})));
+  });
+
   test(
       'editing confirms both the name and complete tags returned by the server',
       () async {

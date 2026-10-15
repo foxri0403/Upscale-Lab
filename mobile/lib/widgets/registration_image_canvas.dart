@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 import '../models/image_editor.dart';
 import '../services/image_editor_service.dart';
 
-/// Viewing a width-fitted image never changes its saved crop. Only gestures in
-/// the crop tool change source coordinates, shared by preview and PNG export.
+/// The entire preview fits a bounded viewport; only crop-tool gestures change
+/// source coordinates. Other tools leave vertical drags to the page scroll view.
 class RegistrationImageCanvas extends StatefulWidget {
   const RegistrationImageCanvas({
     super.key,
@@ -18,6 +18,7 @@ class RegistrationImageCanvas extends StatefulWidget {
     required this.aspectRatio,
     required this.onCropChanged,
     this.enabled = true,
+    this.maxHeight = 360,
   });
 
   final EditorImageSource source;
@@ -27,6 +28,7 @@ class RegistrationImageCanvas extends StatefulWidget {
   final double? aspectRatio;
   final ValueChanged<Rect> onCropChanged;
   final bool enabled;
+  final double maxHeight;
 
   @override
   State<RegistrationImageCanvas> createState() =>
@@ -35,28 +37,12 @@ class RegistrationImageCanvas extends StatefulWidget {
 
 class _RegistrationImageCanvasState extends State<RegistrationImageCanvas> {
   late final _geometry = CropGeometry(widget.source.size);
-  final _viewTransform = TransformationController();
   int? _corner;
   int _pointers = 0;
   double _startScale = 1;
   double _gestureScale = 1;
   Offset _startOffset = Offset.zero;
   Offset _startFocal = Offset.zero;
-
-  @override
-  void didUpdateWidget(RegistrationImageCanvas oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.crop != widget.crop ||
-        oldWidget.cropping != widget.cropping) {
-      _viewTransform.value = Matrix4.identity();
-    }
-  }
-
-  @override
-  void dispose() {
-    _viewTransform.dispose();
-    super.dispose();
-  }
 
   void _start(ScaleStartDetails details) {
     _corner = null;
@@ -67,10 +53,12 @@ class _RegistrationImageCanvasState extends State<RegistrationImageCanvas> {
         _geometry.frame.bottomRight,
         _geometry.frame.bottomLeft
       ];
+      var nearest = 28.0;
       for (var i = 0; i < corners.length; i++) {
-        if ((details.localFocalPoint - corners[i]).distance < 28) {
+        final distance = (details.localFocalPoint - corners[i]).distance;
+        if (distance < nearest) {
           _corner = i;
-          break;
+          nearest = distance;
         }
       }
     }
@@ -111,32 +99,22 @@ class _RegistrationImageCanvasState extends State<RegistrationImageCanvas> {
         final width = bounds.maxWidth;
         if (!widget.cropping) {
           final source = widget.source.size;
-          final height = width *
-              (widget.crop.height * source.height) /
-              (widget.crop.width * source.width);
-          final viewportHeight = math.min(
-              height,
-              (MediaQuery.sizeOf(context).height * .46)
-                  .clamp(180, 480)
-                  .toDouble());
+          final aspect = (widget.crop.width * source.width) /
+              (widget.crop.height * source.height);
+          final viewportHeight = math.min(width / aspect, widget.maxHeight);
           return ClipRRect(
             borderRadius: BorderRadius.circular(16),
             child: SizedBox(
               key: const ValueKey('registration-original-image'),
               height: viewportHeight,
-              child: Semantics(
-                label: '이미지 미리보기. 드래그로 이동, 두 손가락으로 확대 및 축소',
-                child: InteractiveViewer(
-                  key: const ValueKey('registration-image-viewer'),
-                  transformationController: _viewTransform,
-                  constrained: false,
-                  alignment: Alignment.topLeft,
-                  panEnabled: widget.enabled,
-                  scaleEnabled: widget.enabled,
+              child: Center(
+                child: AspectRatio(
+                  key: const ValueKey('registration-preview-aspect'),
+                  aspectRatio: aspect,
                   child: CustomPaint(
                     painter: _RegistrationPreviewPainter(
                         widget.source.preview, widget.crop, widget.filter),
-                    child: SizedBox(width: width, height: height),
+                    child: const SizedBox.expand(),
                   ),
                 ),
               ),
@@ -144,11 +122,7 @@ class _RegistrationImageCanvasState extends State<RegistrationImageCanvas> {
           );
         }
 
-        final aspect = widget.aspectRatio ??
-            (_geometry.viewport.isEmpty
-                ? widget.source.size.aspectRatio
-                : _geometry.sourceRect.size.aspectRatio);
-        final height = math.max(120.0, (width - 24) / aspect + 24);
+        final height = widget.maxHeight;
         final size = Size(width, height);
         final previous = _geometry.normalizedCrop;
         _geometry.layout(size, widget.aspectRatio, padding: 12);

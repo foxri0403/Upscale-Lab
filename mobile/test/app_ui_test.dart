@@ -18,11 +18,18 @@ import 'package:live_layer/theme/app_theme.dart';
 import 'package:live_layer/unified_home.dart';
 import 'package:live_layer/widgets/app_components.dart';
 import 'package:live_layer/widgets/local_image_card.dart';
+import 'package:live_layer/widgets/registration_image_canvas.dart';
 
 class _UiApi extends ApiClient {
   _UiApi() : super(baseUrl: 'https://api.example.test');
   bool failEdit = false;
   List<GalleryPostItem> gallery = [];
+  int downloadReports = 0;
+  @override
+  Future<int> recordGalleryDownload(String postId) async {
+    downloadReports++;
+    return 8;
+  }
   @override
   String get storageScope => 'server\naccount';
   @override
@@ -61,6 +68,7 @@ void main() {
   bool nativePreviewAvailable = true;
   var imports = 0;
   var failWallpaperApply = false;
+  var failSharedDownload = false;
   Map<Object?, Object?>? appliedLocalWallpaper;
   const pickerChannel = MethodChannel('plugins.flutter.io/image_picker');
   const wallpaperChannel = MethodChannel('live_layer/wallpaper');
@@ -91,6 +99,7 @@ void main() {
     nativePreviewAvailable = true;
     imports = 0;
     failWallpaperApply = false;
+    failSharedDownload = false;
     appliedLocalWallpaper = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(pickerChannel, (call) async {
@@ -134,6 +143,7 @@ void main() {
       expect((call.arguments as Map)['ownerId'], api.userId);
       if (call.method == 'listLocalImages') return images;
       if (call.method == 'downloadSharedImage') {
+        if (failSharedDownload) throw PlatformException(code: 'download_failed');
         final downloaded = File('${temp.path}/downloaded-shared.png');
         File(imagePath).copySync(downloaded.path);
         return downloaded.path;
@@ -216,6 +226,18 @@ void main() {
     final manual = find.text('수동');
     await tester.ensureVisible(manual);
     await tester.tap(manual);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> choosePreviewSquare(WidgetTester tester) async {
+    await tester.tap(find.byKey(const ValueKey('wallpaper-ratio-settings')));
+    await tester.pumpAndSettle();
+    await selectManual(tester);
+    final square = find.byKey(const ValueKey(CropPreset.square));
+    await tester.ensureVisible(square);
+    await tester.tap(square);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('설정 적용'));
     await tester.pumpAndSettle();
   }
 
@@ -353,13 +375,10 @@ void main() {
         find.byKey(const ValueKey('wallpaper-preview-image')),
       );
       expect(find.byType(HomeWallpaperPreviewPage), findsOneWidget);
-      final aspect = tester.widget<AspectRatio>(
-        find.ancestor(
-          of: find.byKey(const ValueKey('wallpaper-preview-image')),
-          matching: find.byType(AspectRatio),
-        ),
-      );
-      expect(aspect.aspectRatio, 4 / 3);
+      expect(tester.widget<Image>(find.byKey(
+          const ValueKey('wallpaper-preview-image'))).fit, BoxFit.contain);
+      expect(tester.getRect(find.byKey(const ValueKey('wallpaper-preview-image'))).bottom,
+          lessThanOrEqualTo(tester.getRect(find.byType(DropdownButton<WallpaperTarget>)).top));
       await tester.tap(find.text('배경화면 설정'));
       await tester.pumpAndSettle();
       expect(appliedLocalWallpaper!['id'], 'image-0');
@@ -401,7 +420,7 @@ void main() {
     },
   );
 
-  testWidgets('automatic preview uses full native display and follows rotation',
+  testWidgets('preview keeps the whole image while automatic settings follow rotation',
       (tester) async {
     detectedDisplay = const Size(1080, 2400);
     await show(tester, WallpaperPreviewPage(filePath: imagePath),
@@ -411,15 +430,22 @@ void main() {
             of: find.byKey(const ValueKey('wallpaper-preview-image')),
             matching: find.byType(AspectRatio)))
         .aspectRatio;
-    expect(previewAspect(), 1080 / 2400);
+    expect(previewAspect(), 1);
+    expect(tester.widget<RawImage>(find.byKey(
+        const ValueKey('wallpaper-preview-image'))).fit, BoxFit.contain);
     expect(find.text('맞춤 형태'), findsNothing);
     expect(find.byTooltip('세로 방향'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('wallpaper-ratio-settings')));
+    await tester.pumpAndSettle();
+    expect(find.text('기기 화면 비율 자동 적용 · 1080:2400'), findsOneWidget);
     detectedDisplay = const Size(2400, 1080);
     tester.view.physicalSize = const Size(640, 320);
     await tester.pumpAndSettle();
-    expect(previewAspect(), 2400 / 1080);
-    await tester.ensureVisible(find.text('홈 화면에 적용'));
-    await tester.tap(find.text('홈 화면에 적용'));
+    expect(find.text('기기 화면 비율 자동 적용 · 2400:1080'), findsOneWidget);
+    await tester.tap(find.text('설정 적용'));
+    await tester.pumpAndSettle();
+    expect(previewAspect(), 1);
+    await tester.tap(find.widgetWithText(FilledButton, '배경화면 적용'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.widgetWithText(ListTile, '잠금 화면에 적용'));
     await tester.tap(find.widgetWithText(ListTile, '잠금 화면에 적용'));
@@ -471,11 +497,11 @@ void main() {
           tester,
           find.byKey(const ValueKey('wallpaper-preview-image')),
         );
-        await selectManual(tester);
-        final square = find.byKey(const ValueKey(CropPreset.square));
-        await tester.ensureVisible(square);
-        await tester.tap(square);
-        await tester.pumpAndSettle();
+        expect(api.downloadReports, 1);
+        expect(find.descendant(of: find.byType(WallpaperPreviewPage),
+            matching: find.text('8')), findsOneWidget);
+        expect(find.textContaining('집계'), findsNothing);
+        await choosePreviewSquare(tester);
         if (confirm) {
           final save = find.text('내 보관함에 저장');
           await tester.ensureVisible(save);
@@ -843,7 +869,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('portrait preview fills width and pans without changing source',
+  testWidgets('portrait preview fits fully and drags scroll information and filters',
       (tester) async {
     final path = '${temp.path}/portrait.png';
     await tester.runAsync(() async {
@@ -857,23 +883,96 @@ void main() {
       picture.dispose();
     });
     final original = File(path).readAsBytesSync();
-    await show(tester, ImageFeaturePage(filePath: path, title: '세로 사진'));
-    final finder = find.byKey(const ValueKey('registration-image-viewer'));
-    final viewer = tester.widget<InteractiveViewer>(finder);
-    final content = tester.getSize(
-        find.descendant(of: finder, matching: find.byType(CustomPaint)).first);
-    expect(content.width, closeTo(tester.getSize(finder).width, .01));
+    await show(tester, ImageFeaturePage(filePath: path, title: '세로 사진'),
+        size: const Size(320, 640), scale: 1.4);
+    final aspect = find.byKey(const ValueKey('registration-preview-aspect'));
+    final viewport = find.byKey(const ValueKey('registration-original-image'));
+    final content = tester.getSize(aspect);
     expect(content.height / content.width, closeTo(4, .01));
-    expect(content.height, greaterThan(tester.getSize(finder).height));
-    final gesture = await tester.startGesture(tester.getCenter(finder));
-    await tester.pump();
-    await gesture.moveBy(const Offset(0, -180));
-    await tester.pump();
-    await gesture.up();
+    expect(content.height, lessThanOrEqualTo(tester.getSize(viewport).height));
+    expect(find.byType(InteractiveViewer), findsNothing);
+    final scroll = tester.widget<SingleChildScrollView>(
+        find.byKey(const ValueKey('registration-content'))).controller!;
+    await tester.drag(viewport, const Offset(0, -120));
     await tester.pumpAndSettle();
-    expect(
-        viewer.transformationController!.value.getTranslation().y, lessThan(0));
+    expect(scroll.offset, greaterThan(0));
+    await tester.tap(find.byKey(const ValueKey('registration-tool-filter')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<AspectRatio>(aspect).aspectRatio, .25);
+    await tester.drag(viewport, const Offset(0, -120));
+    await tester.pumpAndSettle();
+    expect(scroll.offset, greaterThan(0));
+    final vivid = find.byKey(const ValueKey(PhotoFilter.vivid));
+    await tester.ensureVisible(vivid);
+    await tester.tap(vivid);
+    await tester.pumpAndSettle();
+    expect(tester.widget<RegistrationImageCanvas>(find.byType(
+        RegistrationImageCanvas)).filter, PhotoFilter.vivid);
     expect(File(path).readAsBytesSync(), original);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('crop canvas stays visible and crop drags do not scroll the settings',
+      (tester) async {
+    await show(tester, ImageFeaturePage(filePath: imagePath, title: '자르기'),
+        size: const Size(320, 640), scale: 1.4);
+    await tester.tap(find.byKey(const ValueKey('registration-tool-crop')));
+    await tester.pumpAndSettle();
+    final canvas = find.byKey(const ValueKey('registration-crop-canvas'));
+    expect(tester.getRect(canvas).bottom,
+        lessThan(tester.getRect(find.byKey(const ValueKey('registration-tools'))).top));
+    final scroll = tester.widget<SingleChildScrollView>(find.byKey(
+        const ValueKey('registration-content'))).controller!;
+    final previous = tester.widget<RegistrationImageCanvas>(
+        find.byType(RegistrationImageCanvas)).crop;
+    await tester.timedDrag(canvas, const Offset(-50, 0),
+        const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    expect(scroll.offset, 0);
+    expect(tester.widget<RegistrationImageCanvas>(find.byType(
+        RegistrationImageCanvas)).crop, isNot(previous));
+    await selectManual(tester);
+    final square = find.byKey(const ValueKey(CropPreset.square));
+    await tester.ensureVisible(square);
+    await tester.tap(square);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('tag editing hides the unspecified option and fills it on empty save',
+      (tester) async {
+    await show(tester, home());
+    await edit(tester, 0);
+    expect(find.descendant(of: find.byType(AlertDialog),
+        matching: find.text(unspecifiedGalleryTag)), findsNothing);
+    await tester.tap(find.widgetWithText(FilterChip, '풍경'));
+    await tester.tap(find.text('저장'));
+    await tester.pumpAndSettle();
+    expect(images[0]['tags'], [unspecifiedGalleryTag]);
+    expect(localWrites, 1);
+    await edit(tester, 0);
+    expect(find.descendant(of: find.byType(AlertDialog),
+        matching: find.text(unspecifiedGalleryTag)), findsNothing);
+    expect(tester.widgetList<FilterChip>(find.byType(FilterChip))
+        .where((chip) => chip.selected), isEmpty);
+    await tester.tap(find.text('취소'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('failed image downloads do not report a completion', (tester) async {
+    api.gallery = [GalleryPostItem(id: 'shared-post', username: 'artist',
+      title: '다운로드 실패', imageUrl: 'https://images.example.test/shared.png',
+      tag: 'SF', createdAt: DateTime.utc(2026))];
+    failSharedDownload = true;
+    await show(tester, home());
+    await tester.tap(find.text('탐색'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다운로드 실패'));
+    await tester.pumpAndSettle();
+    expect(api.downloadReports, 0);
+    expect(imports, 0);
+    expect(find.byType(WallpaperPreviewPage), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

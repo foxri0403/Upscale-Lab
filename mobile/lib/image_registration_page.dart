@@ -68,11 +68,6 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   PhotoFilter _filter = PhotoFilter.original;
   Rect _crop = const Rect.fromLTWH(0, 0, 1, 1);
   int _canvasRevision = 0;
-  int _canvasPointers = 0;
-
-  void _releaseCanvasPointer(PointerEvent _) => setState(() {
-        if (_canvasPointers > 0) _canvasPointers--;
-      });
 
   @override
   void initState() {
@@ -196,11 +191,9 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
         body: SafeArea(
             child: Column(children: [
           Expanded(
-              child: SingleChildScrollView(
+              child: LayoutBuilder(builder: (_, bounds) => SingleChildScrollView(
             controller: _contentScroll,
-            physics: _canvasPointers > 0
-                ? const NeverScrollableScrollPhysics()
-                : null,
+            key: const ValueKey('registration-content'),
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             child: AppFormBody(
@@ -208,11 +201,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (source != null) ...[
-                  Listener(
-                    onPointerDown: (_) => setState(() => _canvasPointers++),
-                    onPointerUp: _releaseCanvasPointer,
-                    onPointerCancel: _releaseCanvasPointer,
-                    child: RegistrationImageCanvas(
+                  RegistrationImageCanvas(
                       key: ValueKey(_canvasRevision),
                       source: source,
                       crop: _crop,
@@ -222,13 +211,14 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                           editing: true),
                       onCropChanged: (crop) => setState(() => _crop = crop),
                       enabled: !_saving,
-                    ),
+                      maxHeight: (bounds.maxHeight * .6).clamp(72.0, 360.0)
+                          .clamp(0.0, bounds.maxHeight),
                   ),
                   const SizedBox(height: 8),
                   Text(
                       _tool == _RegistrationTool.crop
                           ? '모서리를 드래그해 자르기 · 두 손가락으로 확대·축소'
-                          : '드래그로 전체 보기 · 두 손가락으로 확대·축소',
+                          : '위아래로 스크롤해 사진 정보와 편집 항목을 확인하세요.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                           color: colors.onSurfaceVariant, fontSize: 12)),
@@ -261,7 +251,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                 }),
               ],
             )),
-          )),
+          ))),
           const Divider(),
           if (MediaQuery.viewInsetsOf(context).bottom == 0)
             SingleChildScrollView(
@@ -399,11 +389,14 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                               child: ColorFiltered(
                                   colorFilter:
                                       ColorFilter.matrix(filter.matrix),
-                                  child: RawImage(
-                                      image: source.preview,
-                                      width: 64,
-                                      height: 64,
-                                      fit: BoxFit.cover)),
+                                  child: SizedBox.square(
+                                    dimension: 64,
+                                    child: Center(child: AspectRatio(
+                                      aspectRatio: source.size.aspectRatio,
+                                      child: RawImage(image: source.preview,
+                                          fit: BoxFit.contain),
+                                    )),
+                                  )),
                             ),
                           const SizedBox(height: 6),
                           Text(filter.label,

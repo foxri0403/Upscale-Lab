@@ -57,6 +57,16 @@ class _GalleryApi extends ApiClient {
 }
 
 void main() {
+  Future<void> revealTag(WidgetTester tester, String tag) async {
+    final scrollable = find.descendant(of: find.byType(ListView),
+        matching: find.byType(Scrollable));
+    tester.state<ScrollableState>(scrollable).position.jumpTo(0);
+    await tester.pump();
+    final tile = find.widgetWithText(CheckboxListTile, tag);
+    await tester.scrollUntilVisible(tile, 80, scrollable: scrollable);
+    await tester.ensureVisible(tile);
+    await tester.pumpAndSettle();
+  }
   testWidgets('search keeps multiple tags and title across tab changes',
       (tester) async {
     const channel = MethodChannel('live_layer/storage');
@@ -73,14 +83,17 @@ void main() {
     await tester.tap(find.text('태그 선택'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(CheckboxListTile, '동물'));
+    await revealTag(tester, '애니');
     await tester.tap(find.widgetWithText(CheckboxListTile, '애니'));
     await tester.pumpAndSettle();
+    await revealTag(tester, '동물');
     expect(
         tester
             .widget<CheckboxListTile>(
                 find.widgetWithText(CheckboxListTile, '동물'))
             .value,
         isTrue);
+    await revealTag(tester, '애니');
     expect(
         tester
             .widget<CheckboxListTile>(
@@ -100,18 +113,21 @@ void main() {
         '고양이');
     await tester.tap(find.text('태그 선택'));
     await tester.pumpAndSettle();
+    await revealTag(tester, '동물');
     expect(
         tester
             .widget<CheckboxListTile>(
                 find.widgetWithText(CheckboxListTile, '동물'))
             .value,
         isTrue);
+    await revealTag(tester, '애니');
     expect(
         tester
             .widget<CheckboxListTile>(
                 find.widgetWithText(CheckboxListTile, '애니'))
             .value,
         isTrue);
+    await revealTag(tester, '동물');
     await tester.tap(find.widgetWithText(CheckboxListTile, '동물'));
     await tester.tap(find.text('적용하기'));
     await tester.pumpAndSettle();
@@ -199,6 +215,7 @@ void main() {
 
     expect(api.previewRequests, 1);
     final image = tester.widget<Image>(find.byType(Image));
+    expect(image.fit, BoxFit.contain);
     expect(((image.image as ResizeImage).imageProvider as NetworkImage).url,
         'https://images.example.test/cat.png');
     // Widget tests reject real network image requests; exercise the retry button.

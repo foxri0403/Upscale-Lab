@@ -420,7 +420,7 @@ class ApiClient {
 
   Future<String> getGalleryDownloadUrl(String postId) async {
     final response = await _post(
-        Uri.parse('$baseUrl/api/gallery/$postId/download-url'),
+        Uri.parse('$baseUrl/api/gallery/$postId/download-url?countDownload=false'),
         headers: _headers);
     _ensureSuccess(response);
     final body =
@@ -442,6 +442,18 @@ class ApiClient {
       throw StateError('이미지 주소를 불러오지 못했습니다.');
     }
     return url;
+  }
+
+  Future<int> recordGalleryDownload(String postId) async {
+    final response = await _post(
+      Uri.parse('$baseUrl/api/gallery/$postId/download-complete'),
+      headers: _headers,
+    );
+    _ensureSuccess(response);
+    final body = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    final count = body['downloadCount'];
+    if (count is! int || count < 0) throw StateError('다운로드 횟수를 확인하지 못했습니다.');
+    return count;
   }
 
   Future<void> deleteGalleryPost(String id) async {
