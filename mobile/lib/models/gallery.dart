@@ -13,6 +13,7 @@ class GalleryPostItem {
     this.selectedTags,
     this.thumbnailUrl,
     this.fileName,
+    this.savedUserCount,
     required this.createdAt,
   });
 
@@ -24,6 +25,8 @@ class GalleryPostItem {
   final List<String>? selectedTags;
   final String? thumbnailUrl;
   final String? fileName;
+  /// Number of distinct users who saved this post, when supplied by the API.
+  final int? savedUserCount;
   List<String> get tags => selectedTags ?? [tag];
   final DateTime createdAt;
 
@@ -41,6 +44,12 @@ class GalleryPostItem {
         title.toLowerCase().contains(normalizedSearch);
   }
 
+  static int? _readSavedUserCount(Map<String, dynamic> json) {
+    final value = json['savedUserCount'];
+    if (value is int && value >= 0) return value;
+    return null;
+  }
+
   factory GalleryPostItem.fromJson(Map<String, dynamic> json) {
     final tags = GalleryTagCodec.fromPost(json);
     return GalleryPostItem(
@@ -52,6 +61,7 @@ class GalleryPostItem {
       selectedTags: tags.isEmpty ? [unspecifiedGalleryTag] : tags,
       thumbnailUrl: json['thumbnailUrl'] as String?,
       fileName: json['fileName'] as String?,
+      savedUserCount: _readSavedUserCount(json),
       createdAt: DateTime.parse(json['createdAt'] as String).toLocal(),
     );
   }

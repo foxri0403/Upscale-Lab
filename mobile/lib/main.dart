@@ -118,7 +118,7 @@ class LiveLayerApp extends StatelessWidget {
       darkTheme: AppTheme.dark,
       themeMode: selectedMode,
       builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
-        value: AppTheme.systemOverlay,
+        value: AppTheme.overlayFor(Theme.of(context).brightness),
         child: child!,
       ),
       home: isAutoLoggedIn
@@ -131,7 +131,7 @@ class LiveLayerApp extends StatelessWidget {
   }
 }
 
-// 공통 입력창. 기존에 확정한 흰색/미니멀 UI를 그대로 사용한다.
+// 공통 입력창. 라이트/다크 테마에서 동일한 레이아웃을 사용한다.
 class LiveLayerTextField extends StatelessWidget {
   const LiveLayerTextField({
     super.key,
@@ -190,7 +190,7 @@ class LiveLayerButton extends StatelessWidget {
         onPressed: onPressed,
         child: Text(
           text,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
       ),
     );
@@ -224,21 +224,21 @@ class _ServerAddressDialogState extends State<_ServerAddressDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('서버 주소 설정'),
+      title: Text('서버 주소 설정'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'AWS 배포 후 HTTPS API 주소를 입력하세요.',
-            style: TextStyle(color: Color(0xFF6F7789)),
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
-          const SizedBox(height: 14),
+          SizedBox(height: 14),
           TextField(
             controller: _controller,
             keyboardType: TextInputType.url,
             autocorrect: false,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'API URL',
               hintText: 'https://api.example.com',
               border: OutlineInputBorder(),
@@ -249,11 +249,11 @@ class _ServerAddressDialogState extends State<_ServerAddressDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('취소'),
+          child: Text('취소'),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(context, _controller.text.trim()),
-          child: const Text('저장'),
+          child: Text('저장'),
         ),
       ],
     );
@@ -387,19 +387,19 @@ class _LoginPageState extends State<LoginPage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       SizedBox(height: topGap),
-                      const DecoratedBox(
+                      DecoratedBox(
                         decoration: BoxDecoration(
-                          color: AppTheme.tint,
+                          color: Theme.of(context).colorScheme.primaryContainer,
                           borderRadius: BorderRadius.all(Radius.circular(20)),
                         ),
                         child: Padding(
                           padding: EdgeInsets.all(18),
                           child: Icon(Icons.auto_awesome_mosaic_outlined,
-                              color: AppTheme.primary, size: 34),
+                              color: Theme.of(context).colorScheme.primary, size: 34),
                         ),
                       ),
-                      const SizedBox(height: 20),
-                      const Text(
+                      SizedBox(height: 20),
+                      Text(
                         'Upscale Lab',
                         style: TextStyle(
                           fontSize: 32,
@@ -407,23 +407,23 @@ class _LoginPageState extends State<LoginPage> {
                           letterSpacing: -1,
                         ),
                       ),
-                      const SizedBox(height: 14),
-                      const Text(
+                      SizedBox(height: 14),
+                      Text(
                         '당신의 이미지를,\n움직이는 배경화면으로',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 16,
                           height: 1.5,
-                          color: Color(0xFF6F7789),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
-                      const SizedBox(height: 32),
+                      SizedBox(height: 32),
                       LiveLayerTextField(
                         controller: _identifier,
                         hintText: '이메일 또는 사용자 아이디',
                         icon: Icons.person_outline,
                       ),
-                      const SizedBox(height: 14),
+                      SizedBox(height: 14),
                       LiveLayerTextField(
                         controller: _password,
                         hintText: '비밀번호',
@@ -437,11 +437,11 @@ class _LoginPageState extends State<LoginPage> {
                             _showPassword
                                 ? Icons.visibility_off_outlined
                                 : Icons.visibility_outlined,
-                            color: const Color(0xFF6F7789),
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      SizedBox(height: 8),
                       CheckboxListTile(
                         value: _autoLogin,
                         onChanged: _busy
@@ -451,14 +451,14 @@ class _LoginPageState extends State<LoginPage> {
                         contentPadding: EdgeInsets.zero,
                         controlAffinity: ListTileControlAffinity.leading,
                         dense: true,
-                        title: const Text('자동 로그인'),
+                        title: Text('자동 로그인'),
                       ),
-                      const SizedBox(height: 12),
+                      SizedBox(height: 12),
                       LiveLayerButton(
                         text: _busy ? '로그인 중...' : '로그인',
                         onPressed: _busy ? null : _login,
                       ),
-                      const SizedBox(height: 8),
+                      SizedBox(height: 8),
                       Wrap(
                         alignment: WrapAlignment.center,
                         crossAxisAlignment: WrapCrossAlignment.center,
@@ -472,10 +472,10 @@ class _LoginPageState extends State<LoginPage> {
                                             apiClient: widget.apiClient),
                                       ),
                                     ),
-                            child: const Text('아이디 찾기'),
+                            child: Text('아이디 찾기'),
                           ),
-                          const Text('|',
-                              style: TextStyle(color: Color(0xFFD0D3DB))),
+                          Text('|',
+                              style: TextStyle(color: Theme.of(context).colorScheme.outlineVariant)),
                           TextButton(
                             onPressed: _busy
                                 ? null
@@ -486,18 +486,18 @@ class _LoginPageState extends State<LoginPage> {
                                         ),
                                       ),
                                     ),
-                            child: const Text('비밀번호 재설정'),
+                            child: Text('비밀번호 재설정'),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 2),
+                      SizedBox(height: 2),
                       Wrap(
                         alignment: WrapAlignment.center,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          const Text(
+                          Text(
                             '계정이 없으신가요?',
-                            style: TextStyle(color: Color(0xFF777E8E)),
+                            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                           ),
                           TextButton(
                             onPressed: _busy
@@ -508,10 +508,10 @@ class _LoginPageState extends State<LoginPage> {
                                             apiClient: widget.apiClient),
                                       ),
                                     ),
-                            child: const Text(
+                            child: Text(
                               '회원가입하기',
                               style: TextStyle(
-                                color: Color(0xFF536DFE),
+                                color: Theme.of(context).colorScheme.primary,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -520,8 +520,8 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       TextButton.icon(
                         onPressed: _busy ? null : _configureServer,
-                        icon: const Icon(Icons.dns_outlined, size: 18),
-                        label: const Text('서버 주소 설정'),
+                        icon: Icon(Icons.dns_outlined, size: 18),
+                        label: Text('서버 주소 설정'),
                       ),
                       SizedBox(height: keyboardOpen ? 24 : 36),
                     ],
@@ -591,9 +591,9 @@ class _FindIdPageState extends State<FindIdPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: AppTheme.background,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
-        title: const Text('아이디 찾기'),
+        title: Text('아이디 찾기'),
       ),
       body: SafeArea(
         child: AppFormScrollView(
@@ -601,40 +601,40 @@ class _FindIdPageState extends State<FindIdPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 '가입할 때 사용한 이메일을 입력하면 사용자 아이디를 알려드려요.',
                 style: TextStyle(
                   fontSize: 15,
                   height: 1.5,
-                  color: Color(0xFF6F7789),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(height: 30),
+              SizedBox(height: 30),
               LiveLayerTextField(
                 controller: _email,
                 hintText: '이메일 주소',
                 icon: Icons.mail_outline,
                 keyboardType: TextInputType.emailAddress,
               ),
-              const SizedBox(height: 20),
+              SizedBox(height: 20),
               LiveLayerButton(
                 text: _busy ? '확인 중...' : '아이디 찾기',
                 onPressed: _busy ? null : _findId,
               ),
               if (_result != null) ...[
-                const SizedBox(height: 24),
+                SizedBox(height: 24),
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF3F5FF),
+                    color: Theme.of(context).colorScheme.primaryContainer,
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Text(
                     _result!,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Color(0xFF434A5B),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                       height: 1.5,
                     ),
                   ),
@@ -740,9 +740,9 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: AppTheme.background,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
-        title: const Text('비밀번호 재설정'),
+        title: Text('비밀번호 재설정'),
       ),
       body: SafeArea(
         child: AppFormScrollView(
@@ -750,36 +750,36 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 '가입한 이메일로 6자리 재설정 코드를 보내드려요.',
                 style: TextStyle(
                   fontSize: 15,
                   height: 1.5,
-                  color: Color(0xFF6F7789),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(height: 26),
+              SizedBox(height: 26),
               LiveLayerTextField(
                 controller: _email,
                 hintText: '이메일 주소',
                 icon: Icons.mail_outline,
                 keyboardType: TextInputType.emailAddress,
               ),
-              const SizedBox(height: 16),
+              SizedBox(height: 16),
               LiveLayerButton(
                 text:
                     _busy ? '요청 중...' : (_codeSent ? '코드 다시 보내기' : '재설정 코드 받기'),
                 onPressed: _busy ? null : _sendCode,
               ),
               if (_codeSent) ...[
-                const SizedBox(height: 30),
+                SizedBox(height: 30),
                 LiveLayerTextField(
                   controller: _code,
                   hintText: '6자리 재설정 코드',
                   icon: Icons.mark_email_read_outlined,
                   keyboardType: TextInputType.number,
                 ),
-                const SizedBox(height: 14),
+                SizedBox(height: 14),
                 LiveLayerTextField(
                   controller: _newPassword,
                   hintText: '새 비밀번호',
@@ -793,19 +793,19 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
                       _showNewPassword
                           ? Icons.visibility_off_outlined
                           : Icons.visibility_outlined,
-                      color: const Color(0xFF6F7789),
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
-                const SizedBox(height: 8),
-                const Padding(
+                SizedBox(height: 8),
+                Padding(
                   padding: EdgeInsets.only(left: 5),
                   child: Text(
                     '10자 이상 · 대문자 · 숫자 · 특수문자를 포함해주세요.',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF9299AA)),
+                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ),
-                const SizedBox(height: 14),
+                SizedBox(height: 14),
                 LiveLayerTextField(
                   controller: _passwordCheck,
                   hintText: '새 비밀번호 확인',
@@ -819,11 +819,11 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
                       _showPasswordCheck
                           ? Icons.visibility_off_outlined
                           : Icons.visibility_outlined,
-                      color: const Color(0xFF6F7789),
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
-                const SizedBox(height: 22),
+                SizedBox(height: 22),
                 LiveLayerButton(
                   text: _busy ? '변경 중...' : '비밀번호 변경',
                   onPressed: _busy ? null : _resetPassword,
@@ -990,10 +990,10 @@ class _SignUpPageState extends State<SignUpPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: AppTheme.background,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black),
+          icon: Icon(Icons.arrow_back_ios_new, color: Theme.of(context).colorScheme.onSurface),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -1006,8 +1006,8 @@ class _SignUpPageState extends State<SignUpPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const SizedBox(height: 25),
-                  const Text(
+                  SizedBox(height: 25),
+                  Text(
                     'Upscale Lab',
                     style: TextStyle(
                       fontSize: 36,
@@ -1015,16 +1015,16 @@ class _SignUpPageState extends State<SignUpPage> {
                       letterSpacing: -1,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  const Text(
+                  SizedBox(height: 12),
+                  Text(
                     '계정을 생성하고\n나만의 Live2D 배경화면을 만들어보세요.',
                     style: TextStyle(
                       fontSize: 15,
                       height: 1.5,
-                      color: Color(0xFF6F7789),
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(height: 40),
+                  SizedBox(height: 40),
                   LiveLayerTextField(
                     controller: _email,
                     hintText: '이메일 주소',
@@ -1033,7 +1033,7 @@ class _SignUpPageState extends State<SignUpPage> {
                     errorText: _emailError,
                     onChanged: (_) => _clearFieldError('email'),
                   ),
-                  const SizedBox(height: 14),
+                  SizedBox(height: 14),
                   LiveLayerTextField(
                     controller: _username,
                     hintText: '사용자 아이디',
@@ -1041,7 +1041,7 @@ class _SignUpPageState extends State<SignUpPage> {
                     errorText: _usernameError,
                     onChanged: (_) => _clearFieldError('username'),
                   ),
-                  const SizedBox(height: 14),
+                  SizedBox(height: 14),
                   LiveLayerTextField(
                     controller: _password,
                     hintText: '비밀번호',
@@ -1057,19 +1057,19 @@ class _SignUpPageState extends State<SignUpPage> {
                         _showPassword
                             ? Icons.visibility_off_outlined
                             : Icons.visibility_outlined,
-                        color: const Color(0xFF6F7789),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  const Padding(
+                  SizedBox(height: 8),
+                  Padding(
                     padding: EdgeInsets.only(left: 5),
                     child: Text(
                       '10자 이상 · 대문자 · 숫자 · 특수문자를 포함해주세요.',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF9299AA)),
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
-                  const SizedBox(height: 14),
+                  SizedBox(height: 14),
                   LiveLayerTextField(
                     controller: _passwordCheck,
                     hintText: '비밀번호 확인',
@@ -1085,45 +1085,45 @@ class _SignUpPageState extends State<SignUpPage> {
                         _showPasswordCheck
                             ? Icons.visibility_off_outlined
                             : Icons.visibility_outlined,
-                        color: const Color(0xFF6F7789),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  SizedBox(height: 24),
                   LiveLayerButton(
                     text: _busy ? '회원가입 중...' : '회원가입하기',
                     onPressed: _busy ? null : _signUp,
                   ),
                   if (_submitError != null) ...[
-                    const SizedBox(height: 10),
+                    SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
                       child: Text(
                         _submitError!,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Color(0xFFD93025),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
                           fontSize: 13,
                           height: 1.4,
                         ),
                       ),
                     ),
                   ],
-                  const SizedBox(height: 25),
+                  SizedBox(height: 25),
                   Wrap(
                     alignment: WrapAlignment.center,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      const Text(
+                      Text(
                         '이미 계정이 있으신가요?',
-                        style: TextStyle(color: Color(0xFF777E8E)),
+                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                       ),
                       TextButton(
                         onPressed: _busy ? null : () => Navigator.pop(context),
-                        child: const Text(
+                        child: Text(
                           '로그인하기',
                           style: TextStyle(
-                            color: Color(0xFF536DFE),
+                            color: Theme.of(context).colorScheme.primary,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -1216,32 +1216,32 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('이메일 인증')),
+        appBar: AppBar(title: Text('이메일 인증')),
         body: SafeArea(
           child: AppFormScrollView(
             padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const DecoratedBox(
+              DecoratedBox(
                 decoration: BoxDecoration(
-                  color: AppTheme.tint,
+                  color: Theme.of(context).colorScheme.primaryContainer,
                   borderRadius: BorderRadius.all(Radius.circular(18)),
                 ),
                 child: Padding(
                     padding: EdgeInsets.all(16),
                     child: Icon(Icons.mail_outline_rounded,
-                        size: 32, color: AppTheme.primary)),
+                        size: 32, color: Theme.of(context).colorScheme.primary)),
               ),
-              const SizedBox(height: 24),
+              SizedBox(height: 24),
               const AppSectionTitle('인증 코드를 입력해 주세요'),
-              const SizedBox(height: 12),
-              const Text('가입 후 15분 이내에 이메일 인증을 완료해 주세요. 인증하지 않은 계정은 자동 삭제됩니다.',
-                  style: TextStyle(color: AppTheme.muted, height: 1.5)),
-              const SizedBox(height: 8),
+              SizedBox(height: 12),
+              Text('가입 후 15분 이내에 이메일 인증을 완료해 주세요. 인증하지 않은 계정은 자동 삭제됩니다.',
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, height: 1.5)),
+              SizedBox(height: 8),
               Text(widget.email,
-                  style: const TextStyle(color: AppTheme.primary)),
-              const SizedBox(height: 28),
+                  style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+              SizedBox(height: 28),
               Row(
                   children: List.generate(
                       6,
@@ -1258,7 +1258,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
                                   FilteringTextInputFormatter.digitsOnly
                                 ],
                                 maxLength: 1,
-                                style: const TextStyle(
+                                style: TextStyle(
                                     fontSize: 22, fontWeight: FontWeight.w600),
                                 onChanged: (value) {
                                   if (value.isNotEmpty && index < 5) {
@@ -1267,7 +1267,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
                                     _focusNodes[index - 1].requestFocus();
                                   }
                                 },
-                                decoration: const InputDecoration(
+                                decoration: InputDecoration(
                                   counterText: '',
                                   contentPadding:
                                       EdgeInsets.symmetric(vertical: 14),
@@ -1275,15 +1275,15 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
                               ),
                             ),
                           ))),
-              const SizedBox(height: 28),
+              SizedBox(height: 28),
               LiveLayerButton(
                   text: _busy ? '인증 중...' : '인증하기',
                   onPressed: _busy ? null : _verify),
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
               Center(
                   child: TextButton(
                 onPressed: _busy ? null : _resend,
-                child: const Text('인증 코드를 받지 못하셨나요?  다시 보내기',
+                child: Text('인증 코드를 받지 못하셨나요?  다시 보내기',
                     textAlign: TextAlign.center),
               )),
             ]),
@@ -1420,7 +1420,7 @@ class _PreviewPageState extends State<PreviewPage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     ListTile(
-                      title: const Text('센서 반응 감도'),
+                      title: Text('센서 반응 감도'),
                       subtitle: Slider(
                         value: _sensitivity,
                         min: 0,
@@ -1437,8 +1437,8 @@ class _PreviewPageState extends State<PreviewPage> {
                         width: double.infinity,
                         child: FilledButton.icon(
                           style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF536DFE),
-                            foregroundColor: Colors.white,
+                            backgroundColor: Theme.of(context).colorScheme.primary,
+                            foregroundColor: Theme.of(context).colorScheme.onPrimary,
                             minimumSize: const Size.fromHeight(48),
                           ),
                           onPressed: _applyingLive ? null : _applyLiveWallpaper,
@@ -1448,7 +1448,7 @@ class _PreviewPageState extends State<PreviewPage> {
                                   child:
                                       CircularProgressIndicator(strokeWidth: 2),
                                 )
-                              : const Icon(Icons.wallpaper),
+                              : Icon(Icons.wallpaper),
                           label: Text(
                             _applyingLive ? '레이어 다운로드 중...' : '라이브 배경화면 적용',
                           ),
@@ -1462,30 +1462,15 @@ class _PreviewPageState extends State<PreviewPage> {
                           Expanded(
                             child: OutlinedButton.icon(
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFF536DFE),
+                                foregroundColor: Theme.of(context).colorScheme.primary,
                                 side:
-                                    const BorderSide(color: Color(0xFF536DFE)),
-                                minimumSize: const Size.fromHeight(48),
-                              ),
-                              onPressed:
-                                  _downloading ? null : _downloadOriginal,
-                              icon: const Icon(Icons.download_outlined),
-                              label: Text(_downloading ? '준비 중...' : '원본 다운로드'),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFF536DFE),
-                                side:
-                                    const BorderSide(color: Color(0xFF536DFE)),
+                                    BorderSide(color: Theme.of(context).colorScheme.primary),
                                 minimumSize: const Size.fromHeight(48),
                               ),
                               onPressed: _applyingStatic
                                   ? null
                                   : _applyStaticWallpaper,
-                              icon: const Icon(Icons.phone_android),
+                              icon: Icon(Icons.phone_android),
                               label: Text(
                                   _applyingStatic ? '적용 중...' : '원본 바로 적용'),
                             ),

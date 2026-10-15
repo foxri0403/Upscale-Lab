@@ -1,5 +1,7 @@
 import 'package:flutter/services.dart';
 
+import '../models/image_ratio.dart';
+
 /// The Android screen(s) whose static wallpaper will be changed.
 enum WallpaperTarget { home, lock, both }
 
@@ -16,19 +18,25 @@ class WallpaperService {
   Future<void> applyLocal({
     required String sourcePath,
     required WallpaperTarget target,
-  }) => _channel.invokeMethod<void>('applyLocalStaticWallpaper', {
-    'sourcePath': sourcePath,
-    'target': target.name,
-  });
+    ImageRatioSettings ratio = const ImageRatioSettings(),
+  }) =>
+      _channel.invokeMethod<void>('applyLocalStaticWallpaper', {
+        'sourcePath': sourcePath,
+        'target': target.name,
+        'ratio': ratio.toMap(),
+      });
 
   /// Callers should refresh expiring image URLs before applying.
   Future<void> applyRemote({
     required String url,
     required WallpaperTarget target,
-  }) => _channel.invokeMethod<void>('applyStaticWallpaper', {
-    'url': url,
-    'target': target.name,
-  });
+    ImageRatioSettings ratio = const ImageRatioSettings(),
+  }) =>
+      _channel.invokeMethod<void>('applyStaticWallpaper', {
+        'url': url,
+        'target': target.name,
+        'ratio': ratio.toMap(),
+      });
 
   /// Resets the selected screen(s) without deleting library images.
   Future<void> clear({required WallpaperTarget target}) =>

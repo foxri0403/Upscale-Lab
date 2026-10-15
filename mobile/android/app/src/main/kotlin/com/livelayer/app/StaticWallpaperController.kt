@@ -15,18 +15,25 @@ internal class StaticWallpaperController(
     private val platform: WallpaperPlatform,
 ) {
     // MainActivity serializes these operations on its existing IO executor.
-    fun apply(target: WallpaperTarget, openSource: () -> InputStream) {
+    fun apply(
+        target: WallpaperTarget,
+        prepareSource: ((File) -> File)? = null,
+        openSource: () -> InputStream,
+    ) {
         target.requireSupported(platform.sdkInt)
         check(directory.isDirectory || directory.mkdirs()) { "배경화면 저장 폴더를 만들 수 없습니다." }
         val temporary = File.createTempFile("wallpaper-", ".img.part", directory)
+        var prepared = temporary
         try {
             openSource().use { input -> temporary.outputStream().use { output -> input.copyTo(output) } }
-            temporary.inputStream().use { platform.apply(it, target) }
+            prepared = prepareSource?.invoke(temporary) ?: temporary
+            prepared.inputStream().use { platform.apply(it, target) }
             // Do not replace either previous source until Android accepts the image.
             target.screens.forEach { screen ->
                 temporary.copyTo(File(directory, screen.cacheFileName), overwrite = true)
             }
         } finally {
+            if (prepared != temporary) prepared.delete()
             temporary.delete()
         }
     }

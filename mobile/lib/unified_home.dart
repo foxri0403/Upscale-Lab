@@ -12,8 +12,8 @@ import 'models/local_image.dart';
 import 'models/library_order.dart';
 import 'services/api_client.dart';
 import 'services/local_image_store.dart';
-import 'theme/app_theme.dart';
 import 'services/wallpaper_service.dart';
+import 'theme/app_theme.dart';
 import 'widgets/app_components.dart';
 import 'widgets/image_edit_dialog.dart';
 import 'widgets/local_image_card.dart';
@@ -114,14 +114,15 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
   void _reload() => setState(() => _images = _loadLibrary());
 
   Future<void> _previewHomeWallpaper(LocalImageItem image) async {
-    try {
-      if (await _localImageStore.previewWallpaper(image.id)) return;
-      if (!mounted) return;
-      await Navigator.of(context).push<void>(MaterialPageRoute(
-          builder: (_) => WallpaperPreviewPage(filePath: image.path)));
-    } catch (error) {
-      _message('배경화면 미리보기를 열지 못했습니다.\n$error');
-    }
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => HomeWallpaperPreviewPage(
+        image: image,
+        store: _localImageStore,
+        onEdit: () => _editImage(image),
+        onShare: () => image.isShared ? _unshare(image) : _share(image),
+        onDelete: () => _delete(image),
+      ),
+    ));
   }
 
   void _message(String message) {
@@ -229,16 +230,16 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('공유 취소'),
-        content: const Text('검색 화면과 클라우드에서 공유 사본을 삭제할까요? 로컬 이미지는 유지됩니다.'),
+        title: Text('공유 취소'),
+        content: Text('검색 화면과 클라우드에서 공유 사본을 삭제할까요? 로컬 이미지는 유지됩니다.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('돌아가기'),
+            child: Text('돌아가기'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('공유 취소'),
+            child: Text('공유 취소'),
           ),
         ],
       ),
@@ -297,17 +298,17 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('홈 배경화면 제거'),
+        title: Text('홈 배경화면 제거'),
         content:
-            const Text('현재 Android 홈 배경화면만 기본 배경으로 되돌릴까요? 등록된 이미지는 삭제되지 않습니다.'),
+            Text('현재 Android 홈 배경화면만 기본 배경으로 되돌릴까요? 등록된 이미지는 삭제되지 않습니다.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('취소'),
+            child: Text('취소'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('배경화면 제거'),
+            child: Text('배경화면 제거'),
           ),
         ],
       ),
@@ -329,7 +330,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('이미지 삭제'),
+        title: Text('이미지 삭제'),
         content: Text(
           image.isShared
               ? '로컬 이미지와 공유된 클라우드 항목을 모두 삭제할까요?'
@@ -338,11 +339,11 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('취소'),
+            child: Text('취소'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('삭제'),
+            child: Text('삭제'),
           ),
         ],
       ),
@@ -378,11 +379,11 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
                 child: Padding(
               padding: const EdgeInsets.all(24),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.image_not_supported_outlined,
-                    color: AppTheme.muted, size: 36),
+                Icon(Icons.image_not_supported_outlined,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant, size: 36),
                 const SizedBox(height: 12),
-                const Text('이미지를 불러오지 못했습니다.'),
-                TextButton(onPressed: _reload, child: const Text('다시 불러오기')),
+                Text('이미지를 불러오지 못했습니다.'),
+                TextButton(onPressed: _reload, child: Text('다시 불러오기')),
               ]),
             ));
           }
@@ -419,7 +420,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
                 decoration: BoxDecoration(
                     border: candidates.isEmpty
                         ? null
-                        : Border.all(color: AppTheme.primary, width: 2)),
+                        : Border.all(color: Theme.of(context).colorScheme.primary, width: 2)),
                 child: LongPressDraggable<String>(
                   data: image.id,
                   maxSimultaneousDrags: _busyIds.contains(image.id) ? 0 : 1,
@@ -460,7 +461,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
                     child: Row(children: [
                       Expanded(
                           child: Text('내 이미지 (${images.length})',
-                              style: const TextStyle(
+                              style: TextStyle(
                                   fontSize: 18, fontWeight: FontWeight.w700))),
                       PopupMenuButton<LibrarySort>(
                         tooltip: '이미지 정렬',
@@ -477,8 +478,8 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
                         child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             child: Text(_order.sort.label,
-                                style: const TextStyle(
-                                    color: AppTheme.primary,
+                                style: TextStyle(
+                                    color: Theme.of(context).colorScheme.primary,
                                     fontWeight: FontWeight.w600))),
                       ),
                     ]),
@@ -518,37 +519,68 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
         },
       );
 
-  Widget _settings() => ListView(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-        children: [
-          const AppSectionTitle('설정'),
-          const SizedBox(height: 16),
-          AppPanel(
-            padding: EdgeInsets.zero,
-            child: Column(children: [
-              ListTile(
-                leading: const Icon(Icons.wallpaper_outlined),
-                title: const Text('홈 배경화면 제거'),
-                subtitle: const Text('등록한 이미지는 보관됩니다.'),
-                trailing: const Icon(Icons.chevron_right),
-                enabled: !_removingWallpaper,
-                onTap: _removingWallpaper ? null : _removeWallpaper,
-              ),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('로그아웃'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () async {
-                  await _orderWrites;
-                  if (!mounted) return;
-                  await widget.onLogout(context);
-                },
-              ),
-            ]),
+  Widget _settings() {
+    final colors = Theme.of(context).colorScheme;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
+      children: [
+        const AppSectionTitle('설정'),
+        const SizedBox(height: 18),
+        Text('화면 설정', style: TextStyle(color: colors.onSurfaceVariant, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        Card(child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: ValueListenableBuilder<ThemeMode>(
+            valueListenable: AppTheme.mode,
+            builder: (context, mode, _) => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const ListTile(contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.palette_outlined),
+                  title: Text('화면 테마'),
+                  subtitle: Text('시스템 설정 또는 밝고 어두운 화면을 선택하세요.')),
+                SegmentedButton<ThemeMode>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: ThemeMode.system, label: Text('시스템')),
+                    ButtonSegment(value: ThemeMode.light, label: Text('라이트')),
+                    ButtonSegment(value: ThemeMode.dark, label: Text('다크')),
+                  ],
+                  selected: {mode},
+                  onSelectionChanged: (selected) => AppTheme.setMode(selected.first),
+                ),
+                const SizedBox(height: 10),
+              ],
+            ),
           ),
-        ],
-      );
+        )),
+        const SizedBox(height: 20),
+        Text('앱 및 계정', style: TextStyle(color: colors.onSurfaceVariant, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        Card(child: Column(children: [
+          ListTile(
+            leading: Icon(Icons.wallpaper_outlined),
+            title: Text('홈 배경화면 제거'),
+            subtitle: Text('등록한 이미지는 보관됩니다.'),
+            trailing: Icon(Icons.chevron_right),
+            enabled: !_removingWallpaper,
+            onTap: _removingWallpaper ? null : _removeWallpaper,
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: Icon(Icons.logout),
+            title: Text('로그아웃'),
+            trailing: Icon(Icons.chevron_right),
+            onTap: () async {
+              await _orderWrites;
+              if (!mounted) return;
+              await widget.onLogout(context);
+            },
+          ),
+        ])),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -592,8 +624,8 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
         ]),
       ),
       bottomNavigationBar: DecoratedBox(
-        decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: AppTheme.border)),
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
         ),
         child: NavigationBar(
           selectedIndex: _selectedIndex,
@@ -607,7 +639,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
               selectedIcon: Icon(Icons.home_rounded),
               label: '홈',
             ),
-            NavigationDestination(icon: Icon(Icons.search), label: '검색'),
+            NavigationDestination(icon: Icon(Icons.search), label: '탐색'),
             NavigationDestination(
                 icon: Icon(Icons.settings_outlined), label: '설정'),
           ],
@@ -679,11 +711,11 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
               child: Column(children: [
                 Row(children: [
                   const Expanded(child: Text('태그 선택', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
-                  IconButton(onPressed: () => Navigator.pop(sheetContext), icon: const Icon(Icons.close)),
+                  IconButton(onPressed: () => Navigator.pop(sheetContext), icon: Icon(Icons.close)),
                 ]),
                 Expanded(child: ListView(children: [
                   CheckboxListTile(
-                    title: const Text('전체 태그'),
+                    title: Text('전체 태그'),
                     value: allSelected,
                     onChanged: (value) => update(() {
                       selected.clear();
@@ -701,12 +733,12 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
                 Row(children: [
                   Expanded(child: OutlinedButton(
                     onPressed: () => update(selected.clear),
-                    child: const Text('초기화'),
+                    child: Text('초기화'),
                   )),
                   const SizedBox(width: 10),
                   Expanded(child: FilledButton(
                     onPressed: () => Navigator.pop(sheetContext, selected),
-                    child: const Text('적용하기'),
+                    child: Text('적용하기'),
                   )),
                 ]),
               ]),
@@ -748,11 +780,11 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
                     onSubmitted: (_) => _search(),
                     decoration: InputDecoration(
                       hintText: '이미지 이름 검색',
-                      prefixIcon: const Icon(Icons.search),
+                      prefixIcon: Icon(Icons.search),
                       suffixIcon: IconButton(
                         tooltip: '검색',
                         onPressed: _search,
-                        icon: const Icon(Icons.arrow_forward),
+                        icon: Icon(Icons.arrow_forward),
                       ),
                     ),
                   ),
@@ -767,8 +799,8 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
                        )),
                        OutlinedButton.icon(
                          onPressed: _openTagPicker,
-                         icon: const Icon(Icons.tune),
-                         label: const Text('태그 선택'),
+                         icon: Icon(Icons.tune),
+                         label: Text('태그 선택'),
                        ),
                      ]),
                    ),
@@ -780,7 +812,7 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
                     _selectedTags.isEmpty
                         ? '태그를 여러 개 선택할 수 있습니다.'
                         : '${_selectedTags.length}개 선택 · 선택한 태그 중 하나라도 포함된 이미지',
-                    style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 )),
                 FutureBuilder<List<GalleryPostItem>>(
@@ -798,8 +830,8 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
                           child: Padding(
                         padding: const EdgeInsets.all(32),
                         child: Column(children: [
-                          const Icon(Icons.photo_library_outlined,
-                              color: AppTheme.muted, size: 36),
+                          Icon(Icons.photo_library_outlined,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant, size: 36),
                           const SizedBox(height: 12),
                           Text(
                               snapshot.hasError
@@ -809,7 +841,7 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
                           if (snapshot.hasError)
                             TextButton(
                                 onPressed: _refresh,
-                                child: const Text('다시 불러오기')),
+                                child: Text('다시 불러오기')),
                         ]),
                       ));
                     }
@@ -917,7 +949,7 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
       final completed =
           await Navigator.of(context).push<bool>(MaterialPageRoute(
         builder: (_) =>
-            WallpaperPreviewPage(filePath: path!, finishLabel: '내 보관함에 저장'),
+            WallpaperPreviewPage(filePath: path!, finishLabel: '내 보관함에 저장', savedUserCount: widget.post.savedUserCount),
       ));
       if (completed != true || !mounted) return;
       final bytes = await File(path).readAsBytes();
@@ -962,8 +994,8 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
             onPressed: () => setState(() {
               _imageUrl = widget.apiClient.getGalleryImageUrl(widget.post.id);
             }),
-            icon: const Icon(Icons.refresh),
-            label: const Text('다시 불러오기'),
+            icon: Icon(Icons.refresh),
+            label: Text('다시 불러오기'),
           ),
         ),
       );
@@ -996,17 +1028,23 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style:
-                  const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                  TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
           const SizedBox(height: 5),
           Text('${widget.post.username} · ${widget.post.tags.join(' · ')}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, color: AppTheme.muted)),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          const SizedBox(height: 5),
+          Row(children: [
+              Icon(Icons.bookmark_border, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+              Text(widget.post.savedUserCount == null ? '보관 인원 집계 준비 중' : '보관 ${widget.post.savedUserCount}명'),
+            ]),
           const SizedBox(height: 5),
           Text(_importing ? '이미지 불러오는 중…' : '눌러서 미리보기 · 배경화면 적용',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: AppTheme.primary)),
+              style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.primary)),
         ],
       );
 
@@ -1035,8 +1073,7 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
                     const SizedBox(width: 14),
                     Expanded(child: _details()),
                     const SizedBox(width: 8),
-                    const Icon(Icons.download_outlined,
-                        size: 20, color: AppTheme.primary),
+                    Icon(Icons.chevron_right, size: 20),
                   ])),
         ),
       );
@@ -1047,10 +1084,12 @@ class WallpaperPreviewPage extends StatefulWidget {
     super.key,
     required this.filePath,
     this.finishLabel,
+    this.savedUserCount,
   });
 
   final String filePath;
   final String? finishLabel;
+  final int? savedUserCount;
 
   @override
   State<WallpaperPreviewPage> createState() => _WallpaperPreviewPageState();
@@ -1067,9 +1106,9 @@ class _WallpaperPreviewPageState extends State<WallpaperPreviewPage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           const ListTile(title: Text('배경화면 적용 위치 선택')),
-          ListTile(title: const Text('홈 화면에 적용'), onTap: () => Navigator.pop(sheetContext, WallpaperTarget.home)),
-          ListTile(title: const Text('잠금 화면에 적용'), onTap: () => Navigator.pop(sheetContext, WallpaperTarget.lock)),
-          ListTile(title: const Text('전체 적용'), onTap: () => Navigator.pop(sheetContext, WallpaperTarget.both)),
+          ListTile(title: Text('홈 화면에 적용'), onTap: () => Navigator.pop(sheetContext, WallpaperTarget.home)),
+          ListTile(title: Text('잠금 화면에 적용'), onTap: () => Navigator.pop(sheetContext, WallpaperTarget.lock)),
+          ListTile(title: Text('전체 적용'), onTap: () => Navigator.pop(sheetContext, WallpaperTarget.both)),
         ],
       )),
     );
@@ -1078,6 +1117,7 @@ class _WallpaperPreviewPageState extends State<WallpaperPreviewPage> {
     try {
       await _wallpaperChannel.invokeMethod<void>('applyLocalStaticWallpaper', {
         'sourcePath': widget.filePath,
+        'target': target.name,
       });
       if (!mounted) return;
       setState(() => _applied = true);
@@ -1097,7 +1137,12 @@ class _WallpaperPreviewPageState extends State<WallpaperPreviewPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('배경화면 미리보기')),
+        appBar: AppBar(title: Text('배경화면 미리보기'), actions: [
+          Center(child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Text(widget.savedUserCount == null ? '보관 집계 준비 중' : '보관 ${widget.savedUserCount}명'),
+            )),
+        ]),
         body: SafeArea(
             child: Column(children: [
           Expanded(
@@ -1106,7 +1151,7 @@ class _WallpaperPreviewPageState extends State<WallpaperPreviewPage> {
             child: ClipRRect(
               borderRadius: BorderRadius.zero,
               child: SizedBox.expand(
-                child: Image.file(File(widget.filePath), fit: BoxFit.cover),
+                child: Image.file(File(widget.filePath), fit: BoxFit.contain),
               ),
             ),
           )),
@@ -1142,4 +1187,89 @@ class _WallpaperPreviewPageState extends State<WallpaperPreviewPage> {
           ),
         ])),
       );
+}
+
+/// App-owned preview. Unlike the Android system preview, this keeps our UI visible.
+class HomeWallpaperPreviewPage extends StatefulWidget {
+  const HomeWallpaperPreviewPage({super.key, required this.image, required this.store,
+    required this.onEdit, required this.onShare, required this.onDelete});
+  final LocalImageItem image;
+  final LocalImageStore store;
+  final VoidCallback onEdit;
+  final VoidCallback onShare;
+  final VoidCallback onDelete;
+  @override
+  State<HomeWallpaperPreviewPage> createState() => _HomeWallpaperPreviewPageState();
+}
+
+class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
+  bool _busy = false;
+  WallpaperTarget _target = WallpaperTarget.home;
+
+  Future<void> _apply() async {
+    setState(() => _busy = true);
+    try {
+      await widget.store.applyWallpaper(widget.image.id, target: _target);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('배경화면을 적용했습니다.')));
+    } on PlatformException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message ?? '$e')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('적용하지 못했습니다: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
+    value: AppTheme.overlayFor(Brightness.dark),
+    child: Scaffold(
+    backgroundColor: Colors.black,
+    body: SafeArea(child: Stack(children: [
+      Positioned.fill(child: Image.file(File(widget.image.path), fit: BoxFit.contain)),
+      Positioned(top: 8, left: 8, child: IconButton.filledTonal(
+        onPressed: () => Navigator.pop(context), icon: Icon(Icons.arrow_back))),
+      Positioned(top: 8, right: 8, child: PopupMenuButton<String>(
+        icon: Icon(Icons.more_vert, color: Colors.white),
+        onSelected: (action) {
+          Navigator.pop(context);
+          switch (action) {
+            case 'edit': widget.onEdit();
+            case 'share': widget.onShare();
+            case 'delete': widget.onDelete();
+          }
+        },
+        itemBuilder: (_) => [
+          const PopupMenuItem(value: 'edit', child: Text('수정')),
+          PopupMenuItem(value: 'share', child: Text(widget.image.isShared ? '공유 취소' : '공유')),
+          const PopupMenuItem(value: 'delete', child: Text('삭제')),
+        ],
+      )),
+      Positioned(left: 20, right: 20, bottom: 20, child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(color: const Color(0xDD20232B), borderRadius: BorderRadius.circular(12)),
+            child: DropdownButtonHideUnderline(child: DropdownButton<WallpaperTarget>(
+              dropdownColor: const Color(0xFF20232B), value: _target,
+              style: TextStyle(color: Colors.white), isExpanded: true,
+              items: const [
+                DropdownMenuItem(value: WallpaperTarget.home, child: Text('홈 화면')),
+                DropdownMenuItem(value: WallpaperTarget.lock, child: Text('잠금 화면')),
+                DropdownMenuItem(value: WallpaperTarget.both, child: Text('홈 화면 및 잠금 화면')),
+              ],
+              onChanged: _busy ? null : (value) { if (value != null) setState(() => _target = value); },
+            )),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(width: double.infinity, child: FilledButton.icon(
+            onPressed: _busy ? null : _apply,
+            icon: _busy ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)) : Icon(Icons.wallpaper),
+            label: Text('배경화면 설정'),
+          )),
+        ],
+      )),
+    ])),
+  ));
 }

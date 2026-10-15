@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../models/local_image.dart';
 import '../models/library_order.dart';
 import 'wallpaper_service.dart';
+import '../models/image_ratio.dart';
 
 class LocalImageStore {
   const LocalImageStore({required this.scope});
@@ -53,6 +54,7 @@ class LocalImageStore {
     required int width,
     required int height,
     required String mode,
+    ImageRatioSettings ratio = const ImageRatioSettings(),
   }) async {
     final value = await _channel.invokeMapMethod<Object?, Object?>(
       'importLocalImage',
@@ -65,6 +67,7 @@ class LocalImageStore {
         'width': width,
         'height': height,
         'mode': mode,
+        'ratio': ratio.toMap(),
       },
     );
     if (value == null) throw StateError('로컬 이미지 정보를 받지 못했습니다.');
@@ -88,12 +91,14 @@ class LocalImageStore {
     required String id,
     required String title,
     required List<String> tags,
+    ImageRatioSettings? ratio,
   }) =>
       _channel.invokeMethod<void>('updateLocalImageDetails', {
         'scope': scope,
         'id': id,
         'title': title,
         'tags': tags,
+        if (ratio != null) 'ratio': ratio.toMap(),
       });
 
   Future<void> markShared({

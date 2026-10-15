@@ -4,19 +4,23 @@ import 'package:flutter/material.dart';
 
 import 'image_editor_page.dart';
 import 'models/gallery_tags.dart';
+import 'models/image_ratio.dart';
 import 'services/image_editor_service.dart';
-import 'theme/app_theme.dart';
 import 'widgets/app_components.dart';
+import 'widgets/device_display_builder.dart';
+import 'widgets/image_ratio_selector.dart';
 
 class ImageRegistrationOptions {
   const ImageRegistrationOptions({
     required this.title,
     required this.tags,
     this.editedFile,
+    this.ratio = const ImageRatioSettings(),
   });
   final String title;
   final List<String> tags;
   final EditedImageFile? editedFile;
+  final ImageRatioSettings ratio;
 }
 
 class ImageFeaturePage extends StatefulWidget {
@@ -37,6 +41,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   EditorImageSource? _source;
   String? _error;
   bool _editing = false;
+  ImageRatioSettings _ratio = const ImageRatioSettings();
 
   @override
   void initState() {
@@ -79,7 +84,8 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
       result = await Navigator.push<ImageEditorResult>(
           context,
           MaterialPageRoute(
-              builder: (_) => ImageEditorPage(filePath: widget.filePath)));
+              builder: (_) => ImageEditorPage(
+                  filePath: widget.filePath, initialRatio: _ratio)));
       if (!mounted) {
         await result?.editedFile?.dispose();
         return;
@@ -91,16 +97,21 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     Navigator.pop(
         context,
         ImageRegistrationOptions(
-            title: title, tags: tags, editedFile: result?.editedFile));
+            title: title,
+            tags: tags,
+            editedFile: result?.editedFile,
+            ratio: result?.ratio ?? _ratio));
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => DeviceDisplayBuilder(builder: _build);
+
+  Widget _build(BuildContext context, Size display) {
     final source = _source;
     final tileHeight =
         math.max(52.0, MediaQuery.textScalerOf(context).scale(14) * 2 + 20);
     return Scaffold(
-      appBar: AppBar(title: const Text('새 이미지 등록')),
+      appBar: AppBar(title: Text('새 이미지 등록')),
       body: SafeArea(
         child: AppFormScrollView(
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -111,15 +122,20 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (source != null)
-                    ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: AspectRatio(
-                            aspectRatio: source.size.aspectRatio,
-                            child: RawImage(
-                                key: const ValueKey(
-                                    'registration-original-image'),
-                                image: source.preview,
-                                fit: BoxFit.contain)))
+                    SizedBox(
+                        height: (MediaQuery.sizeOf(context).height * .4)
+                            .clamp(180, 460),
+                        child: Center(
+                            child: ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: AspectRatio(
+                                    aspectRatio: _ratio.aspectRatio(
+                                        source.size, display)!,
+                                    child: RawImage(
+                                        key: const ValueKey(
+                                            'registration-original-image'),
+                                        image: source.preview,
+                                        fit: BoxFit.cover)))))
                   else
                     SizedBox(
                         height: 180,
@@ -132,8 +148,15 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                                         Text(_error!),
                                         TextButton(
                                             onPressed: _load,
-                                            child: const Text('다시 시도')),
+                                            child: Text('다시 시도')),
                                       ]))),
+                  const SizedBox(height: 18),
+                  ImageRatioSelector(
+                      value: _ratio,
+                      display: display,
+                      onChanged: _editing
+                          ? null
+                          : (ratio) => setState(() => _ratio = ratio)),
                   const SizedBox(height: 18),
                   const AppSectionTitle('이미지 이름'),
                   const SizedBox(height: 10),
@@ -156,8 +179,8 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                   const SizedBox(height: 22),
                   const AppSectionTitle('태그'),
                   const SizedBox(height: 4),
-                  const Text('태그는 선택하지 않아도 됩니다.',
-                      style: TextStyle(color: AppTheme.muted, fontSize: 12)),
+                  Text('태그는 선택하지 않아도 됩니다.',
+                      style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
                   const SizedBox(height: 10),
                   for (var row = 0;
                       row < (selectableGalleryTags.length / 3).ceil();
@@ -183,18 +206,18 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                           ? null
                           : () => _register(edit: true),
                       icon: const Icon(Icons.open_in_full),
-                      label: const Text('업스케일링')),
+                      label: Text('업스케일링')),
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
                       onPressed: source == null || _editing
                           ? null
                           : () => _register(edit: false),
                       icon: const Icon(Icons.image_outlined),
-                      label: const Text('이미지 등록')),
+                      label: Text('이미지 등록')),
                   const SizedBox(height: 8),
-                  const Text('원본 이미지로 저장',
+                  Text('원본 이미지와 비율 설정을 저장합니다.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: AppTheme.muted, fontSize: 12)),
+                      style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
                 ]),
           ),
         ),
@@ -214,16 +237,16 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
           }),
           style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-              foregroundColor: selected ? AppTheme.primary : AppTheme.ink,
-              backgroundColor: selected ? AppTheme.tint : AppTheme.surface,
+              foregroundColor: selected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurface,
+              backgroundColor: selected ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.surface,
               side: BorderSide(
-                  color: selected ? AppTheme.primary : AppTheme.border),
+                  color: selected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.outlineVariant),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10))),
           child: Text(tag,
               maxLines: 2,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 14)),
+              style: TextStyle(fontSize: 14)),
         ));
   }
 }

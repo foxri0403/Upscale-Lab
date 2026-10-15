@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../theme/app_theme.dart';
 
 class AppSectionTitle extends StatelessWidget {
   const AppSectionTitle(this.title, {super.key, this.trailing});
@@ -16,7 +15,7 @@ class AppSectionTitle extends StatelessWidget {
         if (trailing != null) ...[
           const SizedBox(width: 10),
           Text(trailing!,
-              style: const TextStyle(color: AppTheme.muted, fontSize: 12)),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
         ],
       ]);
 }
@@ -31,10 +30,10 @@ class AppPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-        color: AppTheme.surface,
+        color: Theme.of(context).colorScheme.surface,
         clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
-          side: const BorderSide(color: AppTheme.border),
+          side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
           borderRadius: BorderRadius.circular(16),
         ),
         child: Padding(padding: padding, child: child),
@@ -82,25 +81,25 @@ class LibraryLayoutToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         decoration: BoxDecoration(
-          color: const Color(0xFFF0F3FA),
+          color: Theme.of(context).colorScheme.surfaceContainerHigh,
           borderRadius: BorderRadius.circular(14),
         ),
         padding: const EdgeInsets.all(3),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          _button(false, Icons.format_list_bulleted, '1열 목록'),
-          _button(true, Icons.grid_view_rounded, '2열 그리드'),
+          _button(context, false, Icons.format_list_bulleted, '1열 목록'),
+          _button(context, true, Icons.grid_view_rounded, '2열 그리드'),
         ]),
       );
 
-  Widget _button(bool grid, IconData icon, String label) => Semantics(
+  Widget _button(BuildContext context, bool grid, IconData icon, String label) => Semantics(
         selected: isGrid == grid,
         child: IconButton(
           tooltip: label,
           onPressed: () => onChanged(grid),
           style: IconButton.styleFrom(
             backgroundColor:
-                isGrid == grid ? AppTheme.tint : Colors.transparent,
-            foregroundColor: isGrid == grid ? AppTheme.primary : AppTheme.muted,
+                isGrid == grid ? Theme.of(context).colorScheme.primaryContainer : Colors.transparent,
+            foregroundColor: isGrid == grid ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
           ),
@@ -113,19 +112,21 @@ class SharedBadge extends StatelessWidget {
   const SharedBadge({super.key});
 
   @override
-  Widget build(BuildContext context) => Semantics(
-        label: '공유된 이미지',
-        child: const Row(mainAxisSize: MainAxisSize.min, children: [
-          Text('공유', style: TextStyle(color: AppTheme.primary, fontSize: 11)),
-          SizedBox(width: 4),
-          DecoratedBox(
-            decoration:
-                BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle),
-            child: Padding(
-              padding: EdgeInsets.all(2),
-              child: Icon(Icons.check_rounded, size: 11, color: Colors.white),
-            ),
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Semantics(
+      label: '공유된 이미지',
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Text('공유', style: TextStyle(color: colors.primary, fontSize: 11)),
+        const SizedBox(width: 4),
+        DecoratedBox(
+          decoration: BoxDecoration(color: colors.primary, shape: BoxShape.circle),
+          child: Padding(
+            padding: const EdgeInsets.all(2),
+            child: Icon(Icons.check_rounded, size: 11, color: colors.onPrimary),
           ),
-        ]),
-      );
+        ),
+      ]),
+    );
+  }
 }

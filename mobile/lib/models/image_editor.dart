@@ -1,13 +1,12 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
-enum CropPreset { original, free, screen, wide, standard, square }
+enum CropPreset { original, free, wide, standard, square }
 
 extension CropPresetDetails on CropPreset {
   String label(bool portrait) => switch (this) {
         CropPreset.original => '원본',
         CropPreset.free => '자유 형태',
-        CropPreset.screen => '맞춤 형태',
         CropPreset.wide => portrait ? '9:16' : '16:9',
         CropPreset.standard => portrait ? '3:4' : '4:3',
         CropPreset.square => '1:1',
@@ -16,14 +15,10 @@ extension CropPresetDetails on CropPreset {
   double? aspectRatio({
     required bool portrait,
     required Size source,
-    required Size screen,
   }) {
-    final short = math.min(screen.width, screen.height);
-    final long = math.max(screen.width, screen.height);
     return switch (this) {
       CropPreset.original => source.aspectRatio,
       CropPreset.free => null,
-      CropPreset.screen => portrait ? short / long : long / short,
       CropPreset.wide => portrait ? 9 / 16 : 16 / 9,
       CropPreset.standard => portrait ? 3 / 4 : 4 / 3,
       CropPreset.square => 1,

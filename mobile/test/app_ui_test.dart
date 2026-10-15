@@ -9,6 +9,7 @@ import 'package:live_layer/image_editor_page.dart';
 import 'package:live_layer/models/gallery.dart';
 import 'package:live_layer/models/live_layer_models.dart';
 import 'package:live_layer/models/image_editor.dart';
+import 'package:live_layer/models/image_ratio.dart';
 import 'package:live_layer/services/api_client.dart';
 import 'package:live_layer/theme/app_theme.dart';
 import 'package:live_layer/unified_home.dart';
@@ -46,6 +47,10 @@ void main() {
   late int localWrites;
   late Map<String, Object?> libraryOrder;
   late String? previewedId;
+  Size? detectedDisplay;
+  Map<Object?, Object?>? appliedWallpaper;
+  bool nativePreviewAvailable = true;
+  const wallpaperChannel = MethodChannel('live_layer/wallpaper');
 
   setUpAll(() async {
     temp = Directory.systemTemp.createTempSync('upscale-ui-test-');
@@ -68,6 +73,25 @@ void main() {
     localWrites = 0;
     libraryOrder = {'sort': 'manual', 'ids': <String>[]};
     previewedId = null;
+    detectedDisplay = null;
+    appliedWallpaper = null;
+    nativePreviewAvailable = true;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(wallpaperChannel, (call) async {
+      if (call.method == 'getDisplaySize') {
+        return detectedDisplay == null
+            ? null
+            : {
+                'width': detectedDisplay!.width,
+                'height': detectedDisplay!.height,
+              };
+      }
+      if (call.method == 'applyLocalStaticWallpaper') {
+        appliedWallpaper = Map<Object?, Object?>.from(call.arguments as Map);
+        return null;
+      }
+      throw StateError('Unexpected wallpaper method: ${call.method}');
+    });
     images = List.generate(
         2,
         (index) => {
@@ -95,7 +119,7 @@ void main() {
       }
       if (call.method == 'previewLocalWallpaper') {
         previewedId = (call.arguments as Map)['id'] as String;
-        return true;
+        return nativePreviewAvailable;
       }
       if (call.method == 'updateLocalImageDetails') {
         localWrites++;
@@ -104,6 +128,7 @@ void main() {
         image['title'] = args['title'];
         image['tags'] = args['tags'];
         image['tag'] = (args['tags'] as List).first;
+        if (args['ratio'] != null) image['ratio'] = args['ratio'];
         return null;
       }
       throw StateError('Unexpected method: ${call.method}');
@@ -112,6 +137,28 @@ void main() {
   tearDown(() => TestDefaultBinaryMessengerBinding
       .instance.defaultBinaryMessenger
       .setMockMethodCallHandler(channel, null));
+  tearDown(() => TestDefaultBinaryMessengerBinding
+      .instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(wallpaperChannel, null));
+
+  Future<void> settleFileWork(WidgetTester tester, Finder ready) async {
+    await tester.runAsync(() async {
+      for (var attempt = 0; attempt < 200; attempt++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await tester.pump();
+        if (ready.evaluate().isNotEmpty) break;
+      }
+    });
+    expect(ready, findsOneWidget);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> selectManual(WidgetTester tester) async {
+    final manual = find.text('수동');
+    await tester.ensureVisible(manual);
+    await tester.tap(manual);
+    await tester.pumpAndSettle();
+  }
 
   Future<void> show(WidgetTester tester, Widget page,
       {Size size = const Size(412, 892),
@@ -134,11 +181,15 @@ void main() {
       ),
       home: page,
     );
-    if (page is ImageFeaturePage || page is ImageEditorPage) {
+    if (page is ImageFeaturePage ||
+        page is ImageEditorPage ||
+        page is WallpaperPreviewPage) {
       // The registration page decodes a real file outside Flutter's fake clock.
       final loadedImage = find.byKey(ValueKey(page is ImageFeaturePage
           ? 'registration-original-image'
-          : 'image-editor-canvas'));
+          : page is ImageEditorPage
+              ? 'image-editor-canvas'
+              : 'wallpaper-preview-image'));
       await tester.runAsync(() async {
         await tester.pumpWidget(app);
         for (var attempt = 0; attempt < 100; attempt++) {
@@ -227,13 +278,92 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('registered image opens native launcher wallpaper preview',
+  testWidgets(
+      'registered image opens preview with saved manual ratio and applies it',
+      (tester) async {
+    nativePreviewAvailable = false;
+    images[0]['ratio'] = const ImageRatioSettings(
+            automatic: false, preset: CropPreset.standard, portrait: false)
+        .toMap();
+    await show(tester, home());
+    await tester.tap(card(0));
+    await settleFileWork(
+        tester, find.byKey(const ValueKey('wallpaper-preview-image')));
+    expect(find.text('배경화면 미리보기'), findsOneWidget);
+    expect(find.text('4:3'), findsOneWidget);
+    final aspect = tester.widget<AspectRatio>(find.ancestor(
+        of: find.byKey(const ValueKey('wallpaper-preview-image')),
+        matching: find.byType(AspectRatio)));
+    expect(aspect.aspectRatio, 4 / 3);
+    await tester.ensureVisible(find.text('홈 화면에 적용'));
+    await tester.tap(find.text('홈 화면에 적용'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, '홈 화면에 적용'));
+    await tester.pumpAndSettle();
+    expect(appliedWallpaper!['sourcePath'], imagePath);
+    expect((appliedWallpaper!['ratio'] as Map)['mode'], 'manual');
+    expect((appliedWallpaper!['ratio'] as Map)['preset'], 'standard');
+    expect(appliedWallpaper!['target'], 'home');
+    expect(previewedId, 'image-0');
+    expect(find.text('메인으로 돌아가기'), findsNothing);
+  });
+
+  testWidgets(
+      'registered image retains the Android launcher preview when available',
       (tester) async {
     await show(tester, home());
     await tester.tap(card(0));
     await tester.pumpAndSettle();
     expect(previewedId, 'image-0');
-    expect(find.text('메인으로 돌아가기'), findsNothing);
+    expect(find.text('배경화면 미리보기'), findsNothing);
+  });
+
+  testWidgets('automatic preview uses full native display and follows rotation',
+      (tester) async {
+    detectedDisplay = const Size(1080, 2400);
+    await show(tester, WallpaperPreviewPage(filePath: imagePath),
+        size: const Size(320, 640), keyboard: 160);
+    double previewAspect() => tester
+        .widget<AspectRatio>(find.ancestor(
+            of: find.byKey(const ValueKey('wallpaper-preview-image')),
+            matching: find.byType(AspectRatio)))
+        .aspectRatio;
+    expect(previewAspect(), 1080 / 2400);
+    expect(find.text('맞춤 형태'), findsNothing);
+    expect(find.byTooltip('세로 방향'), findsNothing);
+    detectedDisplay = const Size(2400, 1080);
+    tester.view.physicalSize = const Size(640, 320);
+    await tester.pumpAndSettle();
+    expect(previewAspect(), 2400 / 1080);
+    await tester.ensureVisible(find.text('홈 화면에 적용'));
+    await tester.tap(find.text('홈 화면에 적용'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(ListTile, '잠금 화면에 적용'));
+    await tester.tap(find.widgetWithText(ListTile, '잠금 화면에 적용'));
+    await tester.pumpAndSettle();
+    expect((appliedWallpaper!['ratio'] as Map)['mode'], 'automatic');
+    expect(appliedWallpaper!['target'], 'lock');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('automatic ratio is sent with each selected wallpaper target',
+      (tester) async {
+    await show(tester, WallpaperPreviewPage(filePath: imagePath));
+    for (final entry in {
+      'home': '홈 화면에 적용',
+      'lock': '잠금 화면에 적용',
+      'both': '전체 적용',
+    }.entries) {
+      final apply = find.byType(FilledButton);
+      await tester.ensureVisible(apply);
+      await tester.tap(apply);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ListTile, entry.value));
+      await tester.pumpAndSettle();
+      expect(appliedWallpaper!['target'], entry.key);
+      expect((appliedWallpaper!['ratio'] as Map)['mode'], 'automatic');
+    }
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(
@@ -251,12 +381,26 @@ void main() {
     expect(localWrites, 0);
     await edit(tester, 0);
     await tester.enterText(find.byType(TextFormField), '  새 이미지 이름  ');
+    await selectManual(tester);
+    final square = find.byKey(const ValueKey(CropPreset.square));
+    await tester.ensureVisible(square);
+    await tester.tap(square);
     await tester.tap(find.widgetWithText(FilterChip, 'SF'));
     await tester.tap(find.text('저장'));
     await tester.pumpAndSettle();
     expect(images[0]['title'], '새 이미지 이름');
     expect((images[0]['tags'] as List).toSet(), {'풍경', 'SF'});
     expect(localWrites, 1);
+    expect((images[0]['ratio'] as Map)['mode'], 'manual');
+    expect((images[0]['ratio'] as Map)['preset'], 'square');
+    await edit(tester, 0);
+    expect(
+        tester
+            .widget<SegmentedButton<bool>>(find.byType(SegmentedButton<bool>))
+            .selected,
+        {false});
+    await tester.tap(find.text('취소'));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
 
@@ -280,6 +424,8 @@ void main() {
       (tester) async {
     await show(tester, ImageEditorPage(filePath: imagePath));
     expect(find.text('홈 화면에 적용'), findsNothing);
+    expect(find.text('맞춤 형태'), findsNothing);
+    await selectManual(tester);
     for (final portrait in [true, false, true]) {
       final orientation = find.byTooltip(portrait ? '세로 방향' : '가로 방향');
       await tester.ensureVisible(orientation);
@@ -347,6 +493,7 @@ void main() {
     await tester.ensureVisible(openEditor);
     await tester.tap(openEditor);
     await settleFileWork(find.byKey(const ValueKey('image-editor-canvas')));
+    await selectManual(tester);
     final standard = find.byKey(const ValueKey(CropPreset.standard));
     await tester.ensureVisible(standard);
     await tester.tap(standard);
@@ -381,6 +528,81 @@ void main() {
       codec.dispose();
       await edited.dispose();
     });
+    expect(File(imagePath).existsSync(), isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'direct registration preserves source and returns selected ratio settings',
+      (tester) async {
+    final original = File(imagePath).readAsBytesSync();
+    for (final automatic in [true, false]) {
+      ImageRegistrationOptions? result;
+      await show(
+          tester,
+          Scaffold(
+              body: Builder(
+                  builder: (context) => TextButton(
+                      onPressed: () async {
+                        result = await Navigator.push<ImageRegistrationOptions>(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => ImageFeaturePage(
+                                    filePath: imagePath, title: '원본 이름')));
+                      },
+                      child: const Text('등록 열기')))));
+      await tester.tap(find.text('등록 열기'));
+      await settleFileWork(
+          tester, find.byKey(const ValueKey('registration-original-image')));
+      expect(find.text('맞춤 형태'), findsNothing);
+      if (!automatic) {
+        await selectManual(tester);
+        final standard = find.byKey(const ValueKey(CropPreset.standard));
+        await tester.ensureVisible(standard);
+        await tester.tap(standard);
+        await tester.pumpAndSettle();
+      }
+      final register = find.widgetWithText(OutlinedButton, '이미지 등록');
+      await tester.ensureVisible(register);
+      await tester.tap(register);
+      await tester.pumpAndSettle();
+      expect(result!.ratio.automatic, automatic);
+      expect(result!.ratio.preset,
+          automatic ? CropPreset.original : CropPreset.standard);
+      expect(result!.editedFile, isNull);
+      expect(File(imagePath).readAsBytesSync(), original);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('automatic editor exports the full device ratio', (tester) async {
+    detectedDisplay = const Size(1080, 2400);
+    ImageEditorResult? result;
+    await show(
+        tester,
+        Scaffold(
+            body: Builder(
+                builder: (context) => TextButton(
+                    onPressed: () async {
+                      result = await Navigator.push<ImageEditorResult>(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) =>
+                                  ImageEditorPage(filePath: imagePath)));
+                    },
+                    child: const Text('편집 열기')))));
+    await tester.tap(find.text('편집 열기'));
+    await settleFileWork(
+        tester, find.byKey(const ValueKey('image-editor-canvas')));
+    expect(find.byKey(const ValueKey(CropPreset.wide)), findsNothing);
+    final finish = find.widgetWithText(FilledButton, '완료하고 등록');
+    await tester.ensureVisible(finish);
+    await tester.tap(finish);
+    await settleFileWork(tester, find.text('편집 열기'));
+    expect(result!.ratio.automatic, isTrue);
+    expect(result!.editedFile!.width, 18);
+    expect(result!.editedFile!.height, 40);
+    await tester.runAsync(() => result!.editedFile!.dispose());
     expect(File(imagePath).existsSync(), isTrue);
     expect(tester.takeException(), isNull);
   });

@@ -16,6 +16,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.graphics.Point
+import android.util.DisplayMetrics
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -86,6 +88,10 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "live_layer/wallpaper")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "getDisplaySize" -> {
+                        val size = deviceDisplaySize()
+                        result.success(mapOf("width" to size.x, "height" to size.y))
+                    }
                     "downloadImage" -> enqueueImageDownload(
                         call.argument<String>("url"),
                         call.argument<String>("fileName"),
@@ -94,11 +100,13 @@ class MainActivity : FlutterActivity() {
                     "applyStaticWallpaper" -> applyStaticWallpaper(
                         call.argument<String>("url"),
                         call.argument<Any>("target"),
+                        WallpaperRatio.fromMap(call.argument<Map<*, *>>("ratio")),
                         result,
                     )
                     "applyLocalStaticWallpaper" -> applyLocalStaticWallpaper(
                         call.argument<String>("sourcePath"),
                         call.argument<Any>("target"),
+                        WallpaperRatio.fromMap(call.argument<Map<*, *>>("ratio")),
                         result,
                     )
                     "clearWallpaper" -> clearWallpaper(call.argument<Any>("target"), result)
@@ -149,11 +157,15 @@ class MainActivity : FlutterActivity() {
                         }
                         "saveLibraryOrder" -> saveLibraryOrder(scope, call.arguments as? Map<*, *>, result)
                         "previewLocalWallpaper" -> previewLocalWallpaper(scope, call.argument<String>("id"), result)
-                        "applyLocalWallpaper" -> applyLocalStaticWallpaper(
-                            localWallpaperSource(scope, call.argument<String>("id")).absolutePath,
-                            call.argument<Any>("target"),
-                            result,
-                        )
+                        "applyLocalWallpaper" -> {
+                            val item = localWallpaperItem(scope, call.argument<String>("id"))
+                            applyLocalStaticWallpaper(
+                                File(item.getString("path")).canonicalPath,
+                                call.argument<Any>("target"),
+                                ratioFromJson(item.optJSONObject("ratio")),
+                                result,
+                            )
+                        }
                         "downloadSharedImage" -> downloadSharedImage(call.arguments as? Map<*, *>, scope, result)
                         "importLocalImage" -> importLocalImage(
                             call.arguments as? Map<*, *>,
@@ -336,6 +348,7 @@ class MainActivity : FlutterActivity() {
         val width = (arguments?.get("width") as? Number)?.toInt()
         val height = (arguments?.get("height") as? Number)?.toInt()
         val mode = arguments?.get("mode") as? String ?: "original"
+        val ratio = WallpaperRatio.fromMap(arguments?.get("ratio") as? Map<*, *>)
         if (sourcePath.isNullOrBlank() || requestedTitle.isNullOrBlank() || width == null || height == null) {
             result.error("invalid_local_image", "로컬 이미지 정보가 올바르지 않습니다.", null)
             return
@@ -368,6 +381,7 @@ class MainActivity : FlutterActivity() {
                     .put("width", width)
                     .put("height", height)
                     .put("mode", mode)
+                    .put("ratio", JSONObject(ratio.toMap()))
                     .put("createdAt", utcTimestamp())
                     .put("cloudProjectId", JSONObject.NULL)
                     .put("galleryPostId", JSONObject.NULL)
@@ -507,6 +521,9 @@ class MainActivity : FlutterActivity() {
                     item.put("title", title)
                     item.put("tag", tags.first())
                     item.put("tags", JSONArray(tags))
+                    if (arguments?.get("ratio") is Map<*, *>) {
+                        item.put("ratio", JSONObject(WallpaperRatio.fromMap(arguments["ratio"] as Map<*, *>).toMap()))
+                    }
                     item.put("updatedAt", utcTimestamp())
                     writeLocalImagesJson(scope, items)
                     result.success(null)
@@ -576,33 +593,68 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun localWallpaperSource(scope: String, id: String?): File {
-        val path = synchronized(localImagesLock) {
+    private fun localWallpaperItem(scope: String, id: String?): JSONObject {
+        val item = synchronized(localImagesLock) {
             val owned = readLocalImagesJson(scope)
             (0 until owned.length()).map { owned.getJSONObject(it) }.firstOrNull {
                 it.getString("id") == id
-            }?.getString("path") ?: error("등록된 이미지가 없습니다.")
+            } ?: error("등록된 이미지가 없습니다.")
         }
-        val source = File(path).canonicalFile
+        val source = File(item.getString("path")).canonicalFile
         check(source.isFile) { "이미지 파일을 찾을 수 없습니다." }
         check(source.path.startsWith(File(filesDir, LOCAL_IMAGES_DIRECTORY).canonicalPath + File.separator))
-        return source
+        return item
     }
 
     private fun previewLocalWallpaper(scope: String, id: String?, result: MethodChannel.Result) {
-        val source = localWallpaperSource(scope, id)
-        val uri = FileProvider.getUriForFile(this, "$packageName.wallpaper_images", source)
-        try {
-            // Prefer the user's default launcher's crop/preview UI when supported.
-            val intent = WallpaperManager.getInstance(this).getCropAndSetWallpaperIntent(uri)
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            intent.clipData = ClipData.newRawUri("wallpaper", uri)
-            startActivity(intent)
-            result.success(true)
-        } catch (_: ActivityNotFoundException) {
-            result.success(false)
-        } catch (_: IllegalArgumentException) {
-            result.success(false)
+        val item = localWallpaperItem(scope, id)
+        val source = File(item.getString("path")).canonicalFile
+        val ratio = ratioFromJson(item.optJSONObject("ratio"))
+        val display = deviceDisplaySize()
+        ioExecutor.execute {
+            var preview: File? = null
+            try {
+                val directory = File(cacheDir, "wallpaper_previews")
+                check(directory.exists() || directory.mkdirs())
+                // A granted URI must outlive the launcher preview, not the method
+                // call. Retain recent copies and clean up expired cache entries.
+                val expiresBefore = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+                directory.listFiles()?.filter { it.lastModified() < expiresBefore }?.forEach { it.delete() }
+                val prepared = File.createTempFile("preview-", ".png", directory)
+                preview = prepared
+                val bitmap = WallpaperImageProcessor.render(source, ratio, display)
+                try {
+                    FileOutputStream(prepared).use { output ->
+                        check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output))
+                    }
+                } finally {
+                    bitmap.recycle()
+                }
+                runOnUiThread {
+                    try {
+                        val uri = FileProvider.getUriForFile(this, "$packageName.wallpaper_images", prepared)
+                        // Keep the existing Android launcher preview with a crop
+                        // already prepared from this account's saved ratio.
+                        val intent = WallpaperManager.getInstance(this).getCropAndSetWallpaperIntent(uri)
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        intent.clipData = ClipData.newRawUri("wallpaper", uri)
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (_: ActivityNotFoundException) {
+                        prepared.delete()
+                        result.success(false)
+                    } catch (_: IllegalArgumentException) {
+                        prepared.delete()
+                        result.success(false)
+                    } catch (_: SecurityException) {
+                        prepared.delete()
+                        result.success(false)
+                    }
+                }
+            } catch (_: Exception) {
+                preview?.delete()
+                runOnUiThread { result.success(false) }
+            }
         }
     }
 
@@ -618,6 +670,10 @@ class MainActivity : FlutterActivity() {
             .commit()) { "이미지 기록을 저장할 수 없습니다." }
     }
 
+    private fun ratioFromJson(value: JSONObject?): WallpaperRatio = WallpaperRatio.fromMap(value?.let {
+        it.keys().asSequence().associateWith { key -> it.opt(key).takeUnless { field -> field == JSONObject.NULL } }
+    })
+
     private fun jsonObjectToMap(item: JSONObject): Map<String, Any?> = mapOf(
         "id" to item.getString("id"),
         "title" to item.getString("title"),
@@ -625,6 +681,7 @@ class MainActivity : FlutterActivity() {
         "width" to item.getInt("width"),
         "height" to item.getInt("height"),
         "mode" to item.optString("mode", "original"),
+        "ratio" to ratioFromJson(item.optJSONObject("ratio")).toMap(),
         "tag" to item.optString("tag", "장르 설정되지 않음"),
         "tags" to (item.optJSONArray("tags")?.let { values ->
             (0 until values.length()).map { values.getString(it) }
@@ -739,6 +796,17 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun deviceDisplaySize(): Point {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val bounds = windowManager.maximumWindowMetrics.bounds
+            return Point(bounds.width(), bounds.height())
+        }
+        val metrics = DisplayMetrics()
+        windowManager.defaultDisplay.getRealMetrics(metrics)
+        return Point(metrics.widthPixels, metrics.heightPixels)
+    }
+
     private fun wallpaperTarget(rawTarget: Any?, result: MethodChannel.Result): WallpaperTarget? {
         return try {
             WallpaperTarget.fromArgument(rawTarget).also { it.requireSupported(Build.VERSION.SDK_INT) }
@@ -751,23 +819,23 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun applyStaticWallpaper(url: String?, rawTarget: Any?, result: MethodChannel.Result) {
+    private fun applyStaticWallpaper(url: String?, rawTarget: Any?, ratio: WallpaperRatio, result: MethodChannel.Result) {
         if (url.isNullOrBlank()) {
             result.error("invalid_url", "배경화면 URL이 없습니다.", null)
             return
         }
 
         val target = wallpaperTarget(rawTarget, result) ?: return
-        applyWallpaperSource(target, result) { openHttpStream(url) }
+        applyWallpaperSource(target, ratio, result) { openHttpStream(url) }
     }
 
-    private fun applyLocalStaticWallpaper(sourcePath: String?, rawTarget: Any?, result: MethodChannel.Result) {
+    private fun applyLocalStaticWallpaper(sourcePath: String?, rawTarget: Any?, ratio: WallpaperRatio, result: MethodChannel.Result) {
         if (sourcePath.isNullOrBlank()) {
             result.error("invalid_source", "배경화면 이미지가 없습니다.", null)
             return
         }
         val target = wallpaperTarget(rawTarget, result) ?: return
-        applyWallpaperSource(target, result) {
+        applyWallpaperSource(target, ratio, result) {
             val source = File(sourcePath)
             check(source.isFile) { "배경화면 이미지 파일을 찾을 수 없습니다." }
             source.inputStream()
@@ -776,12 +844,23 @@ class MainActivity : FlutterActivity() {
 
     private fun applyWallpaperSource(
         target: WallpaperTarget,
+        ratio: WallpaperRatio,
         result: MethodChannel.Result,
         openSource: () -> InputStream,
     ) {
+        val display = deviceDisplaySize()
         ioExecutor.execute {
             try {
-                wallpaperController.apply(target, openSource)
+                wallpaperController.apply(target, prepareSource = { source ->
+                    val prepared = File.createTempFile("wallpaper-crop-", ".png", cacheDir)
+                    try {
+                        WallpaperImageProcessor.writePng(source, ratio, display, prepared)
+                        prepared
+                    } catch (error: Exception) {
+                        prepared.delete()
+                        throw error
+                    }
+                }, openSource = openSource)
                 val preferences = getSharedPreferences("live_layer", MODE_PRIVATE).edit()
                 target.screens.forEach { screen ->
                     preferences.putString(
