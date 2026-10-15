@@ -19,6 +19,7 @@ void main() {
     final api = ApiClient(baseUrl: 'https://api.example.test/');
     api.restoreSession(session('a', '1'));
     final scopeA = api.storageScope;
+    final stableId = api.userId;
     api.restoreSession(session('a', '2'));
     expect(api.storageScope, scopeA);
     api.restoreSession(session('b', '3'));
@@ -27,17 +28,20 @@ void main() {
     expect(() => api.storageScope, throwsStateError);
     api.restoreSession(session('a', '4'));
     expect(api.storageScope, isNot(scopeA));
+    expect(
+        api.userId, stableId); // Owner ID is stable when the API host changes.
     api.logout();
     expect(() => api.storageScope, throwsStateError);
   });
 
-  test('every private storage operation carries its captured account scope',
+  test('every gallery operation carries its captured account and owner ID',
       () async {
     const channel = MethodChannel('live_layer/storage');
     final calls = <String>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
       expect((call.arguments as Map)['scope'], 'server\naccount-a');
+      expect((call.arguments as Map)['ownerId'], 'account-a');
       calls.add(call.method);
       if (call.method == 'listLocalImages') return [];
       return null;
@@ -45,7 +49,8 @@ void main() {
     addTearDown(() => TestDefaultBinaryMessengerBinding
         .instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null));
-    const store = LocalImageStore(scope: 'server\naccount-a');
+    const store =
+        LocalImageStore(scope: 'server\naccount-a', ownerId: 'account-a');
     await store.getAll();
     await store.getOrder();
     await store.saveOrder(const LibraryOrder(ids: ['a']));

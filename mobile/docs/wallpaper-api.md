@@ -14,7 +14,7 @@ For an image registered in the signed-in user's library, use the captured
 import 'services/local_image_store.dart';
 import 'services/wallpaper_service.dart';
 
-final store = LocalImageStore(scope: api.storageScope);
+final store = LocalImageStore(scope: api.storageScope, ownerId: api.userId);
 await store.applyWallpaper(image.id, target: WallpaperTarget.lock);
 await store.applyWallpaper(image.id, target: WallpaperTarget.home);
 await store.applyWallpaper(image.id, target: WallpaperTarget.both);
@@ -57,7 +57,7 @@ screen when the OS supports it.
 
 | Channel | Method | Arguments |
 | --- | --- | --- |
-| `live_layer/storage` | `applyLocalWallpaper` | `scope`, `id`, `target` |
+| `live_layer/storage` | `applyLocalWallpaper` | `scope`, `ownerId`, `id`, `target` |
 | `live_layer/wallpaper` | `applyLocalStaticWallpaper` | `sourcePath`, `target`, optional `ratio` |
 | `live_layer/wallpaper` | `applyStaticWallpaper` | `url`, `target`, optional `ratio` |
 | `live_layer/wallpaper` | `clearWallpaper` | `target` |
@@ -66,6 +66,12 @@ The wire target is exactly `home`, `lock`, or `both`. An omitted/null target def
 to `home` for existing callers. Invalid values fail with `invalid_target`.
 `clearHomeWallpaper` remains a home-only compatibility alias. No UI files need to
 change to preserve existing behavior.
+
+All account-scoped storage operations now carry both the legacy server/account
+`scope` and the stable authenticated `ownerId`. Android resolves registered images
+from `Pictures/Upscale Lab` using the image's EXIF owner marker, then regenerates
+an app-cache working copy for wallpaper operations. The scope remains in use for
+sorting and migration of the previous app-private library.
 
 Local and remote application also accept an optional `ratio` map. An omitted
 ratio defaults to automatic, which detects the full applying display and center

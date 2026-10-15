@@ -1,7 +1,50 @@
+import java.io.File
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// Credentials stay outside Git. Environment variables override local properties.
+val sharedSigningFile = rootProject.file(
+    providers.environmentVariable("UPSCALE_SIGNING_PROPERTIES_FILE")
+        .orElse("key.properties").get()
+)
+val sharedSigningProperties = Properties().apply {
+    if (sharedSigningFile.isFile) sharedSigningFile.reader(Charsets.UTF_8).use { load(it) }
+}
+fun signingValue(property: String, environment: String): String? =
+    providers.environmentVariable(environment).orNull
+        ?: sharedSigningProperties.getProperty(property)
+
+val sharedStorePath = signingValue("storeFile", "UPSCALE_KEYSTORE_FILE")
+val sharedStorePassword = signingValue("storePassword", "UPSCALE_KEYSTORE_PASSWORD")
+val sharedKeyAlias = signingValue("keyAlias", "UPSCALE_KEY_ALIAS")
+val sharedKeyPassword = signingValue("keyPassword", "UPSCALE_KEY_PASSWORD")
+val sharedStoreFile = sharedStorePath?.takeIf { it.isNotBlank() }?.let { path ->
+    File(path).let { if (it.isAbsolute) it else File(sharedSigningFile.parentFile, path) }
+}
+
+val validateSharedSigning = tasks.register("validateSharedSigning") {
+    doLast {
+        val missing = listOf(
+            "storeFile" to sharedStorePath,
+            "storePassword" to sharedStorePassword,
+            "keyAlias" to sharedKeyAlias,
+            "keyPassword" to sharedKeyPassword,
+        ).filter { it.second.isNullOrBlank() }.map { it.first }
+        check(missing.isEmpty()) {
+            "Shared release signing is not configured. Set ${missing.joinToString()} " +
+                "in local key.properties or UPSCALE signing environment variables."
+        }
+        check(sharedStoreFile?.isFile == true) { "Shared signing keystore was not found." }
+    }
+}
+
+tasks.matching { it.name == "validateSigningRelease" }.configureEach {
+    dependsOn(validateSharedSigning)
 }
 
 android {
@@ -15,10 +58,19 @@ android {
     }
     kotlinOptions { jvmTarget = JavaVersion.VERSION_17.toString() }
 
-    // Team test releases must remain upgrade-compatible with the existing APKs.
+    signingConfigs {
+        create("shared") {
+            storeFile = sharedStoreFile
+            storePassword = sharedStorePassword
+            keyAlias = sharedKeyAlias
+            keyPassword = sharedKeyPassword
+        }
+    }
+
     buildTypes {
         getByName("release") {
-            signingConfig = signingConfigs.getByName("debug")
+            // Never silently substitute this machine's debug certificate.
+            signingConfig = signingConfigs.getByName("shared")
         }
     }
 

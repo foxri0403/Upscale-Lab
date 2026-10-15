@@ -19,6 +19,8 @@ class _GalleryApi extends ApiClient {
 
   @override
   String get storageScope => apiScope;
+  @override
+  String get userId => apiScope.split('\n').last;
 
   @override
   Future<List<String>> updateGalleryPost(

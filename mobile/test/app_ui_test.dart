@@ -22,6 +22,8 @@ class _UiApi extends ApiClient {
   @override
   String get storageScope => 'server\naccount';
   @override
+  String get userId => 'account';
+  @override
   Future<List<GalleryPostItem>> getGallery(
           {String? search, String? tag, List<String>? tags}) async =>
       [];
@@ -50,6 +52,10 @@ void main() {
   Size? detectedDisplay;
   Map<Object?, Object?>? appliedWallpaper;
   bool nativePreviewAvailable = true;
+  var imports = 0;
+  var failWallpaperApply = false;
+  Map<Object?, Object?>? appliedLocalWallpaper;
+  const pickerChannel = MethodChannel('plugins.flutter.io/image_picker');
   const wallpaperChannel = MethodChannel('live_layer/wallpaper');
 
   setUpAll(() async {
@@ -76,6 +82,14 @@ void main() {
     detectedDisplay = null;
     appliedWallpaper = null;
     nativePreviewAvailable = true;
+    imports = 0;
+    failWallpaperApply = false;
+    appliedLocalWallpaper = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(pickerChannel, (call) async {
+      expect(call.method, 'pickImage');
+      return imagePath;
+    });
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(wallpaperChannel, (call) async {
       if (call.method == 'getDisplaySize') {
@@ -110,7 +124,32 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
       expect((call.arguments as Map)['scope'], api.storageScope);
+      expect((call.arguments as Map)['ownerId'], api.userId);
       if (call.method == 'listLocalImages') return images;
+      if (call.method == 'importLocalImage') {
+        imports++;
+        final args = call.arguments as Map;
+        final saved = <String, Object?>{
+          'id': 'saved-image',
+          'path': args['sourcePath'],
+          'title': args['title'],
+          'tags': args['tags'],
+          'width': args['width'],
+          'height': args['height'],
+          'mode': args['mode'],
+          'ratio': args['ratio'],
+          'createdAt': '2026-10-15T00:00:00Z',
+        };
+        images.add(saved);
+        return saved;
+      }
+      if (call.method == 'applyLocalWallpaper') {
+        expect(imports, 1);
+        appliedLocalWallpaper =
+            Map<Object?, Object?>.from(call.arguments as Map);
+        if (failWallpaperApply) throw PlatformException(code: 'APPLY_FAILED');
+        return null;
+      }
       if (call.method == 'getLibraryOrder') return libraryOrder;
       if (call.method == 'saveLibraryOrder') {
         libraryOrder = Map<String, Object?>.from(call.arguments as Map)
@@ -136,6 +175,9 @@ void main() {
   });
   tearDown(() => TestDefaultBinaryMessengerBinding
       .instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(pickerChannel, null));
+  tearDown(() => TestDefaultBinaryMessengerBinding
+      .instance.defaultBinaryMessenger
       .setMockMethodCallHandler(channel, null));
   tearDown(() => TestDefaultBinaryMessengerBinding
       .instance.defaultBinaryMessenger
@@ -145,12 +187,15 @@ void main() {
     await tester.runAsync(() async {
       for (var attempt = 0; attempt < 200; attempt++) {
         await Future<void>.delayed(const Duration(milliseconds: 10));
-        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 16));
         if (ready.evaluate().isNotEmpty) break;
       }
     });
-    expect(ready, findsOneWidget);
+    expect(ready, findsWidgets,
+        reason:
+            'Visible labels: ${tester.allWidgets.whereType<Text>().map((text) => text.data).toList()}');
     await tester.pumpAndSettle();
+    expect(ready, findsOneWidget);
   }
 
   Future<void> selectManual(WidgetTester tester) async {
@@ -489,25 +534,28 @@ void main() {
         find.byKey(const ValueKey('registration-original-image')));
     expect(find.text(unspecifiedGalleryTag), findsNothing);
     await tester.enterText(find.byType(TextFormField), '  편집한 이미지  ');
-    final openEditor = find.widgetWithText(FilledButton, '업스케일링');
+    final openEditor = find.byKey(const ValueKey('registration-tool-crop'));
     await tester.ensureVisible(openEditor);
     await tester.tap(openEditor);
-    await settleFileWork(find.byKey(const ValueKey('image-editor-canvas')));
+    await tester.pumpAndSettle();
     await selectManual(tester);
     final standard = find.byKey(const ValueKey(CropPreset.standard));
     await tester.ensureVisible(standard);
     await tester.tap(standard);
     await tester.pumpAndSettle();
-    final filters = find.widgetWithText(TextButton, '필터');
+    final filters = find.byKey(const ValueKey('registration-tool-filter'));
     await tester.ensureVisible(filters);
     await tester.tap(filters);
     await tester.pumpAndSettle();
     final mono = find.byKey(const ValueKey(PhotoFilter.monochrome));
     await tester.ensureVisible(mono);
     await tester.tap(mono);
-    final finish = find.widgetWithText(FilledButton, '완료하고 등록');
+    final finish = find.byKey(const ValueKey('save-registration'));
     await tester.ensureVisible(finish);
     await tester.tap(finish);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('wallpaper-home')));
+    await tester.tap(find.byKey(const ValueKey('confirm-image-save')));
     await settleFileWork(find.text('등록 열기'));
     expect(result!.title, '편집한 이미지');
     expect(result!.tags, [unspecifiedGalleryTag]);
@@ -533,7 +581,7 @@ void main() {
   });
 
   testWidgets(
-      'direct registration preserves source and returns selected ratio settings',
+      'save preserves untouched bytes and exports an explicitly selected crop',
       (tester) async {
     final original = File(imagePath).readAsBytesSync();
     for (final automatic in [true, false]) {
@@ -556,20 +604,31 @@ void main() {
           tester, find.byKey(const ValueKey('registration-original-image')));
       expect(find.text('맞춤 형태'), findsNothing);
       if (!automatic) {
+        await tester.tap(find.byKey(const ValueKey('registration-tool-crop')));
+        await tester.pumpAndSettle();
         await selectManual(tester);
         final standard = find.byKey(const ValueKey(CropPreset.standard));
         await tester.ensureVisible(standard);
         await tester.tap(standard);
         await tester.pumpAndSettle();
       }
-      final register = find.widgetWithText(OutlinedButton, '이미지 등록');
+      final register = find.byKey(const ValueKey('save-registration'));
       await tester.ensureVisible(register);
       await tester.tap(register);
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('confirm-image-save')));
+      await settleFileWork(tester, find.text('등록 열기'));
       expect(result!.ratio.automatic, automatic);
       expect(result!.ratio.preset,
           automatic ? CropPreset.original : CropPreset.standard);
-      expect(result!.editedFile, isNull);
+      expect(result!.wallpaperTarget, isNull);
+      if (automatic) {
+        expect(result!.editedFile, isNull);
+      } else {
+        expect(result!.editedFile!.width, 30);
+        expect(result!.editedFile!.height, 40);
+        await tester.runAsync(() => result!.editedFile!.dispose());
+      }
       expect(File(imagePath).readAsBytesSync(), original);
       expect(tester.takeException(), isNull);
     }
@@ -604,6 +663,119 @@ void main() {
     expect(result!.editedFile!.height, 40);
     await tester.runAsync(() => result!.editedFile!.dispose());
     expect(File(imagePath).existsSync(), isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final screens in <String, List<String>>{
+    'none': [],
+    'home': ['home'],
+    'lock': ['lock'],
+    'both': ['home', 'lock'],
+  }.entries) {
+    testWidgets('registration imports before applying ${screens.key}',
+        (tester) async {
+      await show(tester, home());
+      await tester.tap(find.byType(NewImageCard));
+      await settleFileWork(
+          tester, find.byKey(const ValueKey('registration-original-image')));
+      expect(find.text('화면 적용'), findsNothing);
+      for (final tool in ['upscale', 'parallax']) {
+        expect(
+            tester
+                .widget<TextButton>(
+                    find.byKey(ValueKey('registration-tool-$tool')))
+                .onPressed,
+            isNull);
+      }
+      await tester.tap(find.byKey(const ValueKey('save-registration')));
+      await tester.pumpAndSettle();
+      for (final screen in screens.value) {
+        await tester.tap(find.byKey(ValueKey('wallpaper-$screen')));
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.byKey(const ValueKey('confirm-image-save')));
+      await settleFileWork(
+          tester,
+          find.text(screens.key == 'none'
+              ? '이미지를 저장했습니다. 배경화면은 변경하지 않았습니다.'
+              : '이미지를 저장하고 배경화면을 적용했습니다.'));
+      expect(imports, 1);
+      expect(images.last['ratio'], const ImageRatioSettings().toMap());
+      if (screens.key == 'none') {
+        expect(appliedLocalWallpaper, isNull);
+      } else {
+        expect(appliedLocalWallpaper!['target'], screens.key);
+        expect(appliedLocalWallpaper!['id'], 'saved-image');
+        expect(appliedLocalWallpaper!['scope'], api.storageScope);
+        expect(appliedLocalWallpaper!['ownerId'], api.userId);
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('cancel keeps edits and apply failure preserves one saved image',
+      (tester) async {
+    failWallpaperApply = true;
+    await show(tester, home());
+    await tester.tap(find.byType(NewImageCard));
+    await settleFileWork(
+        tester, find.byKey(const ValueKey('registration-original-image')));
+    await tester.enterText(find.byType(TextFormField), '유지할 이름');
+    await tester.tap(find.byKey(const ValueKey('save-registration')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('취소'));
+    await tester.pumpAndSettle();
+    expect(imports, 0);
+    expect(appliedLocalWallpaper, isNull);
+    expect(
+        tester
+            .widget<TextFormField>(find.byType(TextFormField))
+            .controller!
+            .text,
+        '유지할 이름');
+    await tester.tap(find.byKey(const ValueKey('save-registration')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('wallpaper-home')));
+    await tester.tap(find.byKey(const ValueKey('confirm-image-save')));
+    await settleFileWork(
+        tester, find.textContaining('이미지는 저장했지만 배경화면을 적용하지 못했습니다.'));
+    expect(imports, 1);
+    expect(images.last['title'], '유지할 이름');
+    expect(find.textContaining('이미지는 저장했지만 배경화면을 적용하지 못했습니다.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('portrait preview fills width and pans without changing source',
+      (tester) async {
+    final path = '${temp.path}/portrait.png';
+    await tester.runAsync(() async {
+      final recorder = ui.PictureRecorder();
+      Canvas(recorder).drawColor(AppTheme.primary, BlendMode.src);
+      final picture = recorder.endRecording();
+      final portrait = await picture.toImage(80, 320);
+      final data = await portrait.toByteData(format: ui.ImageByteFormat.png);
+      File(path).writeAsBytesSync(data!.buffer.asUint8List());
+      portrait.dispose();
+      picture.dispose();
+    });
+    final original = File(path).readAsBytesSync();
+    await show(tester, ImageFeaturePage(filePath: path, title: '세로 사진'));
+    final finder = find.byKey(const ValueKey('registration-image-viewer'));
+    final viewer = tester.widget<InteractiveViewer>(finder);
+    final content = tester.getSize(
+        find.descendant(of: finder, matching: find.byType(CustomPaint)).first);
+    expect(content.width, closeTo(tester.getSize(finder).width, .01));
+    expect(content.height / content.width, closeTo(4, .01));
+    expect(content.height, greaterThan(tester.getSize(finder).height));
+    final gesture = await tester.startGesture(tester.getCenter(finder));
+    await tester.pump();
+    await gesture.moveBy(const Offset(0, -180));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(
+        viewer.transformationController!.value.getTranslation().y, lessThan(0));
+    expect(File(path).readAsBytesSync(), original);
     expect(tester.takeException(), isNull);
   });
 
