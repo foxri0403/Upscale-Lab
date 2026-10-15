@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ClipData
 import android.content.ActivityNotFoundException
+import android.app.RecoverableSecurityException
 import androidx.core.content.FileProvider
 import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
@@ -60,6 +61,21 @@ class MainActivity : FlutterActivity() {
     }
     private var pendingDownload: PendingDownload? = null
     private var pendingLocalSave: PendingLocalSave? = null
+    private val galleryStore by lazy { GalleryLocalImageStore(applicationContext) }
+    private data class PendingGalleryRead(
+        val ownerId: String,
+        val legacyScope: String,
+        val result: MethodChannel.Result,
+    )
+    private var pendingGalleryRead: PendingGalleryRead? = null
+    private data class PendingGalleryImport(
+        val ownerId: String,
+        val arguments: Map<*, *>?,
+        val result: MethodChannel.Result,
+    )
+    private var pendingGalleryImport: PendingGalleryImport? = null
+    private var pendingGalleryAction: (() -> Unit)? = null
+    private var pendingGalleryResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -135,11 +151,15 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 try {
                     val rawScope = call.argument<String>("scope")
+                    val ownerId = call.argument<String>("ownerId")
                     // Photo-album export is explicit and independent of the private library.
                     val scope = if (call.method == "saveImageToGallery") "" else {
                         require(!rawScope.isNullOrBlank()) { "로그인 계정 정보가 필요합니다." }
                         MessageDigest.getInstance("SHA-256").digest(rawScope.toByteArray(Charsets.UTF_8))
                             .joinToString("") { "%02x".format(it) }
+                    }
+                    if (call.method != "saveImageToGallery") {
+                        require(!ownerId.isNullOrBlank()) { "로그인 사용자 ID가 필요합니다." }
                     }
                     when (call.method) {
                         "saveImageToGallery" -> enqueueLocalImageSave(
@@ -147,7 +167,7 @@ class MainActivity : FlutterActivity() {
                             call.argument<String>("fileName"),
                             result,
                         )
-                        "listLocalImages" -> result.success(readLocalImages(scope))
+                        "listLocalImages" -> listGalleryImages(ownerId!!, scope, result)
                         "getLibraryOrder" -> {
                             val value = JSONObject(getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE)
                                 .getString("order_$scope", "{}") ?: "{}")
@@ -155,46 +175,72 @@ class MainActivity : FlutterActivity() {
                             result.success(mapOf("sort" to value.optString("sort", "manual"),
                                 "ids" to (0 until ids.length()).map { ids.getString(it) }))
                         }
-                        "saveLibraryOrder" -> saveLibraryOrder(scope, call.arguments as? Map<*, *>, result)
-                        "previewLocalWallpaper" -> previewLocalWallpaper(scope, call.argument<String>("id"), result)
+                        "saveLibraryOrder" -> saveLibraryOrder(ownerId!!, scope, call.arguments as? Map<*, *>, result)
+                        "previewLocalWallpaper" -> ioExecutor.execute {
+                            runCatching { previewLocalWallpaper(ownerId!!, call.argument<String>("id"), result) }
+                                .onFailure { error -> runOnUiThread {
+                                    result.error("preview_failed", error.message, null)
+                                } }
+                        }
                         "applyLocalWallpaper" -> {
-                            val item = localWallpaperItem(scope, call.argument<String>("id"))
-                            applyLocalStaticWallpaper(
-                                File(item.getString("path")).canonicalPath,
-                                call.argument<Any>("target"),
-                                ratioFromJson(item.optJSONObject("ratio")),
-                                result,
-                            )
+                            ioExecutor.execute {
+                                try {
+                                    val item = localWallpaperItem(ownerId!!, call.argument<String>("id"))
+                                    runOnUiThread {
+                                        applyLocalStaticWallpaper(
+                                            File(item.getString("path")).canonicalPath,
+                                            call.argument<Any>("target"),
+                                            ratioFromJson(item.optJSONObject("ratio")), result)
+                                    }
+                                } catch (error: Exception) {
+                                    runOnUiThread { result.error("wallpaper_failed", error.message, null) }
+                                }
+                            }
                         }
                         "downloadSharedImage" -> downloadSharedImage(call.arguments as? Map<*, *>, scope, result)
-                        "importLocalImage" -> importLocalImage(
-                            call.arguments as? Map<*, *>,
-                            scope,
-                            result,
-                        )
-                        "markLocalImageShared" -> markLocalImageShared(
-                            call.arguments as? Map<*, *>,
-                            scope,
-                            result,
-                        )
-                        "markLocalImageUnshared" -> markLocalImageUnshared(
-                            call.argument<String>("id"),
-                            scope,
-                            result,
-                        )
-                        "updateLocalImageTag" -> updateLocalImageTag(
-                            call.arguments as? Map<*, *>,
-                            scope,
-                            result,
-                        )
-                        "updateLocalImageDetails" -> updateLocalImageDetails(
-                            call.arguments as? Map<*, *>, scope, result,
-                        )
-                        "deleteLocalImage" -> deleteLocalImage(
-                            call.argument<String>("id"),
-                            scope,
-                            result,
-                        )
+                        "importLocalImage" -> galleryImport(
+                            ownerId!!, call.arguments as? Map<*, *>, result)
+                        "markLocalImageShared" -> galleryMutation(result) {
+                            val args = call.arguments as? Map<*, *>
+                            val id = args?.get("id") as? String ?: error("이미지 ID가 없습니다.")
+                            val project = args["cloudProjectId"] as? String ?: error("프로젝트 ID가 없습니다.")
+                            val post = args["galleryPostId"] as? String ?: error("공유 ID가 없습니다.")
+                            galleryStore.update(ownerId!!, id) {
+                                it.put("cloudProjectId", project).put("galleryPostId", post)
+                            }
+                        }
+                        "markLocalImageUnshared" -> galleryMutation(result) {
+                            galleryStore.update(ownerId!!, call.argument<String>("id") ?: error("이미지 ID가 없습니다.")) {
+                                it.put("cloudProjectId", JSONObject.NULL).put("galleryPostId", JSONObject.NULL)
+                            }
+                        }
+                        "updateLocalImageTag" -> galleryMutation(result) {
+                            val args = call.arguments as? Map<*, *>
+                            val id = args?.get("id") as? String ?: error("이미지 ID가 없습니다.")
+                            val tags = (args["tags"] as? List<*>)?.filterIsInstance<String>()
+                                ?.filter { it.isNotBlank() } ?: error("태그가 없습니다.")
+                            require(tags.isNotEmpty())
+                            galleryStore.update(ownerId!!, id) {
+                                it.put("tags", JSONArray(tags)).put("tag", tags.first())
+                            }
+                        }
+                        "updateLocalImageDetails" -> galleryMutation(result) {
+                            val args = call.arguments as? Map<*, *>
+                            val id = args?.get("id") as? String ?: error("이미지 ID가 없습니다.")
+                            val title = (args["title"] as? String)?.trim() ?: error("이름이 없습니다.")
+                            val tags = (args["tags"] as? List<*>)?.filterIsInstance<String>()
+                                ?.filter { it.isNotBlank() } ?: error("태그가 없습니다.")
+                            require(title.isNotBlank() && title.length <= 160 && tags.isNotEmpty())
+                            galleryStore.update(ownerId!!, id) {
+                                it.put("title", title).put("tags", JSONArray(tags)).put("tag", tags.first())
+                                if (args["ratio"] is Map<*, *>) {
+                                    it.put("ratio", JSONObject(WallpaperRatio.fromMap(args["ratio"] as Map<*, *>).toMap()))
+                                }
+                            }
+                        }
+                        "deleteLocalImage" -> galleryMutation(result) {
+                            galleryStore.delete(ownerId!!, call.argument<String>("id") ?: error("이미지 ID가 없습니다."))
+                        }
                         else -> result.notImplemented()
                     }
                 } catch (error: Exception) {
@@ -208,6 +254,13 @@ class MainActivity : FlutterActivity() {
         pendingDownload = null
         pendingLocalSave?.result?.error("cancelled", "로컬 저장 요청이 취소되었습니다.", null)
         pendingLocalSave = null
+        pendingGalleryRead?.result?.error("cancelled", "사진 조회가 취소되었습니다.", null)
+        pendingGalleryRead = null
+        pendingGalleryImport?.result?.error("cancelled", "이미지 저장이 취소되었습니다.", null)
+        pendingGalleryImport = null
+        pendingGalleryAction = null
+        pendingGalleryResult?.error("cancelled", "이미지 수정이 취소되었습니다.", null)
+        pendingGalleryResult = null
         ioExecutor.shutdownNow()
         super.onDestroy()
     }
@@ -218,6 +271,27 @@ class MainActivity : FlutterActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == GALLERY_WRITE_PERMISSION_REQUEST) {
+            val pending = pendingGalleryImport ?: return
+            pendingGalleryImport = null
+            if (hasGalleryWritePermission()) {
+                galleryImport(pending.ownerId, pending.arguments, pending.result)
+            } else {
+                pending.result.error("storage_permission_denied", "사진을 저장하려면 저장소 권한이 필요합니다.", null)
+            }
+            return
+        }
+        if (requestCode == GALLERY_READ_PERMISSION_REQUEST) {
+            val pending = pendingGalleryRead ?: return
+            pendingGalleryRead = null
+            if (hasGalleryReadPermission()) {
+                listGalleryImages(pending.ownerId, pending.legacyScope, pending.result)
+            } else {
+                pending.result.error("gallery_permission_denied",
+                    "자동 복원을 위해 사진 접근 권한에서 '모든 사진 허용'을 선택해 주세요.", null)
+            }
+            return
+        }
         if (requestCode != DOWNLOAD_PERMISSION_REQUEST) return
 
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
@@ -237,6 +311,131 @@ class MainActivity : FlutterActivity() {
                 "사진 폴더에 저장하려면 저장소 권한이 필요합니다.",
                 null,
             )
+        }
+    }
+
+    private fun hasGalleryWritePermission(): Boolean = Build.VERSION.SDK_INT >= 29 ||
+        Build.VERSION.SDK_INT < 23 || checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun hasGalleryReadPermission(): Boolean = hasGalleryWritePermission() && when {
+        Build.VERSION.SDK_INT >= 33 -> checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) ==
+            PackageManager.PERMISSION_GRANTED
+        Build.VERSION.SDK_INT >= 23 -> checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+        else -> true
+    }
+
+    private fun listGalleryImages(ownerId: String, legacyScope: String, result: MethodChannel.Result) {
+        if (!hasGalleryReadPermission()) {
+            if (pendingGalleryRead != null) {
+                result.error("gallery_busy", "이미지 읽기 권한을 확인하는 중입니다.", null)
+                return
+            }
+            pendingGalleryRead = PendingGalleryRead(ownerId, legacyScope, result)
+            if (Build.VERSION.SDK_INT >= 34) {
+                requestPermissions(arrayOf(Manifest.permission.READ_MEDIA_IMAGES,
+                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED), GALLERY_READ_PERMISSION_REQUEST)
+            } else if (Build.VERSION.SDK_INT <= 28) {
+                requestPermissions(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE), GALLERY_READ_PERMISSION_REQUEST)
+            } else {
+                requestPermissions(arrayOf(
+                    if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES
+                    else Manifest.permission.READ_EXTERNAL_STORAGE), GALLERY_READ_PERMISSION_REQUEST)
+            }
+            return
+        }
+        ioExecutor.execute {
+            try {
+                val images = galleryStore.list(ownerId, legacyScope)
+                runOnUiThread { result.success(images) }
+            } catch (error: Exception) {
+                runOnUiThread { result.error("gallery_read_failed", error.message, null) }
+            }
+        }
+    }
+
+    private fun galleryImport(ownerId: String, arguments: Map<*, *>?, result: MethodChannel.Result) {
+        if (!hasGalleryWritePermission()) {
+            if (pendingGalleryImport != null) {
+                result.error("gallery_busy", "이미지 저장 권한을 확인하는 중입니다.", null)
+                return
+            }
+            pendingGalleryImport = PendingGalleryImport(ownerId, arguments, result)
+            requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), GALLERY_WRITE_PERMISSION_REQUEST)
+            return
+        }
+        ioExecutor.execute {
+            try {
+                val source = File(arguments?.get("sourcePath") as? String ?: error("이미지 경로가 없습니다."))
+                val title = (arguments["title"] as? String)?.trim() ?: error("이미지 이름이 없습니다.")
+                val tags = (arguments["tags"] as? List<*>)?.filterIsInstance<String>()
+                    ?.filter { it.isNotBlank() }?.distinct().orEmpty().ifEmpty { listOf("장르 설정되지 않음") }
+                val width = (arguments["width"] as? Number)?.toInt() ?: error("이미지 너비가 없습니다.")
+                val height = (arguments["height"] as? Number)?.toInt() ?: error("이미지 높이가 없습니다.")
+                require(title.isNotBlank() && width > 0 && height > 0)
+                val ratio = JSONObject(WallpaperRatio.fromMap(arguments["ratio"] as? Map<*, *>).toMap())
+                val image = galleryStore.importImage(ownerId, source, source.name, title, tags, width, height,
+                    arguments["mode"] as? String ?: "original", ratio)
+                runOnUiThread { result.success(image) }
+            } catch (error: Exception) {
+                runOnUiThread { result.error("local_import_failed", error.message, null) }
+            }
+        }
+    }
+
+    /** Requests user consent for modifying photos created before a reinstall (Android 10+). */
+    private fun galleryMutation(result: MethodChannel.Result, action: () -> Unit) {
+        fun attempt(retryAllowed: Boolean) {
+            ioExecutor.execute {
+                try {
+                    action()
+                    runOnUiThread { result.success(null) }
+                } catch (need: GalleryLocalImageStore.MediaAccessRequired) {
+                    if (!retryAllowed || pendingGalleryAction != null) {
+                        runOnUiThread { result.error("media_permission_required", "사진 수정 권한이 필요합니다.", null) }
+                        return@execute
+                    }
+                    runOnUiThread {
+                        try {
+                            val sender = if (Build.VERSION.SDK_INT >= 30) {
+                                if (need.deleting) MediaStore.createDeleteRequest(contentResolver, listOf(need.mediaUri)).intentSender
+                                else MediaStore.createWriteRequest(contentResolver, listOf(need.mediaUri)).intentSender
+                            } else if (Build.VERSION.SDK_INT == 29 && need.cause is RecoverableSecurityException) {
+                                (need.cause as RecoverableSecurityException).userAction.actionIntent.intentSender
+                            } else {
+                                result.error("media_permission_required", "갤러리에서 사진 수정 권한을 허용해 주세요.", null)
+                                return@runOnUiThread
+                            }
+                            pendingGalleryAction = { attempt(false) }
+                            pendingGalleryResult = result
+                            startIntentSenderForResult(sender, GALLERY_EDIT_PERMISSION_REQUEST,
+                                null, 0, 0, 0)
+                        } catch (error: Exception) {
+                            pendingGalleryAction = null
+                            pendingGalleryResult = null
+                            result.error("media_permission_failed", error.message, null)
+                        }
+                    }
+                } catch (error: Exception) {
+                    runOnUiThread { result.error("gallery_update_failed", error.message, null) }
+                }
+            }
+        }
+        attempt(true)
+    }
+
+    @Deprecated("Used for explicit gallery write authorization")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == GALLERY_EDIT_PERMISSION_REQUEST) {
+            val continuation = pendingGalleryAction
+            val pendingResult = pendingGalleryResult
+            pendingGalleryAction = null
+            pendingGalleryResult = null
+            if (resultCode == RESULT_OK) continuation?.invoke()
+            else pendingResult?.error("media_permission_denied", "사진 수정 권한을 허용하지 않았습니다.", null)
         }
     }
 
@@ -573,15 +772,15 @@ class MainActivity : FlutterActivity() {
         return JSONArray(value)
     }
 
-    private fun saveLibraryOrder(scope: String, arguments: Map<*, *>?, result: MethodChannel.Result) {
+    private fun saveLibraryOrder(ownerId: String, scope: String, arguments: Map<*, *>?, result: MethodChannel.Result) {
         val sort = arguments?.get("sort") as? String ?: "manual"
         require(sort in setOf("manual", "newest", "oldest", "korean", "english")) { "올바르지 않은 정렬 방식입니다." }
         val ids = (arguments?.get("ids") as? List<*>)?.filterIsInstance<String>()?.distinct() ?: emptyList()
         ioExecutor.execute {
             try {
                 synchronized(localImagesLock) {
-                    val owned = readLocalImagesJson(scope)
-                    val ownedIds = (0 until owned.length()).map { owned.getJSONObject(it).getString("id") }.toSet()
+                    val ownedIds = galleryStore.list(ownerId, scope)
+                        .mapNotNull { it["id"] as? String }.toSet()
                     val value = JSONObject().put("sort", sort).put("ids", JSONArray(ids.filter { it in ownedIds }))
                     check(getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE).edit()
                         .putString("order_$scope", value.toString()).commit()) { "이미지 순서를 저장할 수 없습니다." }
@@ -593,21 +792,13 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun localWallpaperItem(scope: String, id: String?): JSONObject {
-        val item = synchronized(localImagesLock) {
-            val owned = readLocalImagesJson(scope)
-            (0 until owned.length()).map { owned.getJSONObject(it) }.firstOrNull {
-                it.getString("id") == id
-            } ?: error("등록된 이미지가 없습니다.")
-        }
-        val source = File(item.getString("path")).canonicalFile
-        check(source.isFile) { "이미지 파일을 찾을 수 없습니다." }
-        check(source.path.startsWith(File(filesDir, LOCAL_IMAGES_DIRECTORY).canonicalPath + File.separator))
-        return item
+    private fun localWallpaperItem(ownerId: String, id: String?): JSONObject {
+        require(!id.isNullOrBlank()) { "이미지 ID가 없습니다." }
+        return galleryStore.item(ownerId, id)
     }
 
-    private fun previewLocalWallpaper(scope: String, id: String?, result: MethodChannel.Result) {
-        val item = localWallpaperItem(scope, id)
+    private fun previewLocalWallpaper(ownerId: String, id: String?, result: MethodChannel.Result) {
+        val item = localWallpaperItem(ownerId, id)
         val source = File(item.getString("path")).canonicalFile
         val ratio = ratioFromJson(item.optJSONObject("ratio"))
         val display = deviceDisplaySize()
@@ -1077,6 +1268,9 @@ class MainActivity : FlutterActivity() {
     private companion object {
         val localImagesLock = Any()
         const val DOWNLOAD_PERMISSION_REQUEST = 4101
+        const val GALLERY_READ_PERMISSION_REQUEST = 4102
+        const val GALLERY_EDIT_PERMISSION_REQUEST = 4103
+        const val GALLERY_WRITE_PERMISSION_REQUEST = 4104
         const val CONFIG_PREFERENCES = "live_layer_config"
         const val API_BASE_URL_KEY = "api_base_url"
         const val LOCAL_IMAGES_PREFERENCES = "local_images"

@@ -22,6 +22,8 @@ class _UiApi extends ApiClient {
   @override
   String get storageScope => 'server\naccount';
   @override
+  String get userId => 'account';
+  @override
   Future<List<GalleryPostItem>> getGallery(
           {String? search, String? tag, List<String>? tags}) async =>
       [];
@@ -122,6 +124,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
       expect((call.arguments as Map)['scope'], api.storageScope);
+      expect((call.arguments as Map)['ownerId'], api.userId);
       if (call.method == 'listLocalImages') return images;
       if (call.method == 'importLocalImage') {
         imports++;
@@ -704,6 +707,7 @@ void main() {
         expect(appliedLocalWallpaper!['target'], screens.key);
         expect(appliedLocalWallpaper!['id'], 'saved-image');
         expect(appliedLocalWallpaper!['scope'], api.storageScope);
+        expect(appliedLocalWallpaper!['ownerId'], api.userId);
       }
       expect(tester.takeException(), isNull);
     });

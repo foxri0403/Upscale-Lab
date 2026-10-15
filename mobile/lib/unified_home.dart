@@ -43,7 +43,8 @@ class UnifiedHomePage extends StatefulWidget {
 
 class _UnifiedHomePageState extends State<UnifiedHomePage> {
   late final _localImageStore =
-      LocalImageStore(scope: widget.apiClient.storageScope);
+      LocalImageStore(scope: widget.apiClient.storageScope,
+          ownerId: widget.apiClient.userId);
   late Future<List<LocalImageItem>> _images = _loadLibrary();
   LibraryOrder _order = const LibraryOrder();
   bool _orderLoaded = false;
@@ -202,6 +203,8 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
     if (image.isShared || _busyIds.contains(image.id)) return;
     setState(() => _busyIds.add(image.id));
     String? projectId;
+    String? publishedPostId;
+    bool shareRequested = false;
     try {
       final project = await widget.apiClient.createProject(
         title: image.title,
@@ -210,11 +213,13 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
         height: image.height,
       );
       projectId = project.id;
+      shareRequested = true;
       final postId = await widget.apiClient.shareProject(
         projectId: project.id,
         title: image.title,
         tags: image.tags,
       );
+      publishedPostId = postId;
       await _localImageStore.markShared(
         id: image.id,
         cloudProjectId: project.id,
@@ -225,14 +230,23 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
       _reload();
       _message('클라우드 업로드와 공유를 완료했습니다.');
     } catch (error) {
-      if (projectId != null) {
+      // Once sharing was requested, a timeout cannot prove no post was created.
+      if (projectId != null && !shareRequested) {
         try {
           await widget.apiClient.deleteProject(projectId);
         } catch (_) {
           // Keep the original share error; rollback is best effort.
         }
       }
-      _message('공유하지 못했습니다. 로컬 이미지는 그대로 유지됩니다.\n$error');
+      if (publishedPostId != null) {
+        _message('클라우드 공유는 완료됐지만 기기의 공유 상태를 저장하지 못했습니다. '
+            '공유 게시물은 유지됩니다. 중복 공유 전에 탐색에서 게시 여부를 확인해 주세요.\n$error');
+      } else if (shareRequested) {
+        _message('공유 결과를 확인하지 못했습니다. 서버의 게시물을 자동 삭제하지 않았습니다. '
+            '중복 공유 전에 탐색에서 게시 여부를 확인해 주세요.\n$error');
+      } else {
+        _message('공유를 완료하지 못했습니다. 로컬 이미지는 유지됩니다.\n$error');
+      }
     } finally {
       if (mounted) setState(() => _busyIds.remove(image.id));
     }
@@ -346,8 +360,8 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
         title: Text('이미지 삭제'),
         content: Text(
           image.isShared
-              ? '로컬 이미지와 공유된 클라우드 항목을 모두 삭제할까요?'
-              : '이 이미지를 기기에서 삭제할까요?',
+              ? '이 기기에 저장된 이미지만 삭제할까요?\n공유한 이미지는 탐색과 클라우드에 그대로 남습니다.\n공유 게시물을 삭제하려면 별도의 공유 취소를 이용해 주세요.'
+              : '이 기기에 저장된 이미지를 삭제할까요? 클라우드에는 영향을 주지 않습니다.',
         ),
         actions: [
           TextButton(
@@ -365,17 +379,14 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
 
     setState(() => _busyIds.add(image.id));
     try {
-      final postId = image.galleryPostId;
-      if (postId != null) await widget.apiClient.deleteGalleryPost(postId);
-      final projectId = image.cloudProjectId;
-      if (projectId != null) await widget.apiClient.deleteProject(projectId);
       await _localImageStore.delete(image.id);
       if (!mounted) return;
-      setState(() => _galleryRevision++);
       _reload();
-      _message('이미지를 삭제했습니다.');
+      _message(image.isShared
+          ? '기기에 저장된 이미지만 삭제했습니다. 공유 게시물은 유지됩니다.'
+          : '기기에 저장된 이미지를 삭제했습니다.');
     } catch (error) {
-      _message('이미지를 삭제하지 못했습니다.\n$error');
+      _message('기기의 이미지를 삭제하지 못했습니다. 공유 게시물은 변경되지 않았습니다.\n$error');
     } finally {
       if (mounted) setState(() => _busyIds.remove(image.id));
     }
@@ -395,7 +406,13 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
                 Icon(Icons.image_not_supported_outlined,
                     color: Theme.of(context).colorScheme.onSurfaceVariant, size: 36),
                 const SizedBox(height: 12),
-                Text('이미지를 불러오지 못했습니다.'),
+                Text(
+                  snapshot.error is PlatformException &&
+                          (snapshot.error as PlatformException).code == 'gallery_permission_denied'
+                      ? '자동 복원을 위해 사진 접근 권한을\n모든 사진 허용으로 변경해 주세요.'
+                      : '이미지를 불러오지 못했습니다.',
+                  textAlign: TextAlign.center,
+                ),
                 TextButton(onPressed: _reload, child: Text('다시 불러오기')),
               ]),
             ));
@@ -953,7 +970,8 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
     setState(() => _importing = true);
     String? path;
     try {
-      final store = LocalImageStore(scope: widget.apiClient.storageScope);
+      final store = LocalImageStore(scope: widget.apiClient.storageScope,
+          ownerId: widget.apiClient.userId);
       final url = await widget.apiClient.getGalleryDownloadUrl(widget.post.id);
       path = await store.downloadShared(
           url: url,

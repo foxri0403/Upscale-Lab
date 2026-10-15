@@ -17,7 +17,8 @@ class ApiClient {
 
   String get baseUrl => _baseUrl;
 
-  String get storageScope {
+  /// Stable subject identifier of the authenticated account.
+  String get userId {
     final token = _accessToken;
     if (token == null) throw StateError('로그인이 필요합니다.');
     final parts = token.split('.');
@@ -29,8 +30,11 @@ class ApiClient {
     if (userId is! String || userId.isEmpty) {
       throw StateError('계정 정보를 확인하지 못했습니다.');
     }
-    return '$baseUrl\n$userId';
+    return userId;
   }
+
+  /// Legacy app-private storage key; retained for one-time album migration.
+  String get storageScope => '$baseUrl\n$userId';
 
   void restoreSession(AuthSession session) {
     _accessToken = session.accessToken;

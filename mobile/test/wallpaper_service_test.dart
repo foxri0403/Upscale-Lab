@@ -67,11 +67,13 @@ void main() {
         received = call;
         return null;
       });
-      const store = LocalImageStore(scope: 'server\naccount-a');
+      const store =
+          LocalImageStore(scope: 'server\naccount-a', ownerId: 'account-a');
       await store.applyWallpaper('image-a', target: target);
       expect(received!.method, 'applyLocalWallpaper');
       expect(received!.arguments, {
         'scope': 'server\naccount-a',
+        'ownerId': 'account-a',
         'id': 'image-a',
         'target': target.name,
       });
