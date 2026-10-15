@@ -23,7 +23,7 @@ import java.util.UUID
 
 /**
  * Album is the source of truth; cacheDir only contains disposable working copies.
- * Ownership and details are embedded in each exported image's EXIF UserComment,
+ * Ownership and details are embedded as PNG iTXt / JPEG APP15 metadata,
  * which survives app uninstall. No cloud DB or per-image SharedPreferences needed.
  *
  * This is *not* a secure ownership boundary: photo editors may remove EXIF and
@@ -90,13 +90,16 @@ internal class GalleryLocalImageStore(private val context: Context) {
         item.remove("albumMigrated")
         item.put("ownerKey", ownerKey(ownerId))
         item.put("schema", 1)
-        // Image codecs unsupported by ExifInterface are normalized to PNG.
-        val extension = source.extension.lowercase(Locale.US).takeIf { it in setOf("jpg", "jpeg", "png") } ?: "png"
+        // Inspect the actual image bytes, not a filename supplied by a server.
+        // Shared download URLs can have a .jpg name for PNG content (and vice versa).
+        // Unsupported image containers are decoded and exported as PNG when possible.
+        val sourceFormat = ImageOwnerMetadata.detectFormat(source)
+        val extension = sourceFormat ?: "png"
         check(cacheRoot.exists() || cacheRoot.mkdirs())
         val temporary = File.createTempFile("prepared-", ".$extension", cacheRoot)
         var mediaUri: Uri? = null
         try {
-            if (extension == "png" && source.extension.lowercase(Locale.US) !in setOf("png", "jpg", "jpeg")) {
+            if (sourceFormat == null) {
                 val bitmap = BitmapFactory.decodeFile(source.absolutePath)
                     ?: error("이 이미지 형식은 갤러리 등록을 지원하지 않습니다.")
                 try {
@@ -108,13 +111,17 @@ internal class GalleryLocalImageStore(private val context: Context) {
                 source.inputStream().use { input -> temporary.outputStream().use { output -> input.copyTo(output) } }
             }
             embed(temporary, item)
-            // Fail the import if the marker was not actually saved.
+            // Do not publish an image unless ALL ownership/details survive round-trip.
             check(GalleryImageMetadata.matches(item, readMetadata(temporary))) {
                 "이미지에 사용자 정보를 저장할 수 없습니다."
             }
             val fileName = "UpscaleLab_${item.getString("id")}.$extension"
             val published = publish(temporary, fileName)
             mediaUri = published
+            // Some devices/providers transform data on publication. Verify it too.
+            check(GalleryImageMetadata.matches(item, readMetadata(published))) {
+                "갤러리에 사용자 정보를 저장하지 못했습니다."
+            }
             val record = OwnedMedia(published, item, extension)
             return toPlatformMap(record)
         } catch (failure: Exception) {
@@ -131,21 +138,35 @@ internal class GalleryLocalImageStore(private val context: Context) {
             ?: error("수정할 이미지를 찾지 못했습니다.")
         val updated = JSONObject(record.metadata.toString())
         changes(updated)
+        // Image identity and ownership cannot be changed by detail updates.
+        updated.put("id", record.metadata.getString("id"))
+        updated.put("schema", 1)
         updated.put("ownerKey", ownerKey(ownerId))
         updated.put("updatedAt", timestamp())
+        check(cacheRoot.exists() || cacheRoot.mkdirs()) { "이미지 캐시를 만들 수 없습니다." }
+        val temporary = File.createTempFile("upscale-update-", ".${record.extension}", cacheRoot)
         try {
-            resolver.openFileDescriptor(record.uri, "rw").use { descriptor ->
-                checkNotNull(descriptor) { "이미지 파일에 접근할 수 없습니다." }
-                val exif = ExifInterface(descriptor.fileDescriptor)
-                exif.setAttribute(ExifInterface.TAG_USER_COMMENT, prefix + updated.toString())
-                exif.saveAttributes()
+            // Android MediaStore may not permit editing the source in-place after
+            // reinstall. Prepare and verify a complete file before requesting write.
+            resolver.openInputStream(record.uri).use { input ->
+                checkNotNull(input) { "이미지 파일에 접근할 수 없습니다." }
+                temporary.outputStream().use { output -> input.copyTo(output) }
             }
-            // Verify that modified metadata is durable and readable.
+            embed(temporary, updated)
+            check(GalleryImageMetadata.matches(updated, readMetadata(temporary))) {
+                "이미지 정보를 수정하지 못했습니다."
+            }
+            resolver.openOutputStream(record.uri, "wt").use { output ->
+                checkNotNull(output) { "이미지 파일에 쓰기 권한이 없습니다." }
+                temporary.inputStream().use { input -> input.copyTo(output) }
+            }
             check(GalleryImageMetadata.matches(updated, readMetadata(record.uri))) {
                 "갤러리 이미지 정보를 저장하지 못했습니다."
             }
         } catch (security: SecurityException) {
             throw MediaAccessRequired(record.uri, false, security)
+        } finally {
+            temporary.delete()
         }
     }
 
@@ -203,8 +224,8 @@ internal class GalleryLocalImageStore(private val context: Context) {
         } else {
             arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME, MediaStore.Images.Media.DATA)
         }
-        // Selection limits scanning to Upscale Lab's public album; the EXIF
-        // owner marker is the authoritative filter for this logged-in account.
+        // Only scan Upscale Lab's public album. The embedded owner marker is
+        // the authoritative filter for the currently logged-in account.
         val selection: String
         val args: Array<String>
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -240,26 +261,31 @@ internal class GalleryLocalImageStore(private val context: Context) {
         return results
     }
 
-    private fun readMetadata(uri: Uri): JSONObject? =
-        resolver.openFileDescriptor(uri, "r").use { descriptor ->
-            if (descriptor == null) return null
-            val value = ExifInterface(descriptor.fileDescriptor).getAttribute(ExifInterface.TAG_USER_COMMENT)
-                ?: return null
-            if (!value.startsWith(prefix)) return null
-            JSONObject(value.removePrefix(prefix))
+    private fun readMetadata(uri: Uri): JSONObject? {
+        val marker = resolver.openInputStream(uri).use { input ->
+            if (input == null) null else ImageOwnerMetadata.read(input)
         }
+        if (marker != null) return JSONObject(marker.removePrefix(prefix))
+        // Compatibility with photos saved by the older EXIF-only builds.
+        return resolver.openFileDescriptor(uri, "r").use { descriptor ->
+            if (descriptor == null) return null
+            val legacy = ExifInterface(descriptor.fileDescriptor)
+                .getAttribute(ExifInterface.TAG_USER_COMMENT) ?: return null
+            if (!legacy.startsWith(prefix)) return null
+            JSONObject(legacy.removePrefix(prefix))
+        }
+    }
 
     private fun readMetadata(file: File): JSONObject? {
-        val value = ExifInterface(file.absolutePath).getAttribute(ExifInterface.TAG_USER_COMMENT)
+        val marker = ImageOwnerMetadata.read(file)
+        if (marker != null) return JSONObject(marker.removePrefix(prefix))
+        val legacy = ExifInterface(file.absolutePath).getAttribute(ExifInterface.TAG_USER_COMMENT)
             ?: return null
-        return if (value.startsWith(prefix)) JSONObject(value.removePrefix(prefix)) else null
+        return if (legacy.startsWith(prefix)) JSONObject(legacy.removePrefix(prefix)) else null
     }
 
     private fun embed(file: File, metadata: JSONObject) {
-        ExifInterface(file.absolutePath).apply {
-            setAttribute(ExifInterface.TAG_USER_COMMENT, prefix + metadata.toString())
-            saveAttributes()
-        }
+        ImageOwnerMetadata.write(file, prefix + metadata.toString())
     }
 
     private fun publish(source: File, name: String): Uri {

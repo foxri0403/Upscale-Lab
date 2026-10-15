@@ -69,7 +69,7 @@ change to preserve existing behavior.
 
 All account-scoped storage operations now carry both the legacy server/account
 `scope` and the stable authenticated `ownerId`. Android resolves registered images
-from `Pictures/Upscale Lab` using the image's EXIF owner marker, then regenerates
+from `Pictures/Upscale Lab` using the image's embedded owner marker, then regenerates
 an app-cache working copy for wallpaper operations. The scope remains in use for
 sorting and migration of the previous app-private library.
 
