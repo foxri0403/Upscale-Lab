@@ -1467,21 +1467,6 @@ class _PreviewPageState extends State<PreviewPage> {
                                     const BorderSide(color: Color(0xFF536DFE)),
                                 minimumSize: const Size.fromHeight(48),
                               ),
-                              onPressed:
-                                  _downloading ? null : _downloadOriginal,
-                              icon: const Icon(Icons.download_outlined),
-                              label: Text(_downloading ? '준비 중...' : '원본 다운로드'),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFF536DFE),
-                                side:
-                                    const BorderSide(color: Color(0xFF536DFE)),
-                                minimumSize: const Size.fromHeight(48),
-                              ),
                               onPressed: _applyingStatic
                                   ? null
                                   : _applyStaticWallpaper,
