@@ -23,6 +23,10 @@ secrets.json
 *.pfx
 *.pem
 *.key
+*.jks
+*.keystore
+mobile/android/key.properties
+mobile/android/key.*.properties
 
 # Logs and local data
 *.log

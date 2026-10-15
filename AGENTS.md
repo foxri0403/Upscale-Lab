@@ -64,7 +64,7 @@ These are expected to come from local user secrets, environment variables, or a 
 
 ## Mobile versioning
 
-- Current APK version: **0.7.1** (Android build **15**). Keep only this latest version entry; replace it after every generated APK and never append a version history here.
+- Current APK version: **0.9.0** (Android build **16**). Keep only this latest version entry; replace it after every generated APK and never append a version history here.
 - Use semantic version numbers in `major.minor.patch` form for every new APK release.
 - Increase the first number (`major`) by exactly 1 for a large feature or major product update.
 - Increase the second number (`minor`) by exactly 1 for a smaller feature update.
@@ -74,7 +74,7 @@ These are expected to come from local user secrets, environment variables, or a 
 - Keep the APK filename and mobile documentation synchronized with the version in `mobile/pubspec.yaml`.
 - Whenever an APK is generated, update the single current-version entry above, `mobile/pubspec.yaml`, and `mobile/README.md` together. Read the latest recorded version before assigning a new release; feature releases that also include fixes use the feature increment.
 - Verify every generated APK with Android `apksigner` before delivery; never deliver an unsigned release APK.
-- Existing team APKs are signed with the current development machine's Android debug certificate. Preserve that certificate for upgrade-compatible test APKs until an explicit production signing configuration is supplied.
+- Release APKs must use the team's shared keystore through ignored local `mobile/android/key.properties`, an external `UPSCALE_SIGNING_PROPERTIES_FILE`, or the configured signing environment variables. Never fall back to the machine's debug key for release builds or commit keystores/passwords. Existing team APKs used the local debug certificate; compare certificates before claiming upgrade compatibility.
 
 ## References
 
