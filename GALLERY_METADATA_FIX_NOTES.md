@@ -14,8 +14,8 @@ The existing registration UI, Android permission flow, account filtering, and cl
 
 - Android `:app:testDebugUnitTest`: all 24 tests pass. Metadata survives initial save, reopening, and replacement for PNG/JPEG, including filenames with swapped extensions. Excluding the new marker, the complete original image bytes (including pixels and alpha) remain unchanged. PNG marker CRCs are checked, and repeated updates do not grow duplicate markers. Oversized JPEG metadata leaves the source unchanged.
 - Existing Android ownership, path validation, metadata comparison, ratio, and wallpaper tests run with the same suite.
-- Flutter `test --no-pub`: 99 pass and 9 existing UI tests fail (theme, search, preview, and edit expectations). An exported copy of pre-merge commit `a80c20a` reproduces the same 99/9 result. Flutter source, tests, and package inputs are unchanged by this merge.
-- Flutter static analysis reports three pre-existing findings in unchanged files: two unused declarations in `lib/main.dart` and an unnecessary import in `test/dark_mode_theme_test.dart`.
+- Flutter `test --no-pub`: all 112 tests pass, including saved ratio edits, full-display automatic previews, account-owned wallpaper targets, shared import/cancel cleanup, theme transitions, tab selection persistence, and small-screen layouts with large text and keyboard insets.
+- Flutter `analyze --no-pub`: no issues found. Removed unused download code and a redundant test import.
 - Physical-device MediaStore permission handling and reinstall restoration still require device verification.
 
 ## Device verification

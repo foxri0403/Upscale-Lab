@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:live_layer/theme/app_theme.dart';
 import 'package:live_layer/widgets/app_components.dart';
@@ -35,6 +34,8 @@ void main() {
           ]),
         ),
       ));
+
+      await tester.pumpAndSettle();
 
       final panelMaterial = tester.widget<Material>(find.descendant(
         of: find.byType(AppPanel),

@@ -10,12 +10,16 @@ import 'image_registration_page.dart';
 import 'models/gallery.dart';
 import 'models/local_image.dart';
 import 'models/library_order.dart';
+import 'models/image_ratio.dart';
 import 'services/api_client.dart';
+import 'services/image_editor_service.dart';
 import 'services/local_image_store.dart';
 import 'services/wallpaper_service.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_components.dart';
+import 'widgets/device_display_builder.dart';
 import 'widgets/image_edit_dialog.dart';
+import 'widgets/image_ratio_selector.dart';
 import 'widgets/local_image_card.dart';
 
 export 'image_registration_page.dart';
@@ -293,7 +297,8 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
     if (_busyIds.contains(image.id)) return;
     final edited = await showDialog<ImageEditResult>(
       context: context,
-      builder: (_) => ImageEditDialog(title: image.title, tags: image.tags),
+      builder: (_) => ImageEditDialog(
+          title: image.title, tags: image.tags, ratio: image.ratio),
     );
     if (edited == null || !mounted) return;
 
@@ -308,7 +313,10 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
         );
       }
       await _localImageStore.updateDetails(
-          id: image.id, title: edited.title, tags: confirmedTags);
+          id: image.id,
+          title: edited.title,
+          tags: confirmedTags,
+          ratio: edited.ratio);
       if (!mounted) return;
       setState(() => _galleryRevision++);
       _reload();
@@ -977,12 +985,12 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
           url: url,
           fileName: widget.post.fileName ?? Uri.parse(url).pathSegments.last);
       if (!mounted) return;
-      final completed =
-          await Navigator.of(context).push<bool>(MaterialPageRoute(
+      final ratio =
+          await Navigator.of(context).push<ImageRatioSettings>(MaterialPageRoute(
         builder: (_) =>
             WallpaperPreviewPage(filePath: path!, finishLabel: '내 보관함에 저장', savedUserCount: widget.post.savedUserCount),
       ));
-      if (completed != true || !mounted) return;
+      if (ratio == null || !mounted) return;
       final bytes = await File(path).readAsBytes();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
@@ -997,7 +1005,8 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
           tags: widget.post.tags,
           width: width,
           height: height,
-          mode: 'original');
+          mode: 'original',
+          ratio: ratio);
       widget.onImported?.call();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1069,7 +1078,11 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
           Row(children: [
               Icon(Icons.bookmark_border, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
               const SizedBox(width: 4),
-              Text(widget.post.savedUserCount == null ? '보관 인원 집계 준비 중' : '보관 ${widget.post.savedUserCount}명'),
+              Expanded(child: Text(
+                widget.post.savedUserCount == null ? '보관 인원 집계 준비 중' : '보관 ${widget.post.savedUserCount}명',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              )),
             ]),
           const SizedBox(height: 5),
           Text(_importing ? '이미지 불러오는 중…' : '눌러서 미리보기 · 배경화면 적용',
@@ -1116,11 +1129,13 @@ class WallpaperPreviewPage extends StatefulWidget {
     required this.filePath,
     this.finishLabel,
     this.savedUserCount,
+    this.ratio = const ImageRatioSettings(),
   });
 
   final String filePath;
   final String? finishLabel;
   final int? savedUserCount;
+  final ImageRatioSettings ratio;
 
   @override
   State<WallpaperPreviewPage> createState() => _WallpaperPreviewPageState();
@@ -1129,27 +1144,72 @@ class WallpaperPreviewPage extends StatefulWidget {
 class _WallpaperPreviewPageState extends State<WallpaperPreviewPage> {
   bool _applying = false;
   bool _applied = false;
+  late ImageRatioSettings _ratio = widget.ratio;
+  EditorImageSource? _source;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _error = null);
+    try {
+      final source = await ImageEditorService.loadPreview(widget.filePath);
+      if (!mounted) {
+        source.preview.dispose();
+        return;
+      }
+      setState(() => _source = source);
+    } catch (_) {
+      if (mounted) setState(() => _error = '이미지를 불러오지 못했습니다.');
+    }
+  }
+
+  @override
+  void dispose() {
+    _source?.preview.dispose();
+    super.dispose();
+  }
 
   Future<void> _apply() async {
     final target = await showModalBottomSheet<WallpaperTarget>(
       context: context,
-      builder: (sheetContext) => SafeArea(child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const ListTile(title: Text('배경화면 적용 위치 선택')),
-          ListTile(title: Text('홈 화면에 적용'), onTap: () => Navigator.pop(sheetContext, WallpaperTarget.home)),
-          ListTile(title: Text('잠금 화면에 적용'), onTap: () => Navigator.pop(sheetContext, WallpaperTarget.lock)),
-          ListTile(title: Text('전체 적용'), onTap: () => Navigator.pop(sheetContext, WallpaperTarget.both)),
-        ],
-      )),
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(title: Text('배경화면 적용 위치 선택')),
+              ListTile(
+                title: const Text('홈 화면에 적용'),
+                onTap: () => Navigator.pop(sheetContext, WallpaperTarget.home),
+              ),
+              ListTile(
+                title: const Text('잠금 화면에 적용'),
+                onTap: () => Navigator.pop(sheetContext, WallpaperTarget.lock),
+              ),
+              ListTile(
+                title: const Text('전체 적용'),
+                onTap: () => Navigator.pop(sheetContext, WallpaperTarget.both),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
     if (target == null || !mounted) return;
     setState(() => _applying = true);
     try {
-      await _wallpaperChannel.invokeMethod<void>('applyLocalStaticWallpaper', {
-        'sourcePath': widget.filePath,
-        'target': target.name,
-      });
+      await const WallpaperService().applyLocal(
+        sourcePath: widget.filePath,
+        target: target,
+        ratio: _ratio,
+      );
       if (!mounted) return;
       setState(() => _applied = true);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1157,80 +1217,146 @@ class _WallpaperPreviewPageState extends State<WallpaperPreviewPage> {
       );
     } on PlatformException catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.message ?? '$error')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message ?? '$error')));
       }
     } finally {
       if (mounted) setState(() => _applying = false);
     }
   }
 
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text('배경화면 미리보기'), actions: [
-          Center(child: Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: Text(widget.savedUserCount == null ? '보관 집계 준비 중' : '보관 ${widget.savedUserCount}명'),
-            )),
-        ]),
-        body: SafeArea(
-            child: Column(children: [
-          Expanded(
-              child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-            child: ClipRRect(
-              borderRadius: BorderRadius.zero,
-              child: SizedBox.expand(
-                child: Image.file(File(widget.filePath), fit: BoxFit.contain),
-              ),
-            ),
-          )),
-          Flexible(
-            fit: FlexFit.loose,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _applying ? null : _apply,
-                      icon: _applying
-                          ? const SizedBox.square(
-                              dimension: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2))
-                          : Icon(_applied ? Icons.check : Icons.wallpaper),
-                      label: Text(_applied ? '배경화면 적용됨' : '홈 화면에 적용'),
-                    )),
-                if (widget.finishLabel != null) ...[
-                  const SizedBox(height: 10),
-                  SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        onPressed: _applying
-                            ? null
-                            : () => Navigator.pop(context, true),
-                        child: Text(widget.finishLabel!),
-                      )),
+  Widget _preview(Size display) {
+    final source = _source;
+    if (source == null) {
+      return Center(
+        child: _error == null
+            ? const CircularProgressIndicator()
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_error!),
+                  TextButton(onPressed: _load, child: const Text('다시 시도')),
                 ],
-              ]),
+              ),
+      );
+    }
+    return Center(
+      child: ClipRect(
+        child: AspectRatio(
+          aspectRatio: _ratio.aspectRatio(source.size, display)!,
+          child: RawImage(
+            key: const ValueKey('wallpaper-preview-image'),
+            image: source.preview,
+            fit: BoxFit.cover,
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => DeviceDisplayBuilder(
+        builder: (context, display) => Scaffold(
+          appBar: AppBar(
+            title: const Text('배경화면 미리보기'),
+            actions: [
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 16),
+                  child: Text(
+                    widget.savedUserCount == null
+                        ? '보관 집계 준비 중'
+                        : '보관 ${widget.savedUserCount}명',
+                  ),
+                ),
+              ),
+            ],
+          ),
+          body: SafeArea(
+            child: Column(
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                    child: _preview(display),
+                  ),
+                ),
+                Flexible(
+                  fit: FlexFit.loose,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ImageRatioSelector(
+                          value: _ratio,
+                          display: display,
+                          onChanged: _applying
+                              ? null
+                              : (ratio) => setState(() {
+                                    _ratio = ratio;
+                                    _applied = false;
+                                  }),
+                        ),
+                        const SizedBox(height: 20),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed:
+                                _applying || _source == null ? null : _apply,
+                            icon: _applying
+                                ? const SizedBox.square(
+                                    dimension: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Icon(
+                                    _applied ? Icons.check : Icons.wallpaper),
+                            label: Text(_applied ? '배경화면 적용됨' : '홈 화면에 적용'),
+                          ),
+                        ),
+                        if (widget.finishLabel != null) ...[
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton(
+                              onPressed: _applying || _source == null
+                                  ? null
+                                  : () => Navigator.pop(context, _ratio),
+                              child: Text(widget.finishLabel!),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ])),
+        ),
       );
 }
 
 /// App-owned preview. Unlike the Android system preview, this keeps our UI visible.
 class HomeWallpaperPreviewPage extends StatefulWidget {
-  const HomeWallpaperPreviewPage({super.key, required this.image, required this.store,
-    required this.onEdit, required this.onShare, required this.onDelete});
+  const HomeWallpaperPreviewPage({
+    super.key,
+    required this.image,
+    required this.store,
+    required this.onEdit,
+    required this.onShare,
+    required this.onDelete,
+  });
   final LocalImageItem image;
   final LocalImageStore store;
   final VoidCallback onEdit;
   final VoidCallback onShare;
   final VoidCallback onDelete;
   @override
-  State<HomeWallpaperPreviewPage> createState() => _HomeWallpaperPreviewPageState();
+  State<HomeWallpaperPreviewPage> createState() =>
+      _HomeWallpaperPreviewPageState();
 }
 
 class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
@@ -1242,65 +1368,154 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
     try {
       await widget.store.applyWallpaper(widget.image.id, target: _target);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('배경화면을 적용했습니다.')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('배경화면을 적용했습니다.')));
     } on PlatformException catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message ?? '$e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message ?? '$e')));
+      }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('적용하지 못했습니다: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('적용하지 못했습니다: $e')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
-  Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
-    value: AppTheme.overlayFor(Brightness.dark),
-    child: Scaffold(
-    backgroundColor: Colors.black,
-    body: SafeArea(child: Stack(children: [
-      Positioned.fill(child: Image.file(File(widget.image.path), fit: BoxFit.contain)),
-      Positioned(top: 8, left: 8, child: IconButton.filledTonal(
-        onPressed: () => Navigator.pop(context), icon: Icon(Icons.arrow_back))),
-      Positioned(top: 8, right: 8, child: PopupMenuButton<String>(
-        icon: Icon(Icons.more_vert, color: Colors.white),
-        onSelected: (action) {
-          Navigator.pop(context);
-          switch (action) {
-            case 'edit': widget.onEdit();
-            case 'share': widget.onShare();
-            case 'delete': widget.onDelete();
-          }
-        },
-        itemBuilder: (_) => [
-          const PopupMenuItem(value: 'edit', child: Text('수정')),
-          PopupMenuItem(value: 'share', child: Text(widget.image.isShared ? '공유 취소' : '공유')),
-          const PopupMenuItem(value: 'delete', child: Text('삭제')),
-        ],
-      )),
-      Positioned(left: 20, right: 20, bottom: 20, child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(color: const Color(0xDD20232B), borderRadius: BorderRadius.circular(12)),
-            child: DropdownButtonHideUnderline(child: DropdownButton<WallpaperTarget>(
-              dropdownColor: const Color(0xFF20232B), value: _target,
-              style: TextStyle(color: Colors.white), isExpanded: true,
-              items: const [
-                DropdownMenuItem(value: WallpaperTarget.home, child: Text('홈 화면')),
-                DropdownMenuItem(value: WallpaperTarget.lock, child: Text('잠금 화면')),
-                DropdownMenuItem(value: WallpaperTarget.both, child: Text('홈 화면 및 잠금 화면')),
-              ],
-              onChanged: _busy ? null : (value) { if (value != null) setState(() => _target = value); },
-            )),
+  Widget build(BuildContext context) => DeviceDisplayBuilder(
+        builder: (context, display) => AnnotatedRegion<SystemUiOverlayStyle>(
+          value: AppTheme.overlayFor(Brightness.dark),
+          child: Scaffold(
+            extendBody: true,
+            backgroundColor: Colors.black,
+            bottomNavigationBar: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xDD20232B),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<WallpaperTarget>(
+                          dropdownColor: const Color(0xFF20232B),
+                          value: _target,
+                          style: TextStyle(color: Colors.white),
+                          isExpanded: true,
+                          items: const [
+                            DropdownMenuItem(
+                              value: WallpaperTarget.home,
+                              child: Text('홈 화면'),
+                            ),
+                            DropdownMenuItem(
+                              value: WallpaperTarget.lock,
+                              child: Text('잠금 화면'),
+                            ),
+                            DropdownMenuItem(
+                              value: WallpaperTarget.both,
+                              child: Text('홈 화면 및 잠금 화면'),
+                            ),
+                          ],
+                          onChanged: _busy
+                              ? null
+                              : (value) {
+                                  if (value != null) {
+                                    setState(() => _target = value);
+                                  }
+                                },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _busy ? null : _apply,
+                        icon: _busy
+                            ? const SizedBox.square(
+                                dimension: 16,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Icon(Icons.wallpaper),
+                        label: Text('배경화면 설정'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            body: SafeArea(
+              bottom: false,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: Center(
+                      child: AspectRatio(
+                        aspectRatio: widget.image.ratio.aspectRatio(
+                          widget.image.width > 0 && widget.image.height > 0
+                              ? Size(
+                                  widget.image.width.toDouble(),
+                                  widget.image.height.toDouble(),
+                                )
+                              : display,
+                          display,
+                        )!,
+                        child: Image.file(
+                          File(widget.image.path),
+                          key: const ValueKey('wallpaper-preview-image'),
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: IconButton.filledTonal(
+                      onPressed: () => Navigator.pop(context),
+                      icon: Icon(Icons.arrow_back),
+                    ),
+                  ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: PopupMenuButton<String>(
+                      icon: Icon(Icons.more_vert, color: Colors.white),
+                      onSelected: (action) {
+                        Navigator.pop(context);
+                        switch (action) {
+                          case 'edit':
+                            widget.onEdit();
+                          case 'share':
+                            widget.onShare();
+                          case 'delete':
+                            widget.onDelete();
+                        }
+                      },
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(value: 'edit', child: Text('수정')),
+                        PopupMenuItem(
+                          value: 'share',
+                          child: Text(widget.image.isShared ? '공유 취소' : '공유'),
+                        ),
+                        const PopupMenuItem(value: 'delete', child: Text('삭제')),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-          const SizedBox(height: 10),
-          SizedBox(width: double.infinity, child: FilledButton.icon(
-            onPressed: _busy ? null : _apply,
-            icon: _busy ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)) : Icon(Icons.wallpaper),
-            label: Text('배경화면 설정'),
-          )),
-        ],
-      )),
-    ])),
-  ));
+        ),
+      );
 }

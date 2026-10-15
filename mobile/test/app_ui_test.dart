@@ -8,9 +8,12 @@ import 'package:live_layer/main.dart';
 import 'package:live_layer/image_editor_page.dart';
 import 'package:live_layer/models/gallery.dart';
 import 'package:live_layer/models/live_layer_models.dart';
+import 'package:live_layer/models/local_image.dart';
 import 'package:live_layer/models/image_editor.dart';
 import 'package:live_layer/models/image_ratio.dart';
 import 'package:live_layer/services/api_client.dart';
+import 'package:live_layer/services/local_image_store.dart';
+import 'package:live_layer/services/wallpaper_service.dart';
 import 'package:live_layer/theme/app_theme.dart';
 import 'package:live_layer/unified_home.dart';
 import 'package:live_layer/widgets/app_components.dart';
@@ -19,6 +22,7 @@ import 'package:live_layer/widgets/local_image_card.dart';
 class _UiApi extends ApiClient {
   _UiApi() : super(baseUrl: 'https://api.example.test');
   bool failEdit = false;
+  List<GalleryPostItem> gallery = [];
   @override
   String get storageScope => 'server\naccount';
   @override
@@ -26,7 +30,10 @@ class _UiApi extends ApiClient {
   @override
   Future<List<GalleryPostItem>> getGallery(
           {String? search, String? tag, List<String>? tags}) async =>
-      [];
+      gallery;
+  @override
+  Future<String> getGalleryDownloadUrl(String postId) async =>
+      'https://images.example.test/shared.png';
   @override
   Future<double> getSensorSensitivity() async => 1;
   @override
@@ -126,6 +133,11 @@ void main() {
       expect((call.arguments as Map)['scope'], api.storageScope);
       expect((call.arguments as Map)['ownerId'], api.userId);
       if (call.method == 'listLocalImages') return images;
+      if (call.method == 'downloadSharedImage') {
+        final downloaded = File('${temp.path}/downloaded-shared.png');
+        File(imagePath).copySync(downloaded.path);
+        return downloaded.path;
+      }
       if (call.method == 'importLocalImage') {
         imports++;
         final args = call.arguments as Map;
@@ -144,7 +156,9 @@ void main() {
         return saved;
       }
       if (call.method == 'applyLocalWallpaper') {
-        expect(imports, 1);
+        final id = (call.arguments as Map)['id'];
+        expect(images.where((image) => image['id'] == id), hasLength(1));
+        expect(imports, id == 'saved-image' ? 1 : 0);
         appliedLocalWallpaper =
             Map<Object?, Object?>.from(call.arguments as Map);
         if (failWallpaperApply) throw PlatformException(code: 'APPLY_FAILED');
@@ -324,44 +338,68 @@ void main() {
   });
 
   testWidgets(
-      'registered image opens preview with saved manual ratio and applies it',
-      (tester) async {
-    nativePreviewAvailable = false;
-    images[0]['ratio'] = const ImageRatioSettings(
-            automatic: false, preset: CropPreset.standard, portrait: false)
-        .toMap();
-    await show(tester, home());
-    await tester.tap(card(0));
-    await settleFileWork(
-        tester, find.byKey(const ValueKey('wallpaper-preview-image')));
-    expect(find.text('배경화면 미리보기'), findsOneWidget);
-    expect(find.text('4:3'), findsOneWidget);
-    final aspect = tester.widget<AspectRatio>(find.ancestor(
-        of: find.byKey(const ValueKey('wallpaper-preview-image')),
-        matching: find.byType(AspectRatio)));
-    expect(aspect.aspectRatio, 4 / 3);
-    await tester.ensureVisible(find.text('홈 화면에 적용'));
-    await tester.tap(find.text('홈 화면에 적용'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ListTile, '홈 화면에 적용'));
-    await tester.pumpAndSettle();
-    expect(appliedWallpaper!['sourcePath'], imagePath);
-    expect((appliedWallpaper!['ratio'] as Map)['mode'], 'manual');
-    expect((appliedWallpaper!['ratio'] as Map)['preset'], 'standard');
-    expect(appliedWallpaper!['target'], 'home');
-    expect(previewedId, 'image-0');
-    expect(find.text('메인으로 돌아가기'), findsNothing);
-  });
+    'registered image opens preview with saved manual ratio and applies it',
+    (tester) async {
+      nativePreviewAvailable = false;
+      images[0]['ratio'] = const ImageRatioSettings(
+        automatic: false,
+        preset: CropPreset.standard,
+        portrait: false,
+      ).toMap();
+      await show(tester, home());
+      await tester.tap(card(0));
+      await settleFileWork(
+        tester,
+        find.byKey(const ValueKey('wallpaper-preview-image')),
+      );
+      expect(find.byType(HomeWallpaperPreviewPage), findsOneWidget);
+      final aspect = tester.widget<AspectRatio>(
+        find.ancestor(
+          of: find.byKey(const ValueKey('wallpaper-preview-image')),
+          matching: find.byType(AspectRatio),
+        ),
+      );
+      expect(aspect.aspectRatio, 4 / 3);
+      await tester.tap(find.text('배경화면 설정'));
+      await tester.pumpAndSettle();
+      expect(appliedLocalWallpaper!['id'], 'image-0');
+      expect(appliedLocalWallpaper!['scope'], api.storageScope);
+      expect(appliedLocalWallpaper!['ownerId'], api.userId);
+      expect(appliedLocalWallpaper!['target'], 'home');
+      expect((images[0]['ratio'] as Map)['preset'], 'standard');
+      expect(appliedWallpaper, isNull);
+      expect(previewedId, isNull);
+      expect(find.text('메인으로 돌아가기'), findsNothing);
+    },
+  );
 
   testWidgets(
-      'registered image retains the Android launcher preview when available',
-      (tester) async {
-    await show(tester, home());
-    await tester.tap(card(0));
-    await tester.pumpAndSettle();
-    expect(previewedId, 'image-0');
-    expect(find.text('배경화면 미리보기'), findsNothing);
-  });
+    'registered image keeps app preview and applies each account-owned target',
+    (tester) async {
+      await show(tester, home());
+      await tester.tap(card(0));
+      await tester.pumpAndSettle();
+      expect(previewedId, isNull);
+      expect(find.byType(HomeWallpaperPreviewPage), findsOneWidget);
+      for (final entry in {
+        WallpaperTarget.home: '홈 화면',
+        WallpaperTarget.lock: '잠금 화면',
+        WallpaperTarget.both: '홈 화면 및 잠금 화면',
+      }.entries) {
+        await tester.tap(find.byType(DropdownButton<WallpaperTarget>));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(entry.value).last);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('배경화면 설정'));
+        await tester.pumpAndSettle();
+        expect(appliedLocalWallpaper!['id'], 'image-0');
+        expect(appliedLocalWallpaper!['target'], entry.key.name);
+        expect(appliedLocalWallpaper!['ownerId'], api.userId);
+      }
+      expect(imports, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('automatic preview uses full native display and follows rotation',
       (tester) async {
@@ -410,6 +448,66 @@ void main() {
     }
     expect(tester.takeException(), isNull);
   });
+
+  for (final confirm in [true, false]) {
+    testWidgets(
+      'shared preview ${confirm ? 'saves the chosen ratio' : 'cancels without importing'}',
+      (tester) async {
+        api.gallery = [
+          GalleryPostItem(
+            id: 'shared-post',
+            username: 'artist',
+            title: '가져올 공유 이미지',
+            imageUrl: 'https://images.example.test/shared.png',
+            tag: 'SF',
+            createdAt: DateTime.utc(2026),
+          ),
+        ];
+        await show(tester, home());
+        await tester.tap(find.text('탐색'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('가져올 공유 이미지'));
+        await settleFileWork(
+          tester,
+          find.byKey(const ValueKey('wallpaper-preview-image')),
+        );
+        await selectManual(tester);
+        final square = find.byKey(const ValueKey(CropPreset.square));
+        await tester.ensureVisible(square);
+        await tester.tap(square);
+        await tester.pumpAndSettle();
+        if (confirm) {
+          final save = find.text('내 보관함에 저장');
+          await tester.ensureVisible(save);
+          await tester.tap(save);
+          await settleFileWork(tester, find.text('공유 이미지를 내 보관함에 저장했습니다.'));
+          expect(imports, 1);
+          expect(images.last['title'], '가져올 공유 이미지');
+          expect((images.last['ratio'] as Map)['mode'], 'manual');
+          expect((images.last['ratio'] as Map)['preset'], 'square');
+        } else {
+          await tester.pageBack();
+          await tester.pumpAndSettle();
+          expect(imports, 0);
+          expect(find.byType(GallerySearchPage), findsOneWidget);
+        }
+        await tester.runAsync(() async {
+          for (var attempt = 0;
+              attempt < 100 &&
+                  File('${temp.path}/downloaded-shared.png').existsSync();
+              attempt++) {
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+          }
+        });
+        expect(
+          File('${temp.path}/downloaded-shared.png').existsSync(),
+          isFalse,
+        );
+        expect(File(imagePath).existsSync(), isTrue);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets(
       'edit changes name and tags together; cancel and blank names do not write',
@@ -791,6 +889,12 @@ void main() {
     'image editor': () => ImageEditorPage(filePath: imagePath),
     'wallpaper preview': () =>
         WallpaperPreviewPage(filePath: imagePath, finishLabel: '완료'),
+    'home wallpaper preview': () => HomeWallpaperPreviewPage(
+        image: LocalImageItem.fromPlatformMap(images.first),
+        store: LocalImageStore(scope: api.storageScope, ownerId: api.userId),
+        onEdit: () {},
+        onShare: () {},
+        onDelete: () {}),
     'project preview': () => PreviewPage(
         apiClient: api,
         project: const LiveLayerProject(

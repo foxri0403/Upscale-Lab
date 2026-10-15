@@ -1309,7 +1309,6 @@ class PreviewPage extends StatefulWidget {
 class _PreviewPageState extends State<PreviewPage> {
   static const _wallpaperChannel = MethodChannel('live_layer/wallpaper');
   double _sensitivity = 1;
-  bool _downloading = false;
   bool _applyingStatic = false;
   bool _applyingLive = false;
 
@@ -1319,27 +1318,6 @@ class _PreviewPageState extends State<PreviewPage> {
     widget.apiClient.getSensorSensitivity().then((value) {
       if (mounted) setState(() => _sensitivity = value.clamp(0, 2).toDouble());
     });
-  }
-
-  Future<void> _downloadOriginal() async {
-    setState(() => _downloading = true);
-    try {
-      // Project image URLs are short-lived S3 URLs. Refresh immediately before
-      // handing the URL to Android so a preview left open does not download an
-      // expired link.
-      final project = await widget.apiClient.getProject(widget.project.id);
-      await _wallpaperChannel.invokeMethod<int>('downloadImage', {
-        'url': project.originalImageUrl,
-        'fileName': project.title,
-      });
-      _message('다운로드를 시작했습니다. 완료되면 알림으로 알려드려요.');
-    } on PlatformException catch (error) {
-      _message(error.message ?? '$error');
-    } catch (error) {
-      _message('다운로드 URL을 가져오지 못했습니다.\n$error');
-    } finally {
-      if (mounted) setState(() => _downloading = false);
-    }
   }
 
   Future<void> _applyStaticWallpaper() async {

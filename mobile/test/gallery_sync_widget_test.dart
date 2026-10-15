@@ -68,7 +68,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: UnifiedHomePage(apiClient: api, onLogout: (_) async {})));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('검색'));
+    await tester.tap(find.text('탐색'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('태그 선택'));
     await tester.pumpAndSettle();
@@ -93,7 +93,7 @@ void main() {
     await tester.enterText(find.byType(TextField), '고양이');
     await tester.tap(find.text('홈'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('검색'));
+    await tester.tap(find.text('탐색'));
     await tester.pumpAndSettle();
     expect(api.searchTagRequests.last.toSet(), {'동물', '애니'});
     expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,
