@@ -80,7 +80,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('탐색'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('태그 선택'));
+    await tester.tap(find.byTooltip('태그 선택'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(CheckboxListTile, '동물'));
     await revealTag(tester, '애니');
@@ -111,7 +111,7 @@ void main() {
     expect(api.searchTagRequests.last.toSet(), {'동물', '애니'});
     expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,
         '고양이');
-    await tester.tap(find.text('태그 선택'));
+    await tester.tap(find.byTooltip('태그 선택'));
     await tester.pumpAndSettle();
     await revealTag(tester, '동물');
     expect(
@@ -132,7 +132,7 @@ void main() {
     await tester.tap(find.text('적용하기'));
     await tester.pumpAndSettle();
     expect(api.searchTagRequests.last, ['애니']);
-    await tester.tap(find.text('태그 선택'));
+    await tester.tap(find.byTooltip('태그 선택'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('초기화'));
     await tester.tap(find.text('적용하기'));
@@ -215,14 +215,17 @@ void main() {
 
     expect(api.previewRequests, 1);
     final image = tester.widget<Image>(find.byType(Image));
-    expect(image.fit, BoxFit.contain);
+    expect(image.fit, BoxFit.cover);
     expect(((image.image as ResizeImage).imageProvider as NetworkImage).url,
         'https://images.example.test/cat.png');
     // Widget tests reject real network image requests; exercise the retry button.
     await tester.tap(find.text('다시 불러오기'));
     await tester.pumpAndSettle();
     expect(api.previewRequests, 2);
-    expect(find.text('artist · 동물'), findsOneWidget);
+    expect(find.text('artist · 동물'), findsNothing);
+    final tile = tester.getSize(find.byKey(const ValueKey('post-id')));
+    expect(tile.width, closeTo(tile.height, .01));
+    expect(find.byTooltip('다운로드 0회'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

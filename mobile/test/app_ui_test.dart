@@ -455,6 +455,70 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('shared preview panel hides and reopens without changing the selected ratio',
+      (tester) async {
+    await show(tester, WallpaperPreviewPage(filePath: imagePath,
+        title: '전체 이미지', uploader: 'artist', tags: const ['SF', '풍경'],
+        finishLabel: '내 보관함에 저장'));
+    expect(find.text('업로드자 · artist'), findsOneWidget);
+    expect(find.text('#SF  #풍경'), findsOneWidget);
+    await choosePreviewSquare(tester);
+    final panel = find.byKey(const ValueKey('wallpaper-details-panel'));
+    final handle = find.byKey(const ValueKey('wallpaper-panel-handle'));
+    final image = find.byKey(const ValueKey('wallpaper-image-gestures'));
+    final fullImage = find.byKey(const ValueKey('wallpaper-preview-image'));
+    final expandedHeight = tester.getSize(panel).height;
+    final photoBounds = tester.getRect(fullImage);
+    await tester.drag(image, const Offset(0, 120));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(panel).height, lessThanOrEqualTo(40));
+    expect(handle.hitTestable(), findsOneWidget);
+    expect(tester.getRect(fullImage), photoBounds);
+    await tester.drag(handle, const Offset(0, -200));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(panel).height, closeTo(expandedHeight, 1));
+    expect(find.text('비율 수동'), findsOneWidget);
+    await tester.drag(handle, const Offset(0, 260));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(panel).height, lessThanOrEqualTo(40));
+    await tester.drag(image, const Offset(0, -120));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(panel).height, closeTo(expandedHeight, 1));
+    await tester.tap(find.byKey(const ValueKey('wallpaper-apply')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, '잠금 화면에 적용'));
+    await tester.pumpAndSettle();
+    expect(appliedWallpaper!['target'], 'lock');
+    expect((appliedWallpaper!['ratio'] as Map)['preset'], 'square');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('explore always uses square pairs regardless of the home layout',
+      (tester) async {
+    api.gallery = List.generate(3, (index) => GalleryPostItem(
+      id: 'grid-$index', username: 'creator-$index', title: '사진 $index',
+      imageUrl: 'https://images.example.test/$index.png', tag: 'SF',
+      downloadCount: 7 + index, createdAt: DateTime.utc(2026)));
+    await show(tester, home(), size: const Size(1000, 1000));
+    await tester.tap(find.byTooltip('1열 목록'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('탐색'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LibraryLayoutToggle), findsNothing);
+    final first = tester.getRect(find.byKey(const ValueKey('grid-0')));
+    final second = tester.getRect(find.byKey(const ValueKey('grid-1')));
+    final third = tester.getRect(find.byKey(const ValueKey('grid-2')));
+    expect(first.width, closeTo(first.height, .01));
+    expect(second.top, closeTo(first.top, .01));
+    expect(second.left, greaterThan(first.right));
+    expect(third.top, greaterThan(first.bottom));
+    expect(find.text('creator-0'), findsNothing);
+    expect(find.text('SF'), findsNothing);
+    expect(find.byKey(const ValueKey('gallery-download-grid-0')), findsOneWidget);
+    expect(find.byTooltip('다운로드 7회'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('automatic ratio is sent with each selected wallpaper target',
       (tester) async {
     await show(tester, WallpaperPreviewPage(filePath: imagePath));
@@ -512,7 +576,7 @@ void main() {
           expect((images.last['ratio'] as Map)['mode'], 'manual');
           expect((images.last['ratio'] as Map)['preset'], 'square');
         } else {
-          await tester.pageBack();
+          await tester.tap(find.byTooltip('돌아가기'));
           await tester.pumpAndSettle();
           expect(imports, 0);
           expect(find.byType(GallerySearchPage), findsOneWidget);
