@@ -11,30 +11,40 @@ class ImageRatioSelector extends StatelessWidget {
     required this.display,
     required this.onChanged,
     this.allowFree = false,
+    this.compactHeader = false,
   });
 
   final ImageRatioSettings value;
   final Size display;
   final ValueChanged<ImageRatioSettings>? onChanged;
   final bool allowFree;
+  final bool compactHeader;
 
   @override
   Widget build(BuildContext context) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const AppSectionTitle('비율'),
-          const SizedBox(height: 8),
-          SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(value: true, label: Text('자동')),
-              ButtonSegment(value: false, label: Text('수동')),
-            ],
-            selected: {value.automatic},
-            onSelectionChanged: onChanged == null
-                ? null
-                : (selected) =>
-                    onChanged!(value.copyWith(automatic: selected.single)),
-          ),
+          if (compactHeader)
+            Row(children: [
+              const Expanded(child: AppSectionTitle('비율')),
+              _mode(context, true),
+              _mode(context, false),
+            ])
+          else ...[
+            const AppSectionTitle('비율'),
+            const SizedBox(height: 8),
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: true, label: Text('자동')),
+                ButtonSegment(value: false, label: Text('수동')),
+              ],
+              selected: {value.automatic},
+              onSelectionChanged: onChanged == null
+                  ? null
+                  : (selected) =>
+                      onChanged!(value.copyWith(automatic: selected.single)),
+            ),
+          ],
           const SizedBox(height: 8),
           if (value.automatic)
             Text(
@@ -99,6 +109,28 @@ class ImageRatioSelector extends StatelessWidget {
               color: value.portrait == portrait
                   ? Theme.of(context).colorScheme.primary
                   : Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
+      );
+
+  Widget _mode(BuildContext context, bool automatic) => Semantics(
+        selected: value.automatic == automatic,
+        child: TextButton(
+          key: ValueKey('ratio-mode-${automatic ? 'automatic' : 'manual'}'),
+          onPressed: onChanged == null
+              ? null
+              : () => onChanged!(value.copyWith(automatic: automatic)),
+          style: TextButton.styleFrom(
+            minimumSize: Size.zero,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            backgroundColor: Colors.transparent,
+            foregroundColor: value.automatic == automatic
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          child: Text(automatic ? '자동' : '수동',
+              style: TextStyle(fontWeight: value.automatic == automatic
+                  ? FontWeight.w700 : FontWeight.w400)),
         ),
       );
 }

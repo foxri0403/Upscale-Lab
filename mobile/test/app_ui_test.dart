@@ -658,6 +658,28 @@ void main() {
         find.byKey(const ValueKey('registration-original-image')));
     expect(find.text(unspecifiedGalleryTag), findsNothing);
     await tester.enterText(find.byType(TextFormField), '  편집한 이미지  ');
+    expect(find.byType(FilterChip), findsNothing);
+    final tagPicker = find.byKey(const ValueKey('registration-tag-picker'));
+    await tester.tap(tagPicker);
+    await tester.pumpAndSettle();
+    expect(find.text('전체 태그'), findsOneWidget);
+    expect(find.text(unspecifiedGalleryTag), findsNothing);
+    await tester.tap(find.widgetWithText(CheckboxListTile, '게임'));
+    await tester.tap(find.text('적용하기'));
+    await tester.pumpAndSettle();
+    expect(find.text('게임'), findsOneWidget);
+    await tester.tap(tagPicker);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('초기화'));
+    await tester.tap(find.byTooltip('태그 선택 닫기'));
+    await tester.pumpAndSettle();
+    expect(find.text('게임'), findsOneWidget);
+    await tester.tap(tagPicker);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('초기화'));
+    await tester.tap(find.text('적용하기'));
+    await tester.pumpAndSettle();
+    expect(find.text('게임'), findsNothing);
     final openEditor = find.byKey(const ValueKey('registration-tool-crop'));
     await tester.ensureVisible(openEditor);
     await tester.tap(openEditor);
@@ -674,6 +696,13 @@ void main() {
     final mono = find.byKey(const ValueKey(PhotoFilter.monochrome));
     await tester.ensureVisible(mono);
     await tester.tap(mono);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('registration-preview-button')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('registration-fullscreen-image')), findsOneWidget);
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+    await tester.tap(find.byTooltip('전체 보기 닫기'));
+    await tester.pumpAndSettle();
     final finish = find.byKey(const ValueKey('save-registration'));
     await tester.ensureVisible(finish);
     await tester.tap(finish);
@@ -869,7 +898,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('portrait preview fits fully and drags scroll information and filters',
+  testWidgets('portrait preview stays fixed when dragging information and filters',
       (tester) async {
     final path = '${temp.path}/portrait.png';
     await tester.runAsync(() async {
@@ -891,17 +920,19 @@ void main() {
     expect(content.height / content.width, closeTo(4, .01));
     expect(content.height, lessThanOrEqualTo(tester.getSize(viewport).height));
     expect(find.byType(InteractiveViewer), findsNothing);
-    final scroll = tester.widget<SingleChildScrollView>(
-        find.byKey(const ValueKey('registration-content'))).controller!;
+    final position = tester.getRect(viewport);
+    expect(find.byWidgetPredicate((widget) => widget is Scrollable &&
+        axisDirectionToAxis(widget.axisDirection) == Axis.vertical), findsNothing);
     await tester.drag(viewport, const Offset(0, -120));
     await tester.pumpAndSettle();
-    expect(scroll.offset, greaterThan(0));
+    expect(tester.getRect(viewport), position);
     await tester.tap(find.byKey(const ValueKey('registration-tool-filter')));
     await tester.pumpAndSettle();
     expect(tester.widget<AspectRatio>(aspect).aspectRatio, .25);
+    final filterPosition = tester.getRect(viewport);
     await tester.drag(viewport, const Offset(0, -120));
     await tester.pumpAndSettle();
-    expect(scroll.offset, greaterThan(0));
+    expect(tester.getRect(viewport), filterPosition);
     final vivid = find.byKey(const ValueKey(PhotoFilter.vivid));
     await tester.ensureVisible(vivid);
     await tester.tap(vivid);
@@ -921,16 +952,20 @@ void main() {
     final canvas = find.byKey(const ValueKey('registration-crop-canvas'));
     expect(tester.getRect(canvas).bottom,
         lessThan(tester.getRect(find.byKey(const ValueKey('registration-tools'))).top));
-    final scroll = tester.widget<SingleChildScrollView>(find.byKey(
-        const ValueKey('registration-content'))).controller!;
+    expect(find.byWidgetPredicate((widget) => widget is Scrollable &&
+        axisDirectionToAxis(widget.axisDirection) == Axis.vertical), findsNothing);
     final previous = tester.widget<RegistrationImageCanvas>(
         find.byType(RegistrationImageCanvas)).crop;
     await tester.timedDrag(canvas, const Offset(-50, 0),
         const Duration(milliseconds: 300));
     await tester.pumpAndSettle();
-    expect(scroll.offset, 0);
     expect(tester.widget<RegistrationImageCanvas>(find.byType(
         RegistrationImageCanvas)).crop, isNot(previous));
+    await tester.tap(find.byKey(const ValueKey('registration-preview-button')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('registration-fullscreen-image')), findsOneWidget);
+    await tester.tap(find.byTooltip('전체 보기 닫기'));
+    await tester.pumpAndSettle();
     await selectManual(tester);
     final square = find.byKey(const ValueKey(CropPreset.square));
     await tester.ensureVisible(square);

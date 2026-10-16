@@ -2,12 +2,13 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/image_editor.dart';
 import '../services/image_editor_service.dart';
 
 /// The entire preview fits a bounded viewport; only crop-tool gestures change
-/// source coordinates. Other tools leave vertical drags to the page scroll view.
+/// source coordinates. Other tools keep the image fixed in place.
 class RegistrationImageCanvas extends StatefulWidget {
   const RegistrationImageCanvas({
     super.key,
@@ -151,6 +152,51 @@ class _RegistrationImageCanvasState extends State<RegistrationImageCanvas> {
           ),
         );
       });
+}
+
+class RegistrationPhotoPreviewPage extends StatelessWidget {
+  const RegistrationPhotoPreviewPage({super.key, required this.source,
+    required this.crop, required this.filter});
+
+  final EditorImageSource source;
+  final Rect crop;
+  final PhotoFilter filter;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          title: const Text('사진 전체 보기', style: TextStyle(color: Colors.white)),
+          systemOverlayStyle: SystemUiOverlayStyle.light.copyWith(
+            systemNavigationBarColor: Colors.black,
+            systemNavigationBarIconBrightness: Brightness.light,
+          ),
+          leading: IconButton(
+            tooltip: '전체 보기 닫기',
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.close),
+          ),
+        ),
+        body: SafeArea(child: LayoutBuilder(
+          builder: (context, bounds) => InteractiveViewer(
+            key: const ValueKey('registration-fullscreen-viewer'),
+            maxScale: 8,
+            child: Center(child: RegistrationImageCanvas(
+              key: const ValueKey('registration-fullscreen-image'),
+              source: source,
+              crop: crop,
+              filter: filter,
+              cropping: false,
+              aspectRatio: null,
+              onCropChanged: (_) {},
+              enabled: false,
+              maxHeight: bounds.maxHeight,
+            )),
+          ),
+        )),
+      );
 }
 
 class _RegistrationPreviewPainter extends CustomPainter {

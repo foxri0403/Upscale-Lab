@@ -18,6 +18,7 @@ import 'services/wallpaper_service.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_components.dart';
 import 'widgets/device_display_builder.dart';
+import 'widgets/gallery_tag_picker.dart';
 import 'widgets/image_edit_dialog.dart';
 import 'widgets/image_ratio_selector.dart';
 import 'widgets/local_image_card.dart';
@@ -734,57 +735,7 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
   }
 
   Future<void> _openTagPicker() async {
-    final selected = Set<String>.of(_selectedTags);
-    final result = await showModalBottomSheet<Set<String>>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (sheetContext, update) {
-          final allSelected = selectableGalleryTags.every(selected.contains);
-          return FractionallySizedBox(
-            heightFactor: 0.78,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-              child: Column(children: [
-                Row(children: [
-                  const Expanded(child: Text('태그 선택', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
-                  IconButton(onPressed: () => Navigator.pop(sheetContext), icon: Icon(Icons.close)),
-                ]),
-                Expanded(child: ListView(children: [
-                  CheckboxListTile(
-                    title: Text('전체 태그'),
-                    value: allSelected,
-                    onChanged: (value) => update(() {
-                      selected.clear();
-                      if (value == true) selected.addAll(selectableGalleryTags);
-                    }),
-                  ),
-                  ...selectableGalleryTags.map((tag) => CheckboxListTile(
-                    title: Text(tag),
-                    value: selected.contains(tag),
-                    onChanged: (value) => update(() {
-                      if (value == true) { selected.add(tag); } else { selected.remove(tag); }
-                    }),
-                  )),
-                ])),
-                Row(children: [
-                  Expanded(child: OutlinedButton(
-                    onPressed: () => update(selected.clear),
-                    child: Text('초기화'),
-                  )),
-                  const SizedBox(width: 10),
-                  Expanded(child: FilledButton(
-                    onPressed: () => Navigator.pop(sheetContext, selected),
-                    child: Text('적용하기'),
-                  )),
-                ]),
-              ]),
-            ),
-          );
-        },
-      ),
-    );
+    final result = await showGalleryTagPicker(context, selectedTags: _selectedTags);
     if (result == null || !mounted) return;
     setState(() {
       _selectedTags..clear()..addAll(result);

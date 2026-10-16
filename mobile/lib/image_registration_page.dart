@@ -8,6 +8,7 @@ import 'services/image_editor_service.dart';
 import 'services/wallpaper_service.dart';
 import 'widgets/app_components.dart';
 import 'widgets/device_display_builder.dart';
+import 'widgets/gallery_tag_picker.dart';
 import 'widgets/image_ratio_selector.dart';
 import 'widgets/registration_image_canvas.dart';
 import 'widgets/wallpaper_save_dialog.dart';
@@ -53,7 +54,6 @@ class ImageFeaturePage extends StatefulWidget {
 class _ImageFeaturePageState extends State<ImageFeaturePage> {
   late final _titleController = TextEditingController(text: widget.title);
   final _titleFocus = FocusNode();
-  final _contentScroll = ScrollController();
   final _toolKeys = {
     for (final tool in _RegistrationTool.values) tool: GlobalKey()
   };
@@ -94,16 +94,40 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     _source?.preview.dispose();
     _titleFocus.dispose();
     _titleController.dispose();
-    _contentScroll.dispose();
     super.dispose();
   }
 
   void _selectTool(_RegistrationTool tool) {
     FocusScope.of(context).unfocus();
     setState(() => _tool = tool);
-    if (_contentScroll.hasClients) _contentScroll.jumpTo(0);
     Scrollable.ensureVisible(_toolKeys[tool]!.currentContext!,
         alignment: .5, duration: const Duration(milliseconds: 180));
+  }
+
+  Future<void> _openTagPicker() async {
+    FocusScope.of(context).unfocus();
+    final selected = await showGalleryTagPicker(context, selectedTags: _tags);
+    if (selected == null || !mounted) return;
+    setState(
+      () => _tags
+        ..clear()
+        ..addAll(selected),
+    );
+  }
+
+  void _openPreview() {
+    final source = _source;
+    if (source == null || _saving) return;
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => RegistrationPhotoPreviewPage(
+          source: source,
+          crop: _crop,
+          filter: _filter,
+        ),
+      ),
+    );
   }
 
   Future<void> _save() async {
@@ -182,133 +206,196 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     return PopScope(
       canPop: !_saving,
       child: Scaffold(
-        appBar: AppBar(title: const Text('새 이미지 등록'), actions: [
-          IconButton(
+        appBar: AppBar(
+          title: const Text('새 이미지 등록'),
+          actions: [
+            IconButton(
               tooltip: '편집 초기화',
               onPressed: source == null || _saving ? null : _reset,
-              icon: const Icon(Icons.restart_alt)),
-        ]),
-        body: SafeArea(
-            child: Column(children: [
-          Expanded(
-              child: LayoutBuilder(builder: (_, bounds) => SingleChildScrollView(
-            controller: _contentScroll,
-            key: const ValueKey('registration-content'),
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: AppFormBody(
-                child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (source != null) ...[
-                  RegistrationImageCanvas(
-                      key: ValueKey(_canvasRevision),
-                      source: source,
-                      crop: _crop,
-                      filter: _filter,
-                      cropping: _tool == _RegistrationTool.crop,
-                      aspectRatio: _ratio.aspectRatio(source.size, display,
-                          editing: true),
-                      onCropChanged: (crop) => setState(() => _crop = crop),
-                      enabled: !_saving,
-                      maxHeight: (bounds.maxHeight * .6).clamp(72.0, 360.0)
-                          .clamp(0.0, bounds.maxHeight),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                      _tool == _RegistrationTool.crop
-                          ? '모서리를 드래그해 자르기 · 두 손가락으로 확대·축소'
-                          : '위아래로 스크롤해 사진 정보와 편집 항목을 확인하세요.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                          color: colors.onSurfaceVariant, fontSize: 12)),
-                ] else
-                  SizedBox(
-                      height: 180,
-                      child: Center(
-                        child: _error == null
-                            ? const CircularProgressIndicator()
-                            : Column(mainAxisSize: MainAxisSize.min, children: [
-                                Text(_error!),
-                                TextButton(
-                                    onPressed: _load,
-                                    child: const Text('다시 시도')),
-                              ]),
-                      )),
-                const SizedBox(height: 16),
-                AppPanel(
-                    child: switch (_tool) {
-                  _RegistrationTool.information => _information(),
-                  _RegistrationTool.crop => ImageRatioSelector(
-                      value: _ratio,
-                      display: display,
-                      allowFree: true,
-                      onChanged: source == null || _saving
-                          ? null
-                          : (ratio) => setState(() => _ratio = ratio)),
-                  _RegistrationTool.filter => _filters(),
-                  _ => const SizedBox.shrink(),
-                }),
-              ],
-            )),
-          ))),
-          const Divider(),
-          if (MediaQuery.viewInsetsOf(context).bottom == 0)
-            SingleChildScrollView(
-              key: const ValueKey('registration-tools'),
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Row(children: [
-                for (final tool in _RegistrationTool.values)
-                  Padding(
-                    key: _toolKeys[tool],
-                    padding: const EdgeInsets.symmetric(horizontal: 3),
-                    child: Semantics(
-                        selected: _tool == tool,
-                        child: TextButton(
-                          key: ValueKey('registration-tool-${tool.name}'),
-                          onPressed: _saving || tool.pending
-                              ? null
-                              : () => _selectTool(tool),
-                          style: TextButton.styleFrom(
-                            foregroundColor: _tool == tool
-                                ? colors.primary
-                                : colors.onSurfaceVariant,
-                            backgroundColor:
-                                _tool == tool ? colors.primaryContainer : null,
-                            minimumSize: const Size(76, 64),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14)),
-                          ),
-                          child:
-                              Column(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(tool.icon, size: 23),
-                            const SizedBox(height: 4),
-                            Text(tool.label,
-                                style: const TextStyle(fontSize: 12)),
-                            if (tool.pending)
-                              const Text('준비 중',
-                                  style: TextStyle(fontSize: 10)),
-                          ]),
-                        )),
-                  ),
-              ]),
+              icon: const Icon(Icons.restart_alt),
             ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  key: const ValueKey('save-registration'),
-                  onPressed: source == null || _saving ? null : _save,
-                  child: _exporting
-                      ? const SizedBox.square(
-                          dimension: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('저장'),
-                )),
+          ],
+        ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (_, bounds) => ClipRect(
+                    key: const ValueKey('registration-content'),
+                    child: OverflowBox(
+                      // Keep controls fixed and clip overflow instead of scrolling.
+                      alignment: Alignment.topCenter,
+                      minHeight: 0,
+                      maxHeight: double.infinity,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                        child: AppFormBody(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (source != null) ...[
+                                Semantics(
+                                  button: true,
+                                  label: '사진 전체 보기',
+                                  child: GestureDetector(
+                                    key: const ValueKey(
+                                      'registration-preview-button',
+                                    ),
+                                    onTap: _saving ? null : _openPreview,
+                                    behavior: HitTestBehavior.opaque,
+                                    child: RegistrationImageCanvas(
+                                      key: ValueKey(_canvasRevision),
+                                      source: source,
+                                      crop: _crop,
+                                      filter: _filter,
+                                      cropping: _tool == _RegistrationTool.crop,
+                                      aspectRatio: _ratio.aspectRatio(
+                                        source.size,
+                                        display,
+                                        editing: true,
+                                      ),
+                                      onCropChanged: (crop) =>
+                                          setState(() => _crop = crop),
+                                      enabled: !_saving,
+                                      maxHeight: (bounds.maxHeight * .45).clamp(
+                                        72.0,
+                                        360.0,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  _tool == _RegistrationTool.crop
+                                      ? '모서리를 드래그해 자르기 · 사진을 누르면 전체 보기'
+                                      : '사진을 누르면 전체 화면으로 볼 수 있습니다.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: colors.onSurfaceVariant,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ] else
+                                SizedBox(
+                                  height: 180,
+                                  child: Center(
+                                    child: _error == null
+                                        ? const CircularProgressIndicator()
+                                        : Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(_error!),
+                                              TextButton(
+                                                onPressed: _load,
+                                                child: const Text('다시 시도'),
+                                              ),
+                                            ],
+                                          ),
+                                  ),
+                                ),
+                              const SizedBox(height: 16),
+                              Material(
+                                key: const ValueKey('registration-settings'),
+                                type: MaterialType.transparency,
+                                child: switch (_tool) {
+                                  _RegistrationTool.information =>
+                                    _information(),
+                                  _RegistrationTool.crop => ImageRatioSelector(
+                                      value: _ratio,
+                                      display: display,
+                                      allowFree: true,
+                                      compactHeader: true,
+                                      onChanged: source == null || _saving
+                                          ? null
+                                          : (ratio) =>
+                                              setState(() => _ratio = ratio),
+                                    ),
+                                  _RegistrationTool.filter => _filters(),
+                                  _ => const SizedBox.shrink(),
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              if (MediaQuery.viewInsetsOf(context).bottom == 0)
+                SingleChildScrollView(
+                  key: const ValueKey('registration-tools'),
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  child: Row(
+                    children: [
+                      for (final tool in _RegistrationTool.values)
+                        Padding(
+                          key: _toolKeys[tool],
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          child: Semantics(
+                            selected: _tool == tool,
+                            child: TextButton(
+                              key: ValueKey('registration-tool-${tool.name}'),
+                              onPressed: _saving || tool.pending
+                                  ? null
+                                  : () => _selectTool(tool),
+                              style: TextButton.styleFrom(
+                                foregroundColor: _tool == tool
+                                    ? colors.primary
+                                    : colors.onSurfaceVariant,
+                                backgroundColor: Colors.transparent,
+                                minimumSize: const Size(76, 64),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(tool.icon, size: 23),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    tool.label,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                  if (tool.pending)
+                                    const Text(
+                                      '준비 중',
+                                      style: TextStyle(fontSize: 10),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    key: const ValueKey('save-registration'),
+                    onPressed: source == null || _saving ? null : _save,
+                    child: _exporting
+                        ? const SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('저장'),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ])),
+        ),
       ),
     );
   }
@@ -328,24 +415,32 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
               if (_titleError != null) setState(() => _titleError = null);
             },
             decoration: InputDecoration(
-                labelText: '이미지 이름', counterText: '', errorText: _titleError),
+              labelText: '이미지 이름',
+              counterText: '',
+              errorText: _titleError,
+              filled: false,
+            ),
           ),
           const SizedBox(height: 16),
-          const AppSectionTitle('태그', trailing: '여러 개 선택'),
-          const SizedBox(height: 8),
-          Wrap(spacing: 6, runSpacing: 4, children: [
-            for (final tag in selectableGalleryTags)
-              FilterChip(
-                key: ValueKey('registration-tag-$tag'),
-                label: Text(tag),
-                selected: _tags.contains(tag),
-                onSelected: _saving
-                    ? null
-                    : (selected) => setState(() {
-                          selected ? _tags.add(tag) : _tags.remove(tag);
-                        }),
+          InkWell(
+            key: const ValueKey('registration-tag-picker'),
+            onTap: _saving ? null : _openTagPicker,
+            borderRadius: BorderRadius.circular(12),
+            child: InputDecorator(
+              decoration: const InputDecoration(
+                labelText: '태그',
+                filled: false,
+                suffixIcon: Icon(Icons.expand_more),
               ),
-          ]),
+              child: Text(
+                _tags.isEmpty
+                    ? '태그 선택'
+                    : selectableGalleryTags.where(_tags.contains).join(', '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
         ],
       );
 
