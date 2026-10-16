@@ -684,7 +684,7 @@ void main() {
     await tester.ensureVisible(openEditor);
     await tester.tap(openEditor);
     await tester.pumpAndSettle();
-    await selectManual(tester);
+    expect(find.text('수동'), findsNothing);
     final standard = find.byKey(const ValueKey(CropPreset.standard));
     await tester.ensureVisible(standard);
     await tester.tap(standard);
@@ -759,7 +759,6 @@ void main() {
       if (!automatic) {
         await tester.tap(find.byKey(const ValueKey('registration-tool-crop')));
         await tester.pumpAndSettle();
-        await selectManual(tester);
         final standard = find.byKey(const ValueKey(CropPreset.standard));
         await tester.ensureVisible(standard);
         await tester.tap(standard);
@@ -945,6 +944,7 @@ void main() {
 
   testWidgets('crop canvas stays visible and crop drags do not scroll the settings',
       (tester) async {
+    detectedDisplay = const Size(1080, 2400);
     await show(tester, ImageFeaturePage(filePath: imagePath, title: '자르기'),
         size: const Size(320, 640), scale: 1.4);
     await tester.tap(find.byKey(const ValueKey('registration-tool-crop')));
@@ -966,11 +966,19 @@ void main() {
     expect(find.byKey(const ValueKey('registration-fullscreen-image')), findsOneWidget);
     await tester.tap(find.byTooltip('전체 보기 닫기'));
     await tester.pumpAndSettle();
-    await selectManual(tester);
+    expect(find.text('수동'), findsNothing);
     final square = find.byKey(const ValueKey(CropPreset.square));
     await tester.ensureVisible(square);
     await tester.tap(square);
     await tester.pumpAndSettle();
+    var selected = tester.widget<RegistrationImageCanvas>(find.byType(RegistrationImageCanvas));
+    expect(selected.aspectRatio, 1);
+    await tester.tap(find.byKey(const ValueKey('ratio-mode-automatic')));
+    await tester.pumpAndSettle();
+    selected = tester.widget<RegistrationImageCanvas>(find.byType(RegistrationImageCanvas));
+    expect(selected.aspectRatio, closeTo(1080 / 2400, .0001));
+    expect(selected.crop.width / selected.crop.height, closeTo(1080 / 2400, .0001));
+    expect(square, findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
