@@ -289,7 +289,8 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
     public async Task<DownloadUrlResponse> CreateDownloadUrlAsync(
         Guid postId,
         Guid? currentUserId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool countDownload = true)
     {
         var post = await dbContext.GalleryPosts
             .Include(x => x.Image)
@@ -300,10 +301,42 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
 
         var expiresAt = DateTime.UtcNow.Add(DownloadLifetime);
         var url = storageService.CreateDownloadUrl(post.Image.OriginalObjectKey, DownloadLifetime);
-        post.DownloadCount++;
-        await dbContext.SaveChangesAsync(cancellationToken);
+        // Old clients still count on URL issuance. Current clients opt out and
+        // report completion only after the file has been downloaded locally.
+        if (countDownload)
+            await IncrementDownloadCountAsync(postId, currentUserId, cancellationToken);
 
         return new DownloadUrlResponse(url, expiresAt);
+    }
+
+    public async Task<GalleryDownloadCountResponse> RecordDownloadAsync(
+        Guid postId, Guid? currentUserId, CancellationToken cancellationToken) =>
+        new(await IncrementDownloadCountAsync(postId, currentUserId, cancellationToken));
+
+    private async Task<long> IncrementDownloadCountAsync(
+        Guid postId, Guid? currentUserId, CancellationToken cancellationToken)
+    {
+        var query = dbContext.GalleryPosts.Where(x => x.Id == postId &&
+            (x.IsPublic || x.UserId == currentUserId));
+        var now = DateTime.UtcNow;
+        if (dbContext.Database.IsRelational())
+        {
+            // Increment in the database so concurrent downloads cannot overwrite
+            // each other's counters. No new column or migration is required.
+            var changed = await query.ExecuteUpdateAsync(update => update
+                .SetProperty(x => x.DownloadCount, x => x.DownloadCount + 1)
+                .SetProperty(x => x.UpdatedAt, now), cancellationToken);
+            if (changed == 0) throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
+            return await query.AsNoTracking().Select(x => x.DownloadCount).SingleAsync(cancellationToken);
+        }
+
+        // The existing service tests use EF's non-relational in-memory provider.
+        var post = await query.SingleOrDefaultAsync(cancellationToken)
+            ?? throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
+        post.DownloadCount++;
+        post.UpdatedAt = now;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return post.DownloadCount;
     }
 
     private IQueryable<GalleryPost> BaseQuery() => dbContext.GalleryPosts

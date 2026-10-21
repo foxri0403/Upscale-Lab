@@ -23,6 +23,10 @@ secrets.json
 *.pfx
 *.pem
 *.key
+*.jks
+*.keystore
+mobile/android/key.properties
+mobile/android/key.*.properties
 
 # Logs and local data
 *.log
@@ -47,25 +51,23 @@ mobile/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.ja
 # Local test deliverables
 artifacts/
 mobile/test_assets/
-# ========================================
-# UpscaleLab Android Signing Secrets
-# ========================================
 
-# Signing key files
+# Local Python environments
+.venv/
+__pycache__/
+*.pyc
+
+# Local APK and backup files
+*.apk
+*.bak
+
+# Android signing secrets
+key.properties
 *.jks
 *.keystore
-*.p12
-*.pfx
 
-# Environment variable files
-.env
-.env.*
-!.env.example
-
-# Android local configuration
-**/local.properties
-**/key.properties
-
-# Secret directories
-**/secrets/
-**/Secrets/
+# GPU Worker local files
+gpu-worker/input/
+gpu-worker/output/
+gpu-worker/models/
+gpu-worker/main_backup.py

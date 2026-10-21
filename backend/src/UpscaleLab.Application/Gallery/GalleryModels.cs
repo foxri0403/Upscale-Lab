@@ -42,6 +42,8 @@ public sealed record GalleryPostDetailResponse(
     GalleryPostResponse Post,
     IReadOnlyList<CommentResponse> Comments);
 
+public sealed record GalleryDownloadCountResponse(long DownloadCount);
+
 public sealed record CreateCommentRequest([param: Required, MaxLength(1000)] string Content);
 
 public sealed record CommentResponse(

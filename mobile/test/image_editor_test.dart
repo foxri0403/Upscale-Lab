@@ -81,6 +81,22 @@ void main() {
     }
   });
 
+  test('fractional compact viewports keep valid pan bounds without throwing', () {
+    for (final height in [72.1, 92.7, 128.8, 190.2, 214.2, 231.6, 359.9]) {
+      for (final ratio in [.5, .45, 16 / 9, 4 / 3, 1.0]) {
+        final geometry = CropGeometry(const ui.Size(40, 40))
+          ..layout(ui.Size(288, height), ratio, padding: 12);
+        geometry.transform(geometry.scale, const ui.Offset(10000, -10000));
+        final crop = geometry.normalizedCrop;
+        expect(crop.isEmpty, isFalse);
+        expect(crop.left, greaterThanOrEqualTo(0));
+        expect(crop.top, greaterThanOrEqualTo(0));
+        expect(crop.right, lessThanOrEqualTo(1));
+        expect(crop.bottom, lessThanOrEqualTo(1));
+      }
+    }
+  });
+
   test('resizing the viewport retains the selected source region', () {
     final geometry = CropGeometry(sourceSize)
       ..layout(const ui.Size(360, 360), 1);

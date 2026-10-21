@@ -1,0 +1,7 @@
+# Copy to key.properties locally, or set UPSCALE_SIGNING_PROPERTIES_FILE to an
+# external properties file. Never commit filled credentials or the keystore.
+# Paths may be absolute or relative to the properties file; use forward slashes.
+storeFile=
+storePassword=
+keyAlias=
+keyPassword=

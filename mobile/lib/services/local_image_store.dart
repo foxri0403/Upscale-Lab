@@ -6,23 +6,25 @@ import 'wallpaper_service.dart';
 import '../models/image_ratio.dart';
 
 class LocalImageStore {
-  const LocalImageStore({required this.scope});
+  const LocalImageStore({required this.scope, required this.ownerId});
 
   final String scope;
+  final String ownerId;
 
   static const _channel = MethodChannel('live_layer/storage');
 
   Future<LibraryOrder> getOrder() async =>
       LibraryOrder.fromMap(await _channel.invokeMapMethod<Object?, Object?>(
-              'getLibraryOrder', {'scope': scope}) ??
+              'getLibraryOrder', {'scope': scope, 'ownerId': ownerId}) ??
           const {});
 
   Future<void> saveOrder(LibraryOrder order) => _channel.invokeMethod<void>(
-      'saveLibraryOrder', {'scope': scope, ...order.toMap()});
+      'saveLibraryOrder',
+      {'scope': scope, 'ownerId': ownerId, ...order.toMap()});
 
   Future<bool> previewWallpaper(String id) async =>
-      await _channel.invokeMethod<bool>(
-          'previewLocalWallpaper', {'scope': scope, 'id': id}) ??
+      await _channel.invokeMethod<bool>('previewLocalWallpaper',
+          {'scope': scope, 'ownerId': ownerId, 'id': id}) ??
       false;
 
   /// Applies an image owned by the captured account to the selected screen(s).
@@ -31,13 +33,14 @@ class LocalImageStore {
   Future<void> applyWallpaper(String id, {required WallpaperTarget target}) =>
       _channel.invokeMethod<void>('applyLocalWallpaper', {
         'scope': scope,
+        'ownerId': ownerId,
         'id': id,
         'target': target.name,
       });
 
   Future<List<LocalImageItem>> getAll() async {
-    final values = await _channel
-            .invokeListMethod<Object?>('listLocalImages', {'scope': scope}) ??
+    final values = await _channel.invokeListMethod<Object?>(
+            'listLocalImages', {'scope': scope, 'ownerId': ownerId}) ??
         const <Object?>[];
     return values
         .map((value) => LocalImageItem.fromPlatformMap(
@@ -60,6 +63,7 @@ class LocalImageStore {
       'importLocalImage',
       {
         'scope': scope,
+        'ownerId': ownerId,
         'sourcePath': sourcePath,
         'fileName': fileName,
         'title': title,
@@ -75,14 +79,15 @@ class LocalImageStore {
   }
 
   Future<void> markUnshared(String id) {
-    return _channel.invokeMethod<void>(
-        'markLocalImageUnshared', {'scope': scope, 'id': id});
+    return _channel.invokeMethod<void>('markLocalImageUnshared',
+        {'scope': scope, 'ownerId': ownerId, 'id': id});
   }
 
   Future<void> updateTags({required String id, required List<String> tags}) {
     return _channel.invokeMethod<void>('updateLocalImageTag', {
       'id': id,
       'scope': scope,
+      'ownerId': ownerId,
       'tags': tags,
     });
   }
@@ -95,6 +100,7 @@ class LocalImageStore {
   }) =>
       _channel.invokeMethod<void>('updateLocalImageDetails', {
         'scope': scope,
+        'ownerId': ownerId,
         'id': id,
         'title': title,
         'tags': tags,
@@ -108,19 +114,21 @@ class LocalImageStore {
   }) {
     return _channel.invokeMethod<void>('markLocalImageShared', {
       'scope': scope,
+      'ownerId': ownerId,
       'id': id,
       'cloudProjectId': cloudProjectId,
       'galleryPostId': galleryPostId,
     });
   }
 
-  Future<void> delete(String id) => _channel
-      .invokeMethod<void>('deleteLocalImage', {'scope': scope, 'id': id});
+  Future<void> delete(String id) => _channel.invokeMethod<void>(
+      'deleteLocalImage', {'scope': scope, 'ownerId': ownerId, 'id': id});
 
   Future<String> downloadShared(
       {required String url, required String fileName}) async {
     final path = await _channel.invokeMethod<String>('downloadSharedImage', {
       'scope': scope,
+      'ownerId': ownerId,
       'url': url,
       'fileName': fileName,
     });

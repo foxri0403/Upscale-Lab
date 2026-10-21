@@ -116,13 +116,14 @@ class CropGeometry {
         crop.right / source.width, crop.bottom / source.height);
   }
 
-  void layout(Size size, double? aspect, {bool reset = false}) {
+  void layout(Size size, double? aspect,
+      {bool reset = false, double padding = 24}) {
     if (!reset && size == viewport && aspect == _aspect) return;
     final previous =
         viewport.isEmpty || reset || aspect != _aspect ? null : sourceRect;
     viewport = size;
     _aspect = aspect;
-    final bounds = (Offset.zero & size).deflate(24);
+    final bounds = (Offset.zero & size).deflate(padding);
     final ratio = aspect ?? previous?.size.aspectRatio ?? source.aspectRatio;
     final width = math.min(bounds.width, bounds.height * ratio);
     frame = Rect.fromCenter(
@@ -135,9 +136,13 @@ class CropGeometry {
 
   void transform(double nextScale, Offset nextOffset) {
     scale = nextScale.clamp(minimumScale, minimumScale * 8);
+    // Floating-point rounding can make a covered edge undershoot by a fraction
+    // of a pixel; never pass inverted translation bounds to clamp.
     offset = Offset(
-      nextOffset.dx.clamp(frame.right - source.width * scale, frame.left),
-      nextOffset.dy.clamp(frame.bottom - source.height * scale, frame.top),
+      nextOffset.dx.clamp(
+          math.min(frame.left, frame.right - source.width * scale), frame.left),
+      nextOffset.dy.clamp(
+          math.min(frame.top, frame.bottom - source.height * scale), frame.top),
     );
   }
 

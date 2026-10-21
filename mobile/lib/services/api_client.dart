@@ -17,7 +17,8 @@ class ApiClient {
 
   String get baseUrl => _baseUrl;
 
-  String get storageScope {
+  /// Stable subject identifier of the authenticated account.
+  String get userId {
     final token = _accessToken;
     if (token == null) throw StateError('로그인이 필요합니다.');
     final parts = token.split('.');
@@ -29,8 +30,11 @@ class ApiClient {
     if (userId is! String || userId.isEmpty) {
       throw StateError('계정 정보를 확인하지 못했습니다.');
     }
-    return '$baseUrl\n$userId';
+    return userId;
   }
+
+  /// Legacy app-private storage key; retained for one-time album migration.
+  String get storageScope => '$baseUrl\n$userId';
 
   void restoreSession(AuthSession session) {
     _accessToken = session.accessToken;
@@ -305,6 +309,89 @@ class ApiClient {
     _ensureSuccess(response);
   }
 
+    // GPU 업스케일링 시작 (2배 또는 4배)
+  Future<void> startUpscaling(String projectId, {required int scale}) async {
+    if (scale != 2 && scale != 4) {
+      throw ArgumentError('업스케일 배율은 2 또는 4만 가능합니다.');
+    }
+
+    final response = await _post(
+      Uri.parse('$baseUrl/api/projects/$projectId/process'),
+      headers: _headers,
+      body: jsonEncode({
+        'operation': 'Upscale',
+        'upscaleFactor': scale,
+      }),
+    );
+    _ensureSuccess(response);
+  }
+
+  // GPU 처리 상태 조회
+  Future<Map<String, dynamic>> getProcessingStatus(String projectId) async {
+    final response = await _get(
+      Uri.parse('$baseUrl/api/projects/$projectId/processing-status'),
+      headers: _headers,
+    );
+    _ensureSuccess(response);
+
+    return jsonDecode(utf8.decode(response.bodyBytes))
+        as Map<String, dynamic>;
+  }
+
+  // GPU 처리 완료까지 대기
+  Future<Map<String, dynamic>> waitForUpscaling(
+    String projectId, {
+    Duration interval = const Duration(seconds: 2),
+    int maxAttempts = 120,
+  }) async {
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      final result = await getProcessingStatus(projectId);
+      final status = result['status']?.toString();
+
+      if (status == 'Completed' || status == '2') {
+        return result;
+      }
+
+      if (status == 'Failed' || status == '3') {
+        final message = result['errorMessage']?.toString();
+        throw StateError(
+          message == null || message.isEmpty
+              ? '업스케일링에 실패했습니다.'
+              : message,
+        );
+      }
+
+      if (attempt < maxAttempts - 1) {
+        await Future.delayed(interval);
+      }
+    }
+
+    throw StateError('업스케일링 처리 시간이 초과되었습니다.');
+  }
+
+  // 업스케일링 결과 다운로드 URL
+  Future<String> getUpscaledDownloadUrl(
+    String projectId,
+    String jobId,
+  ) async {
+    final response = await _post(
+      Uri.parse('$baseUrl/api/projects/$projectId/jobs/$jobId/download-url'),
+      headers: _headers,
+    );
+    _ensureSuccess(response);
+
+    final body =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+
+    final url = body['url'];
+
+    if (url is! String || url.isEmpty) {
+      throw StateError('업스케일링 결과 다운로드 주소가 없습니다.');
+    }
+
+    return url;
+  }
+
   Future<String> shareProject({
     required String projectId,
     required String title,
@@ -416,7 +503,8 @@ class ApiClient {
 
   Future<String> getGalleryDownloadUrl(String postId) async {
     final response = await _post(
-        Uri.parse('$baseUrl/api/gallery/$postId/download-url'),
+        Uri.parse(
+            '$baseUrl/api/gallery/$postId/download-url?countDownload=false'),
         headers: _headers);
     _ensureSuccess(response);
     final body =
@@ -438,6 +526,19 @@ class ApiClient {
       throw StateError('이미지 주소를 불러오지 못했습니다.');
     }
     return url;
+  }
+
+  Future<int> recordGalleryDownload(String postId) async {
+    final response = await _post(
+      Uri.parse('$baseUrl/api/gallery/$postId/download-complete'),
+      headers: _headers,
+    );
+    _ensureSuccess(response);
+    final body =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    final count = body['downloadCount'];
+    if (count is! int || count < 0) throw StateError('다운로드 횟수를 확인하지 못했습니다.');
+    return count;
   }
 
   Future<void> deleteGalleryPost(String id) async {

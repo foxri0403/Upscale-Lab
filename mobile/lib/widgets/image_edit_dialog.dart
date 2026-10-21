@@ -30,7 +30,7 @@ class ImageEditDialog extends StatefulWidget {
 class _ImageEditDialogState extends State<ImageEditDialog> {
   final _formKey = GlobalKey<FormState>();
   late final _title = TextEditingController(text: widget.title);
-  late final _tags = widget.tags.toSet();
+  late final _tags = widget.tags.where(selectableGalleryTags.contains).toSet();
   late ImageRatioSettings _ratio = widget.ratio;
 
   @override
@@ -46,9 +46,7 @@ class _ImageEditDialogState extends State<ImageEditDialog> {
         ImageEditResult(
           title: _title.text.trim(),
           ratio: _ratio,
-          tags: _tags.isEmpty
-              ? [unspecifiedGalleryTag]
-              : galleryTags.where(_tags.contains).toList(),
+          tags: registrationTags(_tags),
         ));
   }
 
@@ -89,7 +87,7 @@ class _ImageEditDialogState extends State<ImageEditDialog> {
                         Wrap(
                             spacing: 6,
                             runSpacing: 4,
-                            children: galleryTags
+                            children: selectableGalleryTags
                                 .map((tag) => FilterChip(
                                       label: Text(tag),
                                       selected: _tags.contains(tag),
@@ -97,11 +95,6 @@ class _ImageEditDialogState extends State<ImageEditDialog> {
                                         if (!checked) {
                                           _tags.remove(tag);
                                         } else {
-                                          if (tag == unspecifiedGalleryTag) {
-                                            _tags.clear();
-                                          } else {
-                                            _tags.remove(unspecifiedGalleryTag);
-                                          }
                                           _tags.add(tag);
                                         }
                                       }),

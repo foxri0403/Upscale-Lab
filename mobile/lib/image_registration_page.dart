@@ -1,15 +1,18 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show OverflowBoxFit;
 
-import 'image_editor_page.dart';
 import 'models/gallery_tags.dart';
+import 'models/image_editor.dart';
 import 'models/image_ratio.dart';
+import 'models/wallpaper_save_selection.dart';
 import 'services/image_editor_service.dart';
-import 'theme/app_theme.dart';
+import 'services/wallpaper_service.dart';
 import 'widgets/app_components.dart';
 import 'widgets/device_display_builder.dart';
+import 'widgets/gallery_tag_picker.dart';
 import 'widgets/image_ratio_selector.dart';
+import 'widgets/registration_image_canvas.dart';
+import 'widgets/wallpaper_save_dialog.dart';
 
 class ImageRegistrationOptions {
   const ImageRegistrationOptions({
@@ -17,11 +20,28 @@ class ImageRegistrationOptions {
     required this.tags,
     this.editedFile,
     this.ratio = const ImageRatioSettings(),
+    this.upscaleFactor,
+    this.wallpaperTarget,
   });
   final String title;
   final List<String> tags;
   final EditedImageFile? editedFile;
+  final int? upscaleFactor;
   final ImageRatioSettings ratio;
+  final WallpaperTarget? wallpaperTarget;
+}
+
+enum _RegistrationTool {
+  information('사진 정보', Icons.info_outline),
+  crop('자르기', Icons.crop),
+  filter('필터', Icons.filter_vintage_outlined),
+  upscale('업스케일', Icons.open_in_full),
+  parallax('2.5D', Icons.view_in_ar_outlined);
+
+  const _RegistrationTool(this.label, this.icon);
+  final String label;
+  final IconData icon;
+  bool get pending => this == parallax;
 }
 
 class ImageFeaturePage extends StatefulWidget {
@@ -35,14 +55,23 @@ class ImageFeaturePage extends StatefulWidget {
 }
 
 class _ImageFeaturePageState extends State<ImageFeaturePage> {
-  final _formKey = GlobalKey<FormState>();
   late final _titleController = TextEditingController(text: widget.title);
   final _titleFocus = FocusNode();
+  final _toolKeys = {
+    for (final tool in _RegistrationTool.values) tool: GlobalKey()
+  };
   final Set<String> _tags = {};
   EditorImageSource? _source;
   String? _error;
-  bool _editing = false;
+  String? _titleError;
+  bool _saving = false;
+  bool _exporting = false;
+  _RegistrationTool _tool = _RegistrationTool.information;
+  int _upscaleFactor = 2;
   ImageRatioSettings _ratio = const ImageRatioSettings();
+  PhotoFilter _filter = PhotoFilter.original;
+  Rect _crop = const Rect.fromLTWH(0, 0, 1, 1);
+  int _canvasRevision = 0;
 
   @override
   void initState() {
@@ -72,182 +101,370 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     super.dispose();
   }
 
-  Future<void> _register({required bool edit}) async {
-    if (!_formKey.currentState!.validate() || _source == null || _editing) {
+  void _selectTool(_RegistrationTool tool) {
+    FocusScope.of(context).unfocus();
+    setState(() => _tool = tool);
+    final toolContext = _toolKeys[tool]!.currentContext;
+    if (toolContext != null) {
+      Scrollable.ensureVisible(toolContext,
+          alignment: .5, duration: const Duration(milliseconds: 180));
+    }
+  }
+
+  Future<void> _openTagPicker() async {
+    FocusScope.of(context).unfocus();
+    final selected = await showGalleryTagPicker(context, selectedTags: _tags);
+    if (selected == null || !mounted) return;
+    setState(
+      () => _tags
+        ..clear()
+        ..addAll(selected),
+    );
+  }
+
+  void _openPreview() {
+    final source = _source;
+    if (source == null || _saving) return;
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => RegistrationPhotoPreviewPage(
+          source: source,
+          crop: _crop,
+          filter: _filter,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    if (_source == null || _saving || _exporting) return;
+    final title = _titleController.text.trim();
+    if (title.isEmpty) {
+      _selectTool(_RegistrationTool.information);
+      setState(() => _titleError = '이미지 이름을 입력해 주세요.');
+      _titleFocus.requestFocus();
       return;
     }
     FocusScope.of(context).unfocus();
-    final title = _titleController.text.trim();
-    final tags = registrationTags(_tags);
-    ImageEditorResult? result;
-    if (edit) {
-      setState(() => _editing = true);
-      result = await Navigator.push<ImageEditorResult>(
-          context,
-          MaterialPageRoute(
-              builder: (_) => ImageEditorPage(
-                  filePath: widget.filePath, initialRatio: _ratio)));
+    setState(() => _saving = true);
+    EditedImageFile? edited;
+    try {
+      final selection = await showDialog<WallpaperSaveSelection>(
+          context: context, builder: (_) => const WallpaperSaveDialog());
+      if (selection == null || !mounted) return;
+      setState(() => _exporting = true);
+      edited = await ImageEditorService.export(
+          sourcePath: widget.filePath, crop: _crop, filter: _filter);
       if (!mounted) {
-        await result?.editedFile?.dispose();
+        await edited?.dispose();
         return;
       }
-      setState(() => _editing = false);
-      if (result == null) return;
+      // Let PopScope observe the completed save before returning its result.
+      setState(() => _saving = false);
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || ModalRoute.of(context)?.isCurrent != true) {
+        await edited?.dispose();
+        return;
+      }
+Navigator.pop(
+    context,
+    ImageRegistrationOptions(
+      title: title,
+      tags: registrationTags(_tags),
+      editedFile: edited,
+      upscaleFactor: _tool == _RegistrationTool.upscale
+          ? _upscaleFactor
+          : null,
+      ratio: !_ratio.automatic && _ratio.preset == CropPreset.free
+          ? _ratio.copyWith(
+              freeAspectRatio: _crop.width *
+                  _source!.size.width /
+                  (_crop.height * _source!.size.height))
+          : _ratio,
+      wallpaperTarget: selection.target,
+    ));
+    } catch (_) {
+      await edited?.dispose();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('이미지를 저장하지 못했습니다. 다시 시도해 주세요.')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _exporting = false;
+        });
+      }
     }
-    if (!mounted) return;
-    Navigator.pop(
-        context,
-        ImageRegistrationOptions(
-            title: title,
-            tags: tags,
-            editedFile: result?.editedFile,
-            ratio: result?.ratio ?? _ratio));
   }
+
+  void _reset() => setState(() {
+        _crop = const Rect.fromLTWH(0, 0, 1, 1);
+        _ratio = const ImageRatioSettings();
+        _filter = PhotoFilter.original;
+        _canvasRevision++;
+      });
 
   @override
   Widget build(BuildContext context) => DeviceDisplayBuilder(builder: _build);
 
   Widget _build(BuildContext context, Size display) {
     final source = _source;
-    final tileHeight =
-        math.max(52.0, MediaQuery.textScalerOf(context).scale(14) * 2 + 20);
-    return Scaffold(
-      appBar: AppBar(title: const Text('새 이미지 등록')),
-      body: SafeArea(
-        child: AppFormScrollView(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-          child: Form(
-            key: _formKey,
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (source != null)
-                    SizedBox(
-                        height: (MediaQuery.sizeOf(context).height * .4)
-                            .clamp(180, 460),
-                        child: Center(
-                            child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: AspectRatio(
-                                    aspectRatio: _ratio.aspectRatio(
-                                        source.size, display)!,
-                                    child: RawImage(
-                                        key: const ValueKey(
-                                            'registration-original-image'),
-                                        image: source.preview,
-                                        fit: BoxFit.cover)))))
-                  else
-                    SizedBox(
-                        height: 180,
-                        child: Center(
-                            child: _error == null
-                                ? const CircularProgressIndicator()
-                                : Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                        Text(_error!),
-                                        TextButton(
-                                            onPressed: _load,
-                                            child: const Text('다시 시도')),
-                                      ]))),
-                  const SizedBox(height: 18),
-                  ImageRatioSelector(
-                      value: _ratio,
-                      display: display,
-                      onChanged: _editing
-                          ? null
-                          : (ratio) => setState(() => _ratio = ratio)),
-                  const SizedBox(height: 18),
-                  const AppSectionTitle('이미지 이름'),
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: _titleController,
-                    focusNode: _titleFocus,
-                    maxLength: 160,
-                    textInputAction: TextInputAction.done,
-                    validator: (value) => value == null || value.trim().isEmpty
-                        ? '이미지 이름을 입력해 주세요.'
-                        : null,
-                    decoration: InputDecoration(
-                        counterText: '',
-                        hintText: '이미지 이름',
-                        suffixIcon: IconButton(
-                            tooltip: '이름 변경',
-                            icon: const Icon(Icons.edit_outlined),
-                            onPressed: () => _titleFocus.requestFocus())),
+    final colors = Theme.of(context).colorScheme;
+    final showTools = MediaQuery.viewInsetsOf(context).bottom == 0;
+    final wide = MediaQuery.sizeOf(context).aspectRatio > 1;
+    return PopScope(
+      canPop: !_saving,
+      child: Scaffold(
+        appBar: AppBar(title: const Text('새 이미지 등록'), actions: [
+          IconButton(
+              tooltip: '편집 초기화',
+              onPressed: source == null || _saving ? null : _reset,
+              icon: const Icon(Icons.restart_alt)),
+        ]),
+        body: SafeArea(child: Column(children: [
+          Expanded(child: LayoutBuilder(builder: (_, bounds) => Column(
+            key: const ValueKey('registration-content'),
+            children: [
+              Expanded(child: _preview(display)),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: bounds.maxHeight),
+                child: ClipRect(child: OverflowBox(
+                  fit: OverflowBoxFit.deferToChild,
+                  alignment: Alignment.bottomCenter,
+                  maxHeight: double.infinity,
+                  child: Padding(
+                    key: const ValueKey('registration-settings'),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                    child: AppFormBody(child: Material(
+                      type: MaterialType.transparency,
+                      child: switch (_tool) {
+                        _RegistrationTool.information => _information(),
+                        _RegistrationTool.crop => ImageRatioSelector(
+                          value: _ratio,
+                          display: display,
+                          allowFree: true,
+                          automaticOnly: true,
+                          onChanged: source == null || _saving
+                              ? null
+                              : (ratio) => setState(() => _ratio = ratio)),
+                        _RegistrationTool.filter => _filters(),
+
+_RegistrationTool.upscale => Row(
+  mainAxisAlignment: MainAxisAlignment.center,
+  children: [
+    const Text('업스케일 배율'),
+    const SizedBox(width: 16),
+    SegmentedButton<int>(
+      segments: const [
+        ButtonSegment(value: 2, label: Text('2배')),
+        ButtonSegment(value: 4, label: Text('4배')),
+      ],
+      selected: {_upscaleFactor},
+      onSelectionChanged: _saving
+          ? null
+          : (values) {
+              setState(() {
+                _upscaleFactor = values.first;
+              });
+            },
+    ),
+  ],
+),
+
+_ => const SizedBox.shrink(),
+                      },
+                    )),
                   ),
-                  const SizedBox(height: 22),
-                  const AppSectionTitle('태그'),
-                  const SizedBox(height: 4),
-                  const Text('태그는 선택하지 않아도 됩니다.',
-                      style: TextStyle(color: AppTheme.muted, fontSize: 12)),
-                  const SizedBox(height: 10),
-                  for (var row = 0;
-                      row < (selectableGalleryTags.length / 3).ceil();
-                      row++)
-                    Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Row(children: [
-                          for (var column = 0; column < 3; column++) ...[
-                            if (column > 0) const SizedBox(width: 8),
-                            Expanded(
-                                child: SizedBox(
-                                    height: tileHeight,
-                                    child: row * 3 + column <
-                                            selectableGalleryTags.length
-                                        ? _tag(selectableGalleryTags[
-                                            row * 3 + column])
-                                        : null)),
-                          ],
-                        ])),
-                  const SizedBox(height: 18),
-                  FilledButton.icon(
-                      onPressed: source == null || _editing
-                          ? null
-                          : () => _register(edit: true),
-                      icon: const Icon(Icons.open_in_full),
-                      label: const Text('업스케일링')),
-                  const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                      onPressed: source == null || _editing
-                          ? null
-                          : () => _register(edit: false),
-                      icon: const Icon(Icons.image_outlined),
-                      label: const Text('이미지 등록')),
-                  const SizedBox(height: 8),
-                  const Text('원본 이미지와 비율 설정을 저장합니다.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: AppTheme.muted, fontSize: 12)),
-                ]),
-          ),
-        ),
+                )),
+              ),
+            ],
+          ))),
+          if (wide && showTools)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(children: [
+                Expanded(child: _tools(colors)),
+                Padding(padding: const EdgeInsets.only(right: 16),
+                    child: SizedBox(width: 108, child: _saveButton())),
+              ]),
+            )
+          else ...[
+            if (showTools) _tools(colors),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: SizedBox(width: double.infinity, child: _saveButton()),
+            ),
+          ],
+        ])),
       ),
     );
   }
 
-  Widget _tag(String tag) {
-    final selected = _tags.contains(tag);
-    return Semantics(
-        selected: selected,
-        button: true,
-        child: OutlinedButton(
-          key: ValueKey('registration-tag-$tag'),
-          onPressed: () => setState(() {
-            selected ? _tags.remove(tag) : _tags.add(tag);
-          }),
-          style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-              foregroundColor: selected ? AppTheme.primary : AppTheme.ink,
-              backgroundColor: selected ? AppTheme.tint : AppTheme.surface,
-              side: BorderSide(
-                  color: selected ? AppTheme.primary : AppTheme.border),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10))),
-          child: Text(tag,
-              maxLines: 2,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 14)),
-        ));
-  }
+  Widget _preview(Size display) => Padding(
+        padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+        child: LayoutBuilder(builder: (_, bounds) {
+          final source = _source;
+          if (source == null) {
+            return Center(child: _error == null
+                ? const CircularProgressIndicator()
+                : Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text(_error!),
+                    TextButton(onPressed: _load, child: const Text('다시 시도')),
+                  ]));
+          }
+          return Center(child: Semantics(
+            button: true,
+            label: '사진 전체 보기',
+            child: GestureDetector(
+              key: const ValueKey('registration-preview-button'),
+              onTap: _saving ? null : _openPreview,
+              behavior: HitTestBehavior.opaque,
+              child: RegistrationImageCanvas(
+                key: ValueKey(_canvasRevision),
+                source: source,
+                crop: _crop,
+                filter: _filter,
+                cropping: _tool == _RegistrationTool.crop,
+                aspectRatio: _ratio.aspectRatio(source.size, display, editing: true),
+                onCropChanged: (crop) => setState(() => _crop = crop),
+                enabled: !_saving,
+                maxHeight: bounds.maxHeight,
+              ),
+            ),
+          ));
+        }),
+      );
+
+  Widget _tools(ColorScheme colors) => SingleChildScrollView(
+        key: const ValueKey('registration-tools'),
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(children: [
+          for (final tool in _RegistrationTool.values)
+            Padding(
+              key: _toolKeys[tool],
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: Semantics(selected: _tool == tool, child: TextButton(
+                key: ValueKey('registration-tool-${tool.name}'),
+                onPressed: _saving || tool.pending ? null : () => _selectTool(tool),
+                style: TextButton.styleFrom(
+                  foregroundColor: _tool == tool ? colors.primary : colors.onSurfaceVariant,
+                  backgroundColor: Colors.transparent,
+                  minimumSize: const Size(76, 64),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(tool.icon, size: 23),
+                  const SizedBox(height: 4),
+                  Text(tool.label, style: const TextStyle(fontSize: 12)),
+                  if (tool.pending) const Text('준비 중', style: TextStyle(fontSize: 10)),
+                ]),
+              )),
+            ),
+        ]),
+      );
+
+  Widget _saveButton() => FilledButton(
+        key: const ValueKey('save-registration'),
+        onPressed: _source == null || _saving ? null : _save,
+        child: _exporting
+            ? const SizedBox.square(dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2))
+            : const Text('저장'),
+      );
+
+  Widget _information() => LayoutBuilder(builder: (_, bounds) {
+        final name = TextFormField(
+          controller: _titleController,
+          focusNode: _titleFocus,
+          enabled: !_saving,
+          maxLength: 160,
+          textInputAction: TextInputAction.done,
+          onChanged: (_) {
+            if (_titleError != null) setState(() => _titleError = null);
+          },
+          decoration: InputDecoration(labelText: '이미지 이름', counterText: '',
+              errorText: _titleError, filled: false),
+        );
+        final tags = InkWell(
+          key: const ValueKey('registration-tag-picker'),
+          onTap: _saving ? null : _openTagPicker,
+          borderRadius: BorderRadius.circular(12),
+          child: InputDecorator(
+            decoration: const InputDecoration(labelText: '태그', filled: false,
+                suffixIcon: Icon(Icons.expand_more)),
+            child: Text(_tags.isEmpty ? '태그 선택'
+                : selectableGalleryTags.where(_tags.contains).join(', '),
+                maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+        );
+        return bounds.maxWidth >= 480
+            ? Row(children: [Expanded(child: name), const SizedBox(width: 12),
+                Expanded(child: tags)])
+            : Column(mainAxisSize: MainAxisSize.min,
+                children: [name, const SizedBox(height: 12), tags]);
+      });
+
+  Widget _filters() => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              for (final filter in PhotoFilter.values)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Semantics(
+                    selected: _filter == filter,
+                    button: true,
+                    label: '${filter.label} 필터',
+                    child: InkWell(
+                      key: ValueKey(filter),
+                      onTap: _saving
+                          ? null
+                          : () => setState(() => _filter = filter),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        width: 76,
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                width: 2,
+                                color: _filter == filter
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Theme.of(context)
+                                        .colorScheme
+                                        .outlineVariant)),
+                        child: Column(children: [
+                          if (_source case final source?)
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: ColorFiltered(
+                                  colorFilter:
+                                      ColorFilter.matrix(filter.matrix),
+                                  child: SizedBox.square(
+                                    dimension: 64,
+                                    child: Center(child: AspectRatio(
+                                      aspectRatio: source.size.aspectRatio,
+                                      child: RawImage(image: source.preview,
+                                          fit: BoxFit.contain),
+                                    )),
+                                  )),
+                            ),
+                          const SizedBox(height: 6),
+                          Text(filter.label,
+                              style: const TextStyle(fontSize: 12)),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ),
+            ]),
+          ),
+        ],
+      );
 }

@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../models/local_image.dart';
-import '../theme/app_theme.dart';
 import 'app_components.dart';
 
 class NewImageCard extends StatelessWidget {
@@ -21,14 +20,14 @@ class NewImageCard extends StatelessWidget {
     final icon = creating
         ? const SizedBox.square(
             dimension: 28, child: CircularProgressIndicator(strokeWidth: 2))
-        : Icon(Icons.add, size: isGrid ? 42 : 32, color: AppTheme.muted);
+        : Icon(Icons.add, size: isGrid ? 42 : 32, color: Theme.of(context).colorScheme.onSurfaceVariant);
     final label = Text(creating ? '등록 중...' : '새 이미지 등록',
         style: const TextStyle(fontWeight: FontWeight.w600));
     return Material(
-      color: AppTheme.tint.withValues(alpha: 0.35),
+      color: Theme.of(context).colorScheme.surfaceContainerHigh,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.zero,
-        side: const BorderSide(color: AppTheme.border),
+        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -69,11 +68,11 @@ class LocalImageCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
-  Widget _menu() => PopupMenuButton<String>(
+  Widget _menu(BuildContext context) => PopupMenuButton<String>(
         tooltip: '이미지 메뉴',
         enabled: !busy,
         icon: Icon(Icons.more_vert,
-            size: 22, color: isGrid ? Colors.white : AppTheme.muted),
+            size: 22, color: isGrid ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant),
         onSelected: (value) {
           switch (value) {
             case 'share':
@@ -85,40 +84,40 @@ class LocalImageCard extends StatelessWidget {
           }
         },
         itemBuilder: (_) => [
-          _action(
+          _action(context,
               'share', image.isShared ? '공유 취소' : '공유', Icons.share_outlined),
-          _action('edit', '수정', Icons.edit_outlined),
-          _action('delete', '삭제', Icons.delete_outline, destructive: true),
+          _action(context, 'edit', '수정', Icons.edit_outlined),
+          _action(context, 'delete', '삭제', Icons.delete_outline, destructive: true),
         ],
       );
 
-  PopupMenuItem<String> _action(String value, String title, IconData icon,
+  PopupMenuItem<String> _action(BuildContext context, String value, String title, IconData icon,
           {bool destructive = false}) =>
       PopupMenuItem(
         value: value,
         child: Row(children: [
           Icon(icon,
               size: 20,
-              color: destructive ? const Color(0xFFD93025) : AppTheme.muted),
+              color: destructive ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.onSurfaceVariant),
           const SizedBox(width: 14),
           Text(title,
               style: TextStyle(
-                  color: destructive ? const Color(0xFFD93025) : AppTheme.ink)),
+                  color: destructive ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.onSurface)),
         ]),
       );
 
-  Widget _thumbnail() => Image.file(
+  Widget _thumbnail(BuildContext context) => Image.file(
         File(image.path),
         fit: BoxFit.cover,
         cacheWidth: isGrid ? 480 : 200,
-        errorBuilder: (_, __, ___) => const ColoredBox(
-          color: AppTheme.tint,
+        errorBuilder: (_, __, ___) => ColoredBox(
+          color: Theme.of(context).colorScheme.primaryContainer,
           child:
-              Center(child: Icon(Icons.image_outlined, color: AppTheme.muted)),
+              Center(child: Icon(Icons.image_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant)),
         ),
       );
 
-  Widget _details() => Column(
+  Widget _details(BuildContext context) => Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -137,14 +136,14 @@ class LocalImageCard extends StatelessWidget {
           ]),
           const SizedBox(height: 6),
           Row(children: [
-            const Icon(Icons.sell_outlined, size: 14, color: AppTheme.muted),
+            Icon(Icons.sell_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
             const SizedBox(width: 5),
             Expanded(
                 child: Text(
               image.tags.join(' · '),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             )),
           ]),
         ],
@@ -152,11 +151,11 @@ class LocalImageCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-        color: isGrid ? AppTheme.surface : Colors.transparent,
+        color: isGrid ? Theme.of(context).colorScheme.surface : Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.zero,
           side: isGrid
-              ? const BorderSide(color: AppTheme.border)
+              ? BorderSide(color: Theme.of(context).colorScheme.outlineVariant)
               : BorderSide.none,
         ),
         clipBehavior: Clip.antiAlias,
@@ -168,31 +167,31 @@ class LocalImageCard extends StatelessWidget {
                 AspectRatio(
                     aspectRatio: 1,
                     child: Stack(fit: StackFit.expand, children: [
-                      _thumbnail(),
+                      _thumbnail(context),
                       Positioned(
                           top: 4,
                           right: 4,
                           child: Material(
                             color: Colors.black45,
                             shape: const CircleBorder(),
-                            child: _menu(),
+                            child: _menu(context),
                           )),
                     ])),
-                Padding(padding: const EdgeInsets.all(10), child: _details()),
+                Padding(padding: const EdgeInsets.all(10), child: _details(context)),
               ])
             else
               Padding(
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   child: Row(children: [
-                    SizedBox.square(dimension: 80, child: _thumbnail()),
+                    SizedBox.square(dimension: 80, child: _thumbnail(context)),
                     const SizedBox(width: 14),
-                    Expanded(child: _details()),
-                    _menu(),
+                    Expanded(child: _details(context)),
+                    _menu(context),
                   ])),
             if (busy)
-              const Positioned.fill(
+              Positioned.fill(
                   child: ColoredBox(
-                color: Color(0x55FFFFFF),
+                color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.65),
                 child: Center(
                     child: SizedBox.square(
                   dimension: 26,

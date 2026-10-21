@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'models/image_editor.dart';
 import 'models/image_ratio.dart';
 import 'services/image_editor_service.dart';
-import 'theme/app_theme.dart';
 import 'widgets/app_components.dart';
 import 'widgets/device_display_builder.dart';
 import 'widgets/image_ratio_selector.dart';
@@ -172,7 +171,7 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
     return PopScope(
       canPop: !_saving,
       child: Scaffold(
-        appBar: AppBar(title: const Text('이미지 수정'), actions: [
+        appBar: AppBar(title: Text('이미지 수정'), actions: [
           IconButton(
               tooltip: '편집 초기화',
               onPressed: source == null || _saving
@@ -219,7 +218,7 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                                         Text(_error!),
                                         TextButton(
                                             onPressed: _load,
-                                            child: const Text('다시 시도')),
+                                            child: Text('다시 시도')),
                                       ]))
                         : LayoutBuilder(builder: (context, constraints) {
                             final geometry = _geometry!;
@@ -250,9 +249,9 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                           }),
                   ),
                   const SizedBox(height: 10),
-                  const Text('두 손가락으로 확대·축소',
+                  Text('두 손가락으로 확대·축소',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: AppTheme.muted, fontSize: 12)),
+                      style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
                   const SizedBox(height: 12),
                   Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                     Flexible(child: _tool(false, Icons.tune, '필터')),
@@ -260,7 +259,7 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                         width: 1,
                         height: 24,
                         margin: const EdgeInsets.symmetric(horizontal: 12),
-                        color: AppTheme.border),
+                        color: Theme.of(context).colorScheme.outlineVariant),
                     Flexible(child: _tool(true, Icons.crop, '자르기')),
                   ]),
                   const Divider(height: 24),
@@ -273,9 +272,9 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                             ? null
                             : (ratio) => setState(() => _ratio = ratio)),
                     const SizedBox(height: 8),
-                    const Text('모서리를 드래그해 자르기 영역을 조절하세요.',
+                    Text('모서리를 드래그해 자르기 영역을 조절하세요.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: AppTheme.muted, fontSize: 12)),
+                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
                   ] else if (source != null) ...[
                     const AppSectionTitle('필터'),
                     const SizedBox(height: 10),
@@ -313,15 +312,15 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
               },
         style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-            foregroundColor: selected ? AppTheme.primary : AppTheme.ink,
-            backgroundColor: selected ? AppTheme.tint : AppTheme.surface,
+            foregroundColor: selected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurface,
+            backgroundColor: selected ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.surface,
             side: BorderSide(
-                color: selected ? AppTheme.primary : AppTheme.border)),
+                color: selected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.outlineVariant)),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Text(label, textAlign: TextAlign.center),
           if (pending)
-            const Text('준비 중',
-                style: TextStyle(fontSize: 10, color: AppTheme.muted)),
+            Text('준비 중',
+                style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)),
         ]),
       );
 
@@ -329,7 +328,7 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
       onPressed: _saving ? null : () => setState(() => _cropTab = crop),
       style: TextButton.styleFrom(
           foregroundColor:
-              _cropTab == crop ? AppTheme.primary : AppTheme.muted),
+              _cropTab == crop ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurfaceVariant),
       icon: Icon(icon),
       label: Text(label));
 
@@ -350,8 +349,8 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                           color: _filter == filter
-                              ? AppTheme.primary
-                              : AppTheme.border,
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).colorScheme.outlineVariant,
                           width: 2)),
                   child: Column(children: [
                     ClipRRect(
@@ -369,8 +368,8 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                         style: TextStyle(
                             fontSize: 12,
                             color: _filter == filter
-                                ? AppTheme.primary
-                                : AppTheme.ink)),
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context).colorScheme.onSurface)),
                   ])),
             )),
       );
