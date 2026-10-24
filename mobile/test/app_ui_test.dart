@@ -69,6 +69,8 @@ void main() {
   var imports = 0;
   var failWallpaperApply = false;
   var failSharedDownload = false;
+  String? clearedTarget;
+  var failWallpaperClear = false;
   Map<Object?, Object?>? appliedLocalWallpaper;
   const pickerChannel = MethodChannel('plugins.flutter.io/image_picker');
   const wallpaperChannel = MethodChannel('live_layer/wallpaper');
@@ -100,6 +102,8 @@ void main() {
     imports = 0;
     failWallpaperApply = false;
     failSharedDownload = false;
+    clearedTarget = null;
+    failWallpaperClear = false;
     appliedLocalWallpaper = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(pickerChannel, (call) async {
@@ -118,6 +122,14 @@ void main() {
       }
       if (call.method == 'applyLocalStaticWallpaper') {
         appliedWallpaper = Map<Object?, Object?>.from(call.arguments as Map);
+        return null;
+      }
+      if (call.method == 'clearWallpaper') {
+        if (failWallpaperClear) {
+          throw PlatformException(
+            code: 'wallpaper_clear_failed', message: '배경화면을 제거하지 못했습니다.');
+        }
+        clearedTarget = (call.arguments as Map)['target'] as String;
         return null;
       }
       throw StateError('Unexpected wallpaper method: ${call.method}');
@@ -1141,6 +1153,82 @@ void main() {
     expect(appliedLocalWallpaper, isNull);
   });
 
+  for (final target in WallpaperTarget.values) {
+    testWidgets('settings removes only $target and retains library images', (tester) async {
+      await show(tester, home(), size: const Size(320, 640), scale: 1.6);
+      await tester.tap(find.text('설정'));
+      await tester.pumpAndSettle();
+      final remove = find.widgetWithText(ListTile, '배경화면 제거');
+      await tester.ensureVisible(remove);
+      await tester.pumpAndSettle();
+      await tester.tap(remove);
+      await tester.pumpAndSettle();
+      final confirm = find.byKey(const ValueKey('confirm-wallpaper-remove'));
+      expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
+      expect(clearedTarget, isNull);
+      if (target != WallpaperTarget.lock) {
+        await tester.tap(find.byKey(const ValueKey('remove-wallpaper-home')));
+      }
+      if (target != WallpaperTarget.home) {
+        await tester.tap(find.byKey(const ValueKey('remove-wallpaper-lock')));
+      }
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(confirm);
+      await tester.tap(confirm);
+      await tester.pumpAndSettle();
+      expect(clearedTarget, target.name);
+      expect(images.length, 2);
+      expect(localWrites, 0);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('clearing both checkboxes and cancelling never removes wallpaper', (tester) async {
+    await show(tester, home());
+    await tester.tap(find.text('설정'));
+    await tester.pumpAndSettle();
+    final remove = find.widgetWithText(ListTile, '배경화면 제거');
+    await tester.ensureVisible(remove);
+    await tester.pumpAndSettle();
+    await tester.tap(remove);
+    await tester.pumpAndSettle();
+    for (final name in ['home', 'lock', 'home', 'lock']) {
+      await tester.tap(find.byKey(ValueKey('remove-wallpaper-$name')));
+      await tester.pumpAndSettle();
+    }
+    expect(tester.widget<FilledButton>(find.byKey(const ValueKey('confirm-wallpaper-remove'))).onPressed, isNull);
+    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('취소')));
+    await tester.pumpAndSettle();
+    expect(clearedTarget, isNull);
+    expect(images.length, 2);
+  });
+
+  testWidgets('a failed wallpaper removal reports failure and can be retried', (tester) async {
+    await show(tester, home());
+    await tester.tap(find.text('설정'));
+    await tester.pumpAndSettle();
+    final remove = find.widgetWithText(ListTile, '배경화면 제거');
+    await tester.ensureVisible(remove);
+    await tester.pumpAndSettle();
+    Future<void> chooseHome() async {
+      await tester.tap(remove);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('remove-wallpaper-home')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('confirm-wallpaper-remove')));
+      await tester.pumpAndSettle();
+    }
+    failWallpaperClear = true;
+    await chooseHome();
+    expect(clearedTarget, isNull);
+    expect(find.text('배경화면을 제거하지 못했습니다.'), findsOneWidget);
+    failWallpaperClear = false;
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await chooseHome();
+    expect(clearedTarget, 'home');
+  });
+
   testWidgets('small home supports both layouts, the editor, and settings',
       (tester) async {
     await show(tester, home(), size: const Size(320, 640), scale: 1.6);
@@ -1154,7 +1242,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('설정'));
     await tester.pumpAndSettle();
-    expect(find.text('홈 배경화면 제거'), findsOneWidget);
+    expect(find.text('배경화면 제거'), findsOneWidget);
     expect(find.text('로그아웃'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

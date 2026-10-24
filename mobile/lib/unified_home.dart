@@ -23,12 +23,11 @@ import 'widgets/app_components.dart';
 import 'widgets/device_display_builder.dart';
 import 'widgets/gallery_tag_picker.dart';
 import 'widgets/image_edit_dialog.dart';
+import 'widgets/wallpaper_remove_dialog.dart';
 import 'widgets/local_image_card.dart';
 
 export 'image_registration_page.dart';
 export 'gallery_preview_page.dart';
-
-const _wallpaperChannel = MethodChannel('live_layer/wallpaper');
 
 class GallerySearchSelection {
   String search = '';
@@ -223,14 +222,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
         if (!mounted) return;
         _reload();
 
-        if (options.applyLive2D) {
-          try {
-            await _localImageStore.applyLive2D(saved.id);
-            _message('Live 2D를 저장했습니다. Android 설정 화면에서 적용을 완료해 주세요.');
-          } catch (error) {
-            _message('Live 2D는 저장했지만 설정 화면을 열지 못했습니다.\n$error');
-          }
-        } else if (target != null) {
+        if (target != null) {
           try {
             await _localImageStore.applyWallpaper(saved.id, target: target);
             _message('이미지를 저장하고 배경화면을 적용했습니다.');
@@ -447,29 +439,16 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
 
   Future<void> _removeWallpaper() async {
     if (_removingWallpaper) return;
-    final confirmed = await showDialog<bool>(
+    final target = await showDialog<WallpaperTarget>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('홈 배경화면 제거'),
-        content: Text('현재 Android 홈 배경화면만 기본 배경으로 되돌릴까요? 등록된 이미지는 삭제되지 않습니다.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text('배경화면 제거'),
-          ),
-        ],
-      ),
+      builder: (_) => const WallpaperRemoveDialog(),
     );
-    if (confirmed != true || !mounted) return;
+    if (target == null || !mounted) return;
 
     setState(() => _removingWallpaper = true);
     try {
-      await _wallpaperChannel.invokeMethod<void>('clearHomeWallpaper');
-      _message('홈 배경화면을 제거했습니다. 등록된 이미지는 유지됩니다.');
+      await const WallpaperService().clear(target: target);
+      _message('선택한 배경화면을 제거했습니다. 등록된 이미지는 유지됩니다.');
     } on PlatformException catch (error) {
       _message(error.message ?? '$error');
     } finally {
@@ -734,7 +713,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
             child: Column(children: [
           ListTile(
             leading: Icon(Icons.wallpaper_outlined),
-            title: Text('홈 배경화면 제거'),
+            title: Text('배경화면 제거'),
             subtitle: Text('등록한 이미지는 보관됩니다.'),
             trailing: Icon(Icons.chevron_right),
             enabled: !_removingWallpaper,
@@ -1252,6 +1231,22 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
   late Future<Map<Object?, Object?>>? _layers =
       _live2D ? widget.store.live2DLayers(widget.image.id) : null;
   WallpaperTarget _target = WallpaperTarget.home;
+  bool _targetTouched = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_live2D) {
+      _syncLiveTarget();
+    }
+  }
+
+  Future<void> _syncLiveTarget() async {
+    final target = await Live2DService.activeTarget();
+    if (mounted && !_targetTouched && target != null) {
+      setState(() => _target = target);
+    }
+  }
 
   Future<void> _convertLive2D() async {
     final draft = await Navigator.of(context).push<Live2DDraft>(
@@ -1267,6 +1262,7 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
           _live2D = true;
           _layers = widget.store.live2DLayers(widget.image.id);
         });
+        _syncLiveTarget();
       }
     } catch (error) {
       if (mounted) {
@@ -1280,27 +1276,49 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
   }
 
   Future<void> _apply() async {
+    ScaffoldMessenger.of(context).clearSnackBars();
     setState(() => _busy = true);
     try {
-      if (_live2D) {
-        await widget.store.applyLive2D(widget.image.id);
-      } else {
-        await widget.store.applyWallpaper(widget.image.id, target: _target);
-      }
+      await widget.store.applyWallpaper(widget.image.id, target: _target);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(_live2D
-              ? 'Android 설정 화면에서 Live 2D 적용을 완료해 주세요.'
-              : '배경화면을 적용했습니다.')));
+          content: const Text('배경화면을 적용했습니다.')));
     } on PlatformException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message ?? '$e')));
+            .showSnackBar(SnackBar(
+                content: Text(e.message ?? '$e'),
+                action: _live2D && e.code == 'live2d_activation_required'
+                    ? SnackBarAction(label: 'Live 2D 활성화', onPressed: _activateLive2D)
+                    : null));
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('적용하지 못했습니다: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _activateLive2D() async {
+    if (_busy) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    setState(() => _busy = true);
+    try {
+      final confirmed = await widget.store.activateLive2D(widget.image.id);
+      if (mounted && confirmed) {
+        _targetTouched = false;
+        await _syncLiveTarget();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Live 2D를 활성화했습니다. 이후 같은 화면에는 미리보기 없이 적용됩니다.')));
+      }
+    } on PlatformException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message ?? 'Live 2D를 활성화하지 못했습니다.')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -1321,7 +1339,6 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (!_live2D)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
@@ -1353,6 +1370,7 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
                                 : (value) {
                                     if (value != null) {
                                       setState(() => _target = value);
+                                      _targetTouched = true;
                                     }
                                   },
                           ),
@@ -1364,6 +1382,12 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
                           onPressed: _busy ? null : _convertLive2D,
                           icon: const Icon(Icons.view_in_ar_outlined),
                           label: const Text('Live 2D')),
+                    if (_live2D)
+                      TextButton.icon(
+                          key: const ValueKey('activate-saved-live2d'),
+                          onPressed: _busy ? null : _activateLive2D,
+                          icon: const Icon(Icons.view_in_ar_outlined),
+                          label: const Text('Live 2D 활성화 · 대상 변경')),
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
@@ -1375,7 +1399,7 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
                                     CircularProgressIndicator(strokeWidth: 2),
                               )
                             : Icon(Icons.wallpaper),
-                        label: Text(_live2D ? 'Live 2D 배경화면 설정' : '배경화면 설정'),
+                        label: const Text('배경화면 설정'),
                       ),
                     ),
                   ],

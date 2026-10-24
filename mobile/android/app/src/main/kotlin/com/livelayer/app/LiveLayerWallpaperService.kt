@@ -67,7 +67,7 @@ class LiveLayerWallpaperService : WallpaperService() {
         }
 
         override fun onSharedPreferenceChanged(preferences: SharedPreferences?, key: String?) {
-            if (key == "manifest_path" && !isPreview) {
+            if ((key == "manifest_path" || key == "direct_manifest_path") && !isPreview) {
                 loadedManifest = null
                 lifecycle.selectionChanged()
             }
@@ -119,8 +119,13 @@ class LiveLayerWallpaperService : WallpaperService() {
 
         private fun loadActiveProject(width: Int, height: Int) {
             if (width <= 0 || height <= 0) return
-            val path = (if (isPreview) previewManifest else describedManifest)
-                ?: preferences.getString("manifest_path", null) ?: return
+            val base = (if (isPreview) previewManifest else describedManifest)
+                ?: preferences.getString("manifest_path", null)
+            val direct = if (isPreview) null else preferences.getString("direct_manifest_path", null)
+            fun revision(path: String?): Long = path?.let {
+                runCatching { JSONObject(File(it).readText()).optLong("selectionRevision", 0) }.getOrDefault(0)
+            } ?: 0
+            val path = LiveWallpaperSelection.choose(base, revision(base), direct, revision(direct)) ?: return
             if (loadedManifest == path && layers.isNotEmpty()) return
             recycle()
             try {

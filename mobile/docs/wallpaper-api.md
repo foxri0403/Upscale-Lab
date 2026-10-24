@@ -48,8 +48,12 @@ completion. Refresh short-lived S3 URLs before calling `applyRemote`.
 
 `previewWallpaper` opens the device's crop/set screen, which controls its own target
 selection. To enforce an in-app target choice, call `applyWallpaper` or
-`WallpaperService` directly. Live wallpaper application continues to use Android's
-required confirmation screen; this API applies static image sources. Removal uses
+`WallpaperService` directly. Owned Live 2D images use the same `applyWallpaper`
+entry point and update the active service without opening a preview. The selected
+destination combination must match this service's currently active destinations;
+otherwise `live2d_activation_required` is returned without changing a wallpaper.
+Initial service activation or destination changes use a separate explicit
+`activateLive2D` action in the Live 2D controls and require Android confirmation. Removal uses
 Android's wallpaper reset API and can also reset a live wallpaper on a selected
 screen when the OS supports it.
 
@@ -61,11 +65,16 @@ screen when the OS supports it.
 | `live_layer/wallpaper` | `applyLocalStaticWallpaper` | `sourcePath`, `target`, optional `ratio` |
 | `live_layer/wallpaper` | `applyStaticWallpaper` | `url`, `target`, optional `ratio` |
 | `live_layer/wallpaper` | `clearWallpaper` | `target` |
+| `live_layer/storage` | `activateLocalLive2D` | `scope`, `ownerId`, `id` |
+| `live_layer/wallpaper` | `activateLive2DDraft` | `draftId` |
+| `live_layer/wallpaper` | `getActiveLive2DTarget` | none (returns Android flags, or `0`) |
 
 The wire target is exactly `home`, `lock`, or `both`. An omitted/null target defaults
 to `home` for existing callers. Invalid values fail with `invalid_target`.
-`clearHomeWallpaper` remains a home-only compatibility alias. No UI files need to
-change to preserve existing behavior.
+`clearHomeWallpaper` remains a home-only compatibility alias. Settings use one
+**배경화면 제거** action with independent home/lock checkboxes, disabled deletion
+when neither is selected, and **취소 / 삭제** actions. Activation returns `true`
+only after Android confirms the selection; cancelling returns `false`.
 
 All account-scoped storage operations now carry both the legacy server/account
 `scope` and the stable authenticated `ownerId`. Android resolves registered images
@@ -73,9 +82,9 @@ from its permanent private `files/image_library/<owner>/<image>/` directory.
 Pixels and metadata are separate files; gallery permissions and app-cache working
 copies are unnecessary for normal library operations. The scope remains in use for
 sorting and migration of the previous app-private library. An owned `mode=live2d`
-record always opens the live wallpaper service, including through the generic
-`applyLocalWallpaper`/`previewLocalWallpaper` bridge, and is never flattened to a
-static source. See [private image storage](../../docs/private-image-storage.md).
+record stays live through the generic `applyLocalWallpaper` bridge and is never
+flattened to a static source. `previewLocalWallpaper` is a separate explicit preview
+operation. See [private image storage](../../docs/private-image-storage.md).
 
 Local and remote application also accept an optional `ratio` map. An omitted
 ratio defaults to automatic, which detects the full applying display and center

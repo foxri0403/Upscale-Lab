@@ -26,7 +26,6 @@ class ImageRegistrationOptions {
     this.upscaleFactor,
     this.wallpaperTarget,
     this.live2D,
-    this.applyLive2D = false,
   });
   final String title;
   final List<String> tags;
@@ -35,7 +34,6 @@ class ImageRegistrationOptions {
   final ImageRatioSettings ratio;
   final WallpaperTarget? wallpaperTarget;
   final Live2DDraft? live2D;
-  final bool applyLive2D;
 }
 
 enum _RegistrationTool {
@@ -198,23 +196,6 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     EditedImageFile? edited;
     Live2DDraft? prepared;
     try {
-      final applyLive2D = _live2D == null
-          ? false
-          : await showDialog<bool>(
-              context: context,
-              builder: (context) => AlertDialog(
-                      title: const Text('Live 2D 저장'),
-                      content: const Text(
-                          '적용을 선택하면 Android 라이브 배경화면 설정 화면이 열립니다. 적용 화면은 Android에서 선택합니다.'),
-                      actions: [
-                        TextButton(
-                            onPressed: () => Navigator.pop(context, false),
-                            child: const Text('보관함에 저장')),
-                        FilledButton(
-                            onPressed: () => Navigator.pop(context, true),
-                            child: const Text('저장 후 적용')),
-                      ]));
-      if (!mounted || applyLive2D == null) return;
       final selection = _live2D != null
           ? const WallpaperSaveSelection()
           : await showDialog<WallpaperSaveSelection>(
@@ -257,7 +238,6 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                 : _ratio,
             wallpaperTarget: selection.target,
             live2D: prepared,
-            applyLive2D: applyLive2D,
           ));
       prepared = null;
     } catch (_) {

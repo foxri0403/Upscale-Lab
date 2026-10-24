@@ -24,6 +24,7 @@ class Live2DPage extends StatefulWidget {
 class _Live2DPageState extends State<Live2DPage> {
   Live2DDraft? _draft;
   bool _processing = true;
+  bool _activating = false;
   String? _error;
   String _layer = 'composite';
   @override
@@ -86,6 +87,32 @@ class _Live2DPageState extends State<Live2DPage> {
     }
   }
 
+  Future<void> _activate() async {
+    final draft = _draft;
+    if (draft == null || _processing || _activating) return;
+    setState(() => _activating = true);
+    Live2DDraft? edited;
+    try {
+      edited = await Live2DService.export(draft,
+          crop: widget.crop, filter: widget.filter);
+      final confirmed = await Live2DService.activate(edited);
+      if (mounted && confirmed) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Live 2D를 활성화했습니다. 이후 같은 화면에는 미리보기 없이 적용됩니다.')));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Live 2D를 활성화하지 못했습니다. 다시 시도해 주세요.')));
+      }
+    } finally {
+      if (edited != null && edited.id != draft.id) {
+        await Live2DService.discard(edited);
+      }
+      if (mounted) setState(() => _activating = false);
+    }
+  }
+
   @override
   void dispose() {
     Live2DService.discard(_draft);
@@ -96,7 +123,7 @@ class _Live2DPageState extends State<Live2DPage> {
   Widget build(BuildContext context) {
     final draft = _draft;
     return PopScope(
-        canPop: !_processing,
+        canPop: !_processing && !_activating,
         child: Scaffold(
             appBar: AppBar(title: const Text('Live 2D')),
             body: SafeArea(
@@ -146,35 +173,68 @@ class _Live2DPageState extends State<Live2DPage> {
                                                   filter: widget.filter,
                                                   layer: _layer)))),
                           const SizedBox(height: 12),
-                          if (draft != null) ...[
-                            SegmentedButton<String>(
-                                segments: const [
-                                  ButtonSegment(
-                                      value: 'composite', label: Text('미리보기')),
-                                  ButtonSegment(
-                                      value: 'background', label: Text('배경')),
-                                  ButtonSegment(
-                                      value: 'foreground',
-                                      label: Text('인물·사물')),
-                                ],
-                                selected: {
-                                  _layer
-                                },
-                                onSelectionChanged: (value) =>
-                                    setState(() => _layer = value.first)),
-                            const SizedBox(height: 12),
-                            const Text(
-                                '기기를 기울여 보세요. 배경은 고정되고 인물·사물만 움직입니다.\n가려진 배경은 주변 색으로 채워져 실제 배경과 다를 수 있습니다.',
-                                textAlign: TextAlign.center),
-                            const SizedBox(height: 12),
-                            FilledButton(
-                                key: const ValueKey('use-live2d'),
-                                onPressed: _processing ? null : _use,
-                                child: const Text('Live 2D 사용')),
-                          ] else
-                            const Text(
-                                '최초 사용 시 Google Play 서비스의 분리 모델 다운로드가 필요합니다.\n자이로 센서가 없는 기기에서는 정지 이미지로 표시됩니다.',
-                                textAlign: TextAlign.center),
+                          Flexible(
+                              child: SingleChildScrollView(
+                                  child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                if (draft != null) ...[
+                                  SegmentedButton<String>(
+                                      segments: const [
+                                        ButtonSegment(
+                                            value: 'composite',
+                                            label: Text('미리보기')),
+                                        ButtonSegment(
+                                            value: 'background',
+                                            label: Text('배경')),
+                                        ButtonSegment(
+                                            value: 'foreground',
+                                            label: Text('인물·사물')),
+                                      ],
+                                      selected: {
+                                        _layer
+                                      },
+                                      onSelectionChanged: (value) =>
+                                          setState(() => _layer = value.first)),
+                                  const SizedBox(height: 12),
+                                  const Text(
+                                      '기기를 기울여 보세요. 배경은 고정되고 인물·사물만 움직입니다.\n가려진 배경은 주변 색으로 채워져 실제 배경과 다를 수 있습니다.',
+                                      textAlign: TextAlign.center),
+                                  const SizedBox(height: 12),
+                                  FilledButton(
+                                      key: const ValueKey('use-live2d'),
+                                      onPressed: _processing || _activating
+                                          ? null
+                                          : _use,
+                                      child: const Text('Live 2D 사용')),
+                                  const SizedBox(height: 8),
+                                  TextButton(
+                                      key: const ValueKey('activate-live2d'),
+                                      onPressed: _processing || _activating
+                                          ? null
+                                          : _activate,
+                                      child: _activating
+                                          ? const Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                  SizedBox.square(
+                                                      dimension: 16,
+                                                      child:
+                                                          CircularProgressIndicator(
+                                                              strokeWidth: 2)),
+                                                  SizedBox(width: 8),
+                                                  Text('활성화 확인 중…')
+                                                ])
+                                          : const Text('배경화면에서 Live 2D 활성화')),
+                                  const Text(
+                                      '최초 활성화·대상 변경에는 Android 확인이 필요하며 현재 이미지가 배경화면에 적용됩니다. 저장만 할 때는 활성화하지 않아도 됩니다.',
+                                      textAlign: TextAlign.center),
+                                ] else
+                                  const Text(
+                                      '최초 사용 시 Google Play 서비스의 분리 모델 다운로드가 필요합니다.\n자이로 센서가 없는 기기에서는 정지 이미지로 표시됩니다.',
+                                      textAlign: TextAlign.center),
+                              ]))),
                         ])))));
   }
 }

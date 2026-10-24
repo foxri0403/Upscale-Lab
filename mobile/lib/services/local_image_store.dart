@@ -25,8 +25,11 @@ class LocalImageStore {
       (await _channel.invokeMapMethod<Object?, Object?>(
           'getLocalLive2D', {'scope': scope, 'ownerId': ownerId, 'id': id}))!;
 
-  Future<void> applyLive2D(String id) => _channel.invokeMethod<void>(
-      'applyLocalLive2D', {'scope': scope, 'ownerId': ownerId, 'id': id});
+  /// Android's required activation belongs to the Live 2D controls, not Apply.
+  Future<bool> activateLive2D(String id) async =>
+      await _channel.invokeMethod<bool>('activateLocalLive2D',
+          {'scope': scope, 'ownerId': ownerId, 'id': id}) ??
+      false;
 
   Future<LibraryOrder> getOrder() async =>
       LibraryOrder.fromMap(await _channel.invokeMapMethod<Object?, Object?>(

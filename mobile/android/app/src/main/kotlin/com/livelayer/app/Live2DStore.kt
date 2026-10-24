@@ -204,13 +204,30 @@ internal class Live2DStore(private val context: Context) {
     fun activate(owner: String, imageId: String): File {
         layers(owner, imageId)
         val source = File(ownerDirectory(owner), safeId(imageId))
+        return snapshot(source)
+    }
+
+    fun activateDraft(draftId: String): File = snapshot(File(drafts, safeId(draftId)))
+
+    private fun snapshot(source: File): File {
+        require(listOf("manifest.json", "background.png", "foreground.png").all { File(source, it).isFile }) {
+            "Live 2D 레이어가 없습니다. 다시 분리해 주세요."
+        }
         // The wallpaper must survive deletion/logout of the library item.
         val root = File(context.filesDir, "wallpapers")
         val destination = File(root, "live2d-${UUID.randomUUID()}")
         try {
             check(source.copyRecursively(destination))
-            return File(destination, "manifest.json")
+            return stampSelection(File(destination, "manifest.json"))
         } catch (error: Exception) { destination.deleteRecursively(); throw error }
+    }
+
+    fun stampSelection(manifest: File): File {
+        val preferences = context.getSharedPreferences("live_layer", Context.MODE_PRIVATE)
+        val revision = preferences.getLong("selection_revision", 0) + 1
+        check(preferences.edit().putLong("selection_revision", revision).commit())
+        manifest.writeText(JSONObject(manifest.readText()).put("selectionRevision", revision).toString())
+        return manifest
     }
 
     fun discardWallpaper(manifestPath: String?) {

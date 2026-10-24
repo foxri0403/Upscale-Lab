@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'dart:ui' as ui;
 import '../models/image_editor.dart';
 import 'image_editor_service.dart';
+import 'wallpaper_service.dart';
 
 class Live2DDraft {
   const Live2DDraft(
@@ -31,6 +32,25 @@ abstract final class Live2DService {
   static Future<Live2DDraft> split(String path) async =>
       Live2DDraft.fromMap((await _channel.invokeMapMethod<Object?, Object?>(
           'splitLive2D', {'sourcePath': path}))!);
+
+  static Future<bool> activate(Live2DDraft draft) async =>
+      await _channel
+          .invokeMethod<bool>('activateLive2DDraft', {'draftId': draft.id}) ??
+      false;
+
+  static Future<WallpaperTarget?> activeTarget() async {
+    try {
+      return switch (
+          await _channel.invokeMethod<int>('getActiveLive2DTarget')) {
+        1 => WallpaperTarget.home,
+        2 => WallpaperTarget.lock,
+        3 => WallpaperTarget.both,
+        _ => null,
+      };
+    } on PlatformException {
+      return null;
+    }
+  }
 
   /// Keep the separation untouched while editing. Bake the same crop/filter
   /// into both planes only when saving, preserving the foreground alpha.
