@@ -62,11 +62,11 @@ object WallpaperImageProcessor {
         }
     }
 
-    private fun decode(file: File): Bitmap {
+    internal fun decode(file: File, maxSide: Int = MAX_SIDE): Bitmap {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             return ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { decoder, info, _ ->
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                val factor = min(1.0, MAX_SIDE.toDouble() / max(info.size.width, info.size.height))
+                val factor = min(1.0, maxSide.toDouble() / max(info.size.width, info.size.height))
                 decoder.setTargetSize(max(1, (info.size.width * factor).roundToInt()),
                     max(1, (info.size.height * factor).roundToInt()))
             }
@@ -75,7 +75,7 @@ object WallpaperImageProcessor {
         BitmapFactory.decodeFile(file.absolutePath, bounds)
         require(bounds.outWidth > 0 && bounds.outHeight > 0) { "이미지를 읽을 수 없습니다." }
         var sample = 1
-        while (max(bounds.outWidth, bounds.outHeight) / sample > MAX_SIDE) sample *= 2
+        while (max(bounds.outWidth, bounds.outHeight) / sample > maxSide) sample *= 2
         val source = BitmapFactory.decodeFile(file.absolutePath,
             BitmapFactory.Options().apply { inSampleSize = sample })
             ?: error("이미지를 읽을 수 없습니다.")

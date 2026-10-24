@@ -653,7 +653,7 @@ void main() {
   });
 
   testWidgets(
-      'editor switches directional ratios and keeps conversion buttons pending',
+      'editor switches directional ratios and enables Live 2D conversion',
       (tester) async {
     await show(tester, ImageEditorPage(filePath: imagePath));
     expect(find.text('홈 화면에 적용'), findsNothing);
@@ -668,13 +668,14 @@ void main() {
       expect(find.text(portrait ? '3:4' : '4:3'), findsOneWidget);
       expect(find.text(portrait ? '16:9' : '9:16'), findsNothing);
     }
-    for (final feature in ['업스케일', '2.5D 변환']) {
+    for (final feature in ['업스케일']) {
       final button = find.widgetWithText(OutlinedButton, feature);
       await tester.ensureVisible(button);
       await tester.tap(button);
       await tester.pumpAndSettle();
       expect(find.text('$feature 기능은 준비 중입니다.'), findsOneWidget);
     }
+    expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Live 2D')).onPressed, isNotNull);
     final filters = find.widgetWithText(TextButton, '필터');
     await tester.ensureVisible(filters);
     await tester.tap(filters);
@@ -901,7 +902,7 @@ void main() {
                 .widget<TextButton>(
                     find.byKey(ValueKey('registration-tool-$tool')))
                 .onPressed,
-            isNull);
+              isNotNull);
       }
       await tester.tap(find.byKey(const ValueKey('save-registration')));
       await tester.pumpAndSettle();

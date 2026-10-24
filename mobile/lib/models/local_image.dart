@@ -31,6 +31,7 @@ class LocalImageItem {
   final ImageRatioSettings ratio;
 
   bool get isShared => cloudProjectId != null && galleryPostId != null;
+  bool get isLive2D => mode == 'live2d';
 
   factory LocalImageItem.fromPlatformMap(Map<Object?, Object?> map) {
     return LocalImageItem(

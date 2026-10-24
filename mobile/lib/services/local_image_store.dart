@@ -13,6 +13,17 @@ class LocalImageStore {
 
   static const _channel = MethodChannel('live_layer/storage');
 
+  Future<void> attachLive2D(String id, String draftId) =>
+      _channel.invokeMethod<void>('attachLocalLive2D',
+          {'scope': scope, 'ownerId': ownerId, 'id': id, 'draftId': draftId});
+
+  Future<Map<Object?, Object?>> live2DLayers(String id) async =>
+      (await _channel.invokeMapMethod<Object?, Object?>(
+          'getLocalLive2D', {'scope': scope, 'ownerId': ownerId, 'id': id}))!;
+
+  Future<void> applyLive2D(String id) => _channel.invokeMethod<void>(
+      'applyLocalLive2D', {'scope': scope, 'ownerId': ownerId, 'id': id});
+
   Future<LibraryOrder> getOrder() async =>
       LibraryOrder.fromMap(await _channel.invokeMapMethod<Object?, Object?>(
               'getLibraryOrder', {'scope': scope, 'ownerId': ownerId}) ??

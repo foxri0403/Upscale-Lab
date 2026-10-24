@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show OverflowBoxFit;
+import 'live_2d_page.dart';
+import 'services/live_2d_service.dart';
+import 'widgets/live_2d_preview.dart';
 
 import 'models/gallery_tags.dart';
 import 'models/image_editor.dart';
@@ -22,6 +25,8 @@ class ImageRegistrationOptions {
     this.ratio = const ImageRatioSettings(),
     this.upscaleFactor,
     this.wallpaperTarget,
+    this.live2D,
+    this.applyLive2D = false,
   });
   final String title;
   final List<String> tags;
@@ -29,6 +34,8 @@ class ImageRegistrationOptions {
   final int? upscaleFactor;
   final ImageRatioSettings ratio;
   final WallpaperTarget? wallpaperTarget;
+  final Live2DDraft? live2D;
+  final bool applyLive2D;
 }
 
 enum _RegistrationTool {
@@ -36,12 +43,11 @@ enum _RegistrationTool {
   crop('자르기', Icons.crop),
   filter('필터', Icons.filter_vintage_outlined),
   upscale('업스케일', Icons.open_in_full),
-  parallax('2.5D', Icons.view_in_ar_outlined);
+  parallax('Live 2D', Icons.view_in_ar_outlined);
 
   const _RegistrationTool(this.label, this.icon);
   final String label;
   final IconData icon;
-  bool get pending => this == parallax;
 }
 
 class ImageFeaturePage extends StatefulWidget {
@@ -72,6 +78,31 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   PhotoFilter _filter = PhotoFilter.original;
   Rect _crop = const Rect.fromLTWH(0, 0, 1, 1);
   int _canvasRevision = 0;
+  Live2DDraft? _live2D;
+
+  void _clearLive2D() {
+    final draft = _live2D;
+    _live2D = null;
+    Live2DService.discard(draft);
+  }
+
+  Future<void> _openLive2D() async {
+    if (_source == null || _saving) return;
+    final result = await Navigator.of(context).push<Live2DDraft>(
+        MaterialPageRoute(
+            builder: (_) => Live2DPage(
+                sourcePath: widget.filePath, crop: _crop, filter: _filter)));
+    if (result == null) return;
+    if (!mounted) {
+      await Live2DService.discard(result);
+      return;
+    }
+    _clearLive2D();
+    setState(() {
+      _live2D = result;
+      _tool = _RegistrationTool.parallax;
+    });
+  }
 
   @override
   void initState() {
@@ -95,6 +126,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
 
   @override
   void dispose() {
+    _clearLive2D();
     _source?.preview.dispose();
     _titleFocus.dispose();
     _titleController.dispose();
@@ -103,6 +135,13 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
 
   void _selectTool(_RegistrationTool tool) {
     FocusScope.of(context).unfocus();
+    if (tool == _RegistrationTool.parallax) {
+      _openLive2D();
+      return;
+    }
+    if (tool == _RegistrationTool.upscale || tool == _RegistrationTool.crop) {
+      _clearLive2D();
+    }
     setState(() => _tool = tool);
     final toolContext = _toolKeys[tool]!.currentContext;
     if (toolContext != null) {
@@ -125,6 +164,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   void _openPreview() {
     final source = _source;
     if (source == null || _saving) return;
+    if (_live2D != null) return;
     FocusScope.of(context).unfocus();
     Navigator.of(context).push<void>(
       MaterialPageRoute(
@@ -150,8 +190,27 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     setState(() => _saving = true);
     EditedImageFile? edited;
     try {
-      final selection = await showDialog<WallpaperSaveSelection>(
-          context: context, builder: (_) => const WallpaperSaveDialog());
+      final applyLive2D = _live2D == null
+          ? false
+          : await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                      title: const Text('Live 2D 저장'),
+                      content: const Text(
+                          '적용을 선택하면 Android 라이브 배경화면 설정 화면이 열립니다. 적용 화면은 Android에서 선택합니다.'),
+                      actions: [
+                        TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('보관함에 저장')),
+                        FilledButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('저장 후 적용')),
+                      ]));
+      if (!mounted || applyLive2D == null) return;
+      final selection = _live2D != null
+          ? const WallpaperSaveSelection()
+          : await showDialog<WallpaperSaveSelection>(
+              context: context, builder: (_) => const WallpaperSaveDialog());
       if (selection == null || !mounted) return;
       setState(() => _exporting = true);
       edited = await ImageEditorService.export(
@@ -167,23 +226,26 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
         await edited?.dispose();
         return;
       }
-Navigator.pop(
-    context,
-    ImageRegistrationOptions(
-      title: title,
-      tags: registrationTags(_tags),
-      editedFile: edited,
-      upscaleFactor: _tool == _RegistrationTool.upscale
-          ? _upscaleFactor
-          : null,
-      ratio: !_ratio.automatic && _ratio.preset == CropPreset.free
-          ? _ratio.copyWith(
-              freeAspectRatio: _crop.width *
-                  _source!.size.width /
-                  (_crop.height * _source!.size.height))
-          : _ratio,
-      wallpaperTarget: selection.target,
-    ));
+      final live2D = _live2D;
+      _live2D = null;
+      Navigator.pop(
+          context,
+          ImageRegistrationOptions(
+            title: title,
+            tags: registrationTags(_tags),
+            editedFile: edited,
+            upscaleFactor:
+                _tool == _RegistrationTool.upscale ? _upscaleFactor : null,
+            ratio: !_ratio.automatic && _ratio.preset == CropPreset.free
+                ? _ratio.copyWith(
+                    freeAspectRatio: _crop.width *
+                        _source!.size.width /
+                        (_crop.height * _source!.size.height))
+                : _ratio,
+            wallpaperTarget: selection.target,
+            live2D: live2D,
+            applyLive2D: applyLive2D,
+          ));
     } catch (_) {
       await edited?.dispose();
       if (mounted) {
@@ -201,6 +263,7 @@ Navigator.pop(
   }
 
   void _reset() => setState(() {
+        _clearLive2D();
         _crop = const Rect.fromLTWH(0, 0, 1, 1);
         _ratio = const ImageRatioSettings();
         _filter = PhotoFilter.original;
@@ -224,70 +287,87 @@ Navigator.pop(
               onPressed: source == null || _saving ? null : _reset,
               icon: const Icon(Icons.restart_alt)),
         ]),
-        body: SafeArea(child: Column(children: [
-          Expanded(child: LayoutBuilder(builder: (_, bounds) => Column(
-            key: const ValueKey('registration-content'),
-            children: [
-              Expanded(child: _preview(display)),
-              ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: bounds.maxHeight),
-                child: ClipRect(child: OverflowBox(
-                  fit: OverflowBoxFit.deferToChild,
-                  alignment: Alignment.bottomCenter,
-                  maxHeight: double.infinity,
-                  child: Padding(
-                    key: const ValueKey('registration-settings'),
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                    child: AppFormBody(child: Material(
-                      type: MaterialType.transparency,
-                      child: switch (_tool) {
-                        _RegistrationTool.information => _information(),
-                        _RegistrationTool.crop => ImageRatioSelector(
-                          value: _ratio,
-                          display: display,
-                          allowFree: true,
-                          automaticOnly: true,
-                          onChanged: source == null || _saving
-                              ? null
-                              : (ratio) => setState(() => _ratio = ratio)),
-                        _RegistrationTool.filter => _filters(),
-
-_RegistrationTool.upscale => Row(
-  mainAxisAlignment: MainAxisAlignment.center,
-  children: [
-    const Text('업스케일 배율'),
-    const SizedBox(width: 16),
-    SegmentedButton<int>(
-      segments: const [
-        ButtonSegment(value: 2, label: Text('2배')),
-        ButtonSegment(value: 4, label: Text('4배')),
-      ],
-      selected: {_upscaleFactor},
-      onSelectionChanged: _saving
-          ? null
-          : (values) {
-              setState(() {
-                _upscaleFactor = values.first;
-              });
-            },
-    ),
-  ],
-),
-
-_ => const SizedBox.shrink(),
-                      },
-                    )),
-                  ),
-                )),
-              ),
-            ],
-          ))),
+        body: SafeArea(
+            child: Column(children: [
+          Expanded(
+              child: LayoutBuilder(
+                  builder: (_, bounds) => Column(
+                        key: const ValueKey('registration-content'),
+                        children: [
+                          Expanded(child: _preview(display)),
+                          ConstrainedBox(
+                            constraints:
+                                BoxConstraints(maxHeight: bounds.maxHeight),
+                            child: ClipRect(
+                                child: OverflowBox(
+                              fit: OverflowBoxFit.deferToChild,
+                              alignment: Alignment.bottomCenter,
+                              maxHeight: double.infinity,
+                              child: Padding(
+                                key: const ValueKey('registration-settings'),
+                                padding:
+                                    const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                                child: AppFormBody(
+                                    child: Material(
+                                  type: MaterialType.transparency,
+                                  child: switch (_tool) {
+                                    _RegistrationTool.information =>
+                                      _information(),
+                                    _RegistrationTool.crop =>
+                                      ImageRatioSelector(
+                                          value: _ratio,
+                                          display: display,
+                                          allowFree: true,
+                                          automaticOnly: true,
+                                          onChanged: source == null || _saving
+                                              ? null
+                                              : (ratio) => setState(() {
+                                                    _clearLive2D();
+                                                    _ratio = ratio;
+                                                  })),
+                                    _RegistrationTool.filter => _filters(),
+                                    _RegistrationTool.upscale => Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          const Text('업스케일 배율'),
+                                          const SizedBox(width: 16),
+                                          SegmentedButton<int>(
+                                            segments: const [
+                                              ButtonSegment(
+                                                  value: 2, label: Text('2배')),
+                                              ButtonSegment(
+                                                  value: 4, label: Text('4배')),
+                                            ],
+                                            selected: {_upscaleFactor},
+                                            onSelectionChanged: _saving
+                                                ? null
+                                                : (values) {
+                                                    setState(() {
+                                                      _upscaleFactor =
+                                                          values.first;
+                                                    });
+                                                  },
+                                          ),
+                                        ],
+                                      ),
+                                    _RegistrationTool.parallax => const Text(
+                                        'Live 2D · 배경 고정 / 인물·사물 자이로 이동',
+                                        textAlign: TextAlign.center),
+                                  },
+                                )),
+                              ),
+                            )),
+                          ),
+                        ],
+                      ))),
           if (wide && showTools)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Row(children: [
                 Expanded(child: _tools(colors)),
-                Padding(padding: const EdgeInsets.only(right: 16),
+                Padding(
+                    padding: const EdgeInsets.only(right: 16),
                     child: SizedBox(width: 108, child: _saveButton())),
               ]),
             )
@@ -308,14 +388,27 @@ _ => const SizedBox.shrink(),
         child: LayoutBuilder(builder: (_, bounds) {
           final source = _source;
           if (source == null) {
-            return Center(child: _error == null
-                ? const CircularProgressIndicator()
-                : Column(mainAxisSize: MainAxisSize.min, children: [
-                    Text(_error!),
-                    TextButton(onPressed: _load, child: const Text('다시 시도')),
-                  ]));
+            return Center(
+                child: _error == null
+                    ? const CircularProgressIndicator()
+                    : Column(mainAxisSize: MainAxisSize.min, children: [
+                        Text(_error!),
+                        TextButton(
+                            onPressed: _load, child: const Text('다시 시도')),
+                      ]));
           }
-          return Center(child: Semantics(
+          final draft = _live2D;
+          if (draft != null) {
+            return Center(
+                child: AspectRatio(
+                    aspectRatio: _ratio.aspectRatio(source.size, display) ??
+                        source.size.aspectRatio,
+                    child: Live2DPreview(
+                        backgroundPath: draft.backgroundPath,
+                        foregroundPath: draft.foregroundPath)));
+          }
+          return Center(
+              child: Semantics(
             button: true,
             label: '사진 전체 보기',
             child: GestureDetector(
@@ -328,8 +421,12 @@ _ => const SizedBox.shrink(),
                 crop: _crop,
                 filter: _filter,
                 cropping: _tool == _RegistrationTool.crop,
-                aspectRatio: _ratio.aspectRatio(source.size, display, editing: true),
-                onCropChanged: (crop) => setState(() => _crop = crop),
+                aspectRatio:
+                    _ratio.aspectRatio(source.size, display, editing: true),
+                onCropChanged: (crop) => setState(() {
+                  _clearLive2D();
+                  _crop = crop;
+                }),
                 enabled: !_saving,
                 maxHeight: bounds.maxHeight,
               ),
@@ -347,22 +444,26 @@ _ => const SizedBox.shrink(),
             Padding(
               key: _toolKeys[tool],
               padding: const EdgeInsets.symmetric(horizontal: 3),
-              child: Semantics(selected: _tool == tool, child: TextButton(
-                key: ValueKey('registration-tool-${tool.name}'),
-                onPressed: _saving || tool.pending ? null : () => _selectTool(tool),
-                style: TextButton.styleFrom(
-                  foregroundColor: _tool == tool ? colors.primary : colors.onSurfaceVariant,
-                  backgroundColor: Colors.transparent,
-                  minimumSize: const Size(76, 64),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(tool.icon, size: 23),
-                  const SizedBox(height: 4),
-                  Text(tool.label, style: const TextStyle(fontSize: 12)),
-                  if (tool.pending) const Text('준비 중', style: TextStyle(fontSize: 10)),
-                ]),
-              )),
+              child: Semantics(
+                  selected: _tool == tool,
+                  child: TextButton(
+                    key: ValueKey('registration-tool-${tool.name}'),
+                    onPressed: _saving ? null : () => _selectTool(tool),
+                    style: TextButton.styleFrom(
+                      foregroundColor: _tool == tool
+                          ? colors.primary
+                          : colors.onSurfaceVariant,
+                      backgroundColor: Colors.transparent,
+                      minimumSize: const Size(76, 64),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                    ),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(tool.icon, size: 23),
+                      const SizedBox(height: 4),
+                      Text(tool.label, style: const TextStyle(fontSize: 12)),
+                    ]),
+                  )),
             ),
         ]),
       );
@@ -371,8 +472,8 @@ _ => const SizedBox.shrink(),
         key: const ValueKey('save-registration'),
         onPressed: _source == null || _saving ? null : _save,
         child: _exporting
-            ? const SizedBox.square(dimension: 20,
-                child: CircularProgressIndicator(strokeWidth: 2))
+            ? const SizedBox.square(
+                dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
             : const Text('저장'),
       );
 
@@ -386,25 +487,37 @@ _ => const SizedBox.shrink(),
           onChanged: (_) {
             if (_titleError != null) setState(() => _titleError = null);
           },
-          decoration: InputDecoration(labelText: '이미지 이름', counterText: '',
-              errorText: _titleError, filled: false),
+          decoration: InputDecoration(
+              labelText: '이미지 이름',
+              counterText: '',
+              errorText: _titleError,
+              filled: false),
         );
         final tags = InkWell(
           key: const ValueKey('registration-tag-picker'),
           onTap: _saving ? null : _openTagPicker,
           borderRadius: BorderRadius.circular(12),
           child: InputDecorator(
-            decoration: const InputDecoration(labelText: '태그', filled: false,
+            decoration: const InputDecoration(
+                labelText: '태그',
+                filled: false,
                 suffixIcon: Icon(Icons.expand_more)),
-            child: Text(_tags.isEmpty ? '태그 선택'
-                : selectableGalleryTags.where(_tags.contains).join(', '),
-                maxLines: 1, overflow: TextOverflow.ellipsis),
+            child: Text(
+                _tags.isEmpty
+                    ? '태그 선택'
+                    : selectableGalleryTags.where(_tags.contains).join(', '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
           ),
         );
         return bounds.maxWidth >= 480
-            ? Row(children: [Expanded(child: name), const SizedBox(width: 12),
-                Expanded(child: tags)])
-            : Column(mainAxisSize: MainAxisSize.min,
+            ? Row(children: [
+                Expanded(child: name),
+                const SizedBox(width: 12),
+                Expanded(child: tags)
+              ])
+            : Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [name, const SizedBox(height: 12), tags]);
       });
 
@@ -425,7 +538,10 @@ _ => const SizedBox.shrink(),
                       key: ValueKey(filter),
                       onTap: _saving
                           ? null
-                          : () => setState(() => _filter = filter),
+                          : () => setState(() {
+                                _clearLive2D();
+                                _filter = filter;
+                              }),
                       borderRadius: BorderRadius.circular(12),
                       child: Container(
                         width: 76,
@@ -448,9 +564,11 @@ _ => const SizedBox.shrink(),
                                       ColorFilter.matrix(filter.matrix),
                                   child: SizedBox.square(
                                     dimension: 64,
-                                    child: Center(child: AspectRatio(
+                                    child: Center(
+                                        child: AspectRatio(
                                       aspectRatio: source.size.aspectRatio,
-                                      child: RawImage(image: source.preview,
+                                      child: RawImage(
+                                          image: source.preview,
                                           fit: BoxFit.contain),
                                     )),
                                   )),

@@ -1,6 +1,9 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'live_2d_page.dart';
+import 'services/live_2d_service.dart';
+import 'widgets/live_2d_preview.dart';
 
 import 'models/image_editor.dart';
 import 'models/image_ratio.dart';
@@ -10,9 +13,10 @@ import 'widgets/device_display_builder.dart';
 import 'widgets/image_ratio_selector.dart';
 
 class ImageEditorResult {
-  const ImageEditorResult(this.editedFile, this.ratio);
+  const ImageEditorResult(this.editedFile, this.ratio, {this.live2D});
   final EditedImageFile? editedFile;
   final ImageRatioSettings ratio;
+  final Live2DDraft? live2D;
 }
 
 class ImageEditorPage extends StatefulWidget {
@@ -35,6 +39,34 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
   PhotoFilter _filter = PhotoFilter.original;
   bool _cropTab = true;
   bool _saving = false;
+  Live2DDraft? _live2D;
+
+  void _clearLive2D() {
+    Live2DService.discard(_live2D);
+    _live2D = null;
+  }
+
+  Future<void> _openLive2D() async {
+    final geometry = _geometry;
+    if (geometry == null || _saving) return;
+    final draft = await Navigator.of(context).push<Live2DDraft>(
+        MaterialPageRoute(
+            builder: (_) => Live2DPage(
+                sourcePath: widget.filePath,
+                crop: geometry.normalizedCrop,
+                filter: _filter)));
+    if (!mounted) {
+      await Live2DService.discard(draft);
+      return;
+    }
+    if (draft != null) {
+      setState(() {
+        _clearLive2D();
+        _live2D = draft;
+      });
+    }
+  }
+
   int? _corner;
   int _pointers = 0;
   double _startScale = 1;
@@ -67,6 +99,7 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
 
   @override
   void dispose() {
+    _clearLive2D();
     _source?.preview.dispose();
     super.dispose();
   }
@@ -94,6 +127,8 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
       setState(() => _saving = false);
       await WidgetsBinding.instance.endOfFrame;
       if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+        final live2D = _live2D;
+        _live2D = null;
         Navigator.pop(
             context,
             ImageEditorResult(
@@ -101,7 +136,8 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                 _ratio.preset == CropPreset.free && !_ratio.automatic
                     ? _ratio.copyWith(
                         freeAspectRatio: geometry.sourceRect.size.aspectRatio)
-                    : _ratio));
+                    : _ratio,
+                live2D: live2D));
       } else {
         await edited?.dispose();
       }
@@ -150,6 +186,7 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
       _startGestureScale = details.scale;
     }
     setState(() {
+      _clearLive2D();
       if (_corner case final corner?) {
         geometry.resizeCorner(corner, details.localFocalPoint);
       } else {
@@ -177,6 +214,7 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
               onPressed: source == null || _saving
                   ? null
                   : () => setState(() {
+                        _clearLive2D();
                         _ratio = widget.initialRatio;
                         _filter = PhotoFilter.original;
                         _geometry!.layout(
@@ -199,11 +237,17 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                       child: Row(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                        Expanded(child: _conversion('원본 이미지', selected: true)),
+                        Expanded(
+                            child: _conversion('원본 이미지',
+                                selected: _live2D == null,
+                                action: () => setState(_clearLive2D))),
                         const SizedBox(width: 8),
                         Expanded(child: _conversion('업스케일', pending: true)),
                         const SizedBox(width: 8),
-                        Expanded(child: _conversion('2.5D 변환', pending: true)),
+                        Expanded(
+                            child: _conversion('Live 2D',
+                                selected: _live2D != null,
+                                action: _openLive2D)),
                       ])),
                   const SizedBox(height: 14),
                   SizedBox(
@@ -220,38 +264,46 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                                             onPressed: _load,
                                             child: Text('다시 시도')),
                                       ]))
-                        : LayoutBuilder(builder: (context, constraints) {
-                            final geometry = _geometry!;
-                            geometry.layout(
-                                constraints.biggest,
-                                _ratio.aspectRatio(source.size, display,
-                                    editing: true));
-                            return ClipRRect(
-                              borderRadius: BorderRadius.circular(16),
-                              child: Semantics(
-                                label: '이미지 편집 영역. 두 손가락으로 확대 및 축소, 드래그로 이동',
-                                child: GestureDetector(
-                                  key: const ValueKey('image-editor-canvas'),
-                                  behavior: HitTestBehavior.opaque,
-                                  onScaleStart: _saving ? null : _start,
-                                  onScaleUpdate: _saving ? null : _update,
-                                  child: CustomPaint(
-                                      painter: _CropPainter(
-                                          source.preview,
-                                          geometry.imageRect,
-                                          geometry.frame,
-                                          _filter,
-                                          _cropTab),
-                                      child: const SizedBox.expand()),
-                                ),
-                              ),
-                            );
-                          }),
+                        : _live2D != null
+                            ? Live2DPreview(
+                                backgroundPath: _live2D!.backgroundPath,
+                                foregroundPath: _live2D!.foregroundPath)
+                            : LayoutBuilder(builder: (context, constraints) {
+                                final geometry = _geometry!;
+                                geometry.layout(
+                                    constraints.biggest,
+                                    _ratio.aspectRatio(source.size, display,
+                                        editing: true));
+                                return ClipRRect(
+                                  borderRadius: BorderRadius.circular(16),
+                                  child: Semantics(
+                                    label:
+                                        '이미지 편집 영역. 두 손가락으로 확대 및 축소, 드래그로 이동',
+                                    child: GestureDetector(
+                                      key:
+                                          const ValueKey('image-editor-canvas'),
+                                      behavior: HitTestBehavior.opaque,
+                                      onScaleStart: _saving ? null : _start,
+                                      onScaleUpdate: _saving ? null : _update,
+                                      child: CustomPaint(
+                                          painter: _CropPainter(
+                                              source.preview,
+                                              geometry.imageRect,
+                                              geometry.frame,
+                                              _filter,
+                                              _cropTab),
+                                          child: const SizedBox.expand()),
+                                    ),
+                                  ),
+                                );
+                              }),
                   ),
                   const SizedBox(height: 10),
                   Text('두 손가락으로 확대·축소',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontSize: 12)),
                   const SizedBox(height: 12),
                   Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                     Flexible(child: _tool(false, Icons.tune, '필터')),
@@ -270,11 +322,17 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                         allowFree: true,
                         onChanged: source == null || _saving
                             ? null
-                            : (ratio) => setState(() => _ratio = ratio)),
+                            : (ratio) => setState(() {
+                                  _clearLive2D();
+                                  _ratio = ratio;
+                                })),
                     const SizedBox(height: 8),
                     Text('모서리를 드래그해 자르기 영역을 조절하세요.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
+                        style: TextStyle(
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                            fontSize: 12)),
                   ] else if (source != null) ...[
                     const AppSectionTitle('필터'),
                     const SizedBox(height: 10),
@@ -303,32 +361,44 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
   }
 
   Widget _conversion(String label,
-          {bool selected = false, bool pending = false}) =>
+          {bool selected = false,
+          bool pending = false,
+          VoidCallback? action}) =>
       OutlinedButton(
         onPressed: _saving
             ? null
             : () {
                 if (pending) _pending(label);
+                action?.call();
               },
         style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-            foregroundColor: selected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurface,
-            backgroundColor: selected ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.surface,
+            foregroundColor: selected
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.onSurface,
+            backgroundColor: selected
+                ? Theme.of(context).colorScheme.primaryContainer
+                : Theme.of(context).colorScheme.surface,
             side: BorderSide(
-                color: selected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.outlineVariant)),
+                color: selected
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.outlineVariant)),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Text(label, textAlign: TextAlign.center),
           if (pending)
             Text('준비 중',
-                style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                style: TextStyle(
+                    fontSize: 10,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
         ]),
       );
 
   Widget _tool(bool crop, IconData icon, String label) => TextButton.icon(
       onPressed: _saving ? null : () => setState(() => _cropTab = crop),
       style: TextButton.styleFrom(
-          foregroundColor:
-              _cropTab == crop ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurfaceVariant),
+          foregroundColor: _cropTab == crop
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.onSurfaceVariant),
       icon: Icon(icon),
       label: Text(label));
 
@@ -340,7 +410,12 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
             label: '${filter.label} 필터',
             child: InkWell(
               key: ValueKey(filter),
-              onTap: _saving ? null : () => setState(() => _filter = filter),
+              onTap: _saving
+                  ? null
+                  : () => setState(() {
+                        _clearLive2D();
+                        _filter = filter;
+                      }),
               borderRadius: BorderRadius.circular(12),
               child: Container(
                   width: 76,

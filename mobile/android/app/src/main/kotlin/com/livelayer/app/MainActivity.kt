@@ -22,6 +22,7 @@ import android.util.DisplayMetrics
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.EventChannel
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -62,6 +63,13 @@ class MainActivity : FlutterActivity() {
     private var pendingDownload: PendingDownload? = null
     private var pendingLocalSave: PendingLocalSave? = null
     private val galleryStore by lazy { GalleryLocalImageStore(applicationContext) }
+    private val live2DStore by lazy { Live2DStore(applicationContext) }
+    private var tiltEvents: EventChannel.EventSink? = null
+    private val tiltSensor by lazy {
+        TiltSensor(applicationContext, { windowManager.defaultDisplay.rotation }) { x, y ->
+            tiltEvents?.success(listOf(x.toDouble(), y.toDouble()))
+        }
+    }
     private data class PendingGalleryRead(
         val ownerId: String,
         val legacyScope: String,
@@ -79,6 +87,14 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, "live_layer/tilt")
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+                    tiltEvents = events
+                    tiltSensor.start()
+                }
+                override fun onCancel(arguments: Any?) { tiltSensor.stop(); tiltEvents = null }
+            })
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "live_layer/config")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -104,6 +120,23 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "live_layer/wallpaper")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "splitLive2D" -> ioExecutor.execute {
+                        try {
+                            val source = File(call.argument<String>("sourcePath") ?: error("이미지가 없습니다."))
+                            val draft = live2DStore.split(source)
+                            runOnUiThread { result.success(draft) }
+                        } catch (error: Exception) {
+                            runOnUiThread { result.error("live2d_failed", error.cause?.message ?: error.message, null) }
+                        }
+                    }
+                    "discardLive2D" -> ioExecutor.execute {
+                        try {
+                            live2DStore.discard(call.argument<String>("draftId") ?: error("분리 ID가 없습니다."))
+                            runOnUiThread { result.success(null) }
+                        } catch (error: Exception) {
+                            runOnUiThread { result.error("live2d_failed", error.message, null) }
+                        }
+                    }
                     "getDisplaySize" -> {
                         val size = deviceDisplaySize()
                         result.success(mapOf("width" to size.x, "height" to size.y))
@@ -162,6 +195,54 @@ class MainActivity : FlutterActivity() {
                         require(!ownerId.isNullOrBlank()) { "로그인 사용자 ID가 필요합니다." }
                     }
                     when (call.method) {
+                        "attachLocalLive2D" -> galleryMutation(result) {
+                            val id = call.argument<String>("id") ?: error("이미지 ID가 없습니다.")
+                            val item = galleryStore.item(ownerId!!, id)
+                            live2DStore.attach(ownerId, id, call.argument<String>("draftId") ?: error("분리 ID가 없습니다."))
+                            try {
+                                if (item.optString("mode") != "live2d") {
+                                    galleryStore.update(ownerId, id) { it.put("mode", "live2d") }
+                                }
+                            } catch (error: Exception) {
+                                live2DStore.delete(ownerId, id)
+                                throw error
+                            }
+                        }
+                        "getLocalLive2D" -> ioExecutor.execute {
+                            try {
+                                val id = call.argument<String>("id") ?: error("이미지 ID가 없습니다.")
+                                galleryStore.item(ownerId!!, id)
+                                val layers = live2DStore.layers(ownerId, id)
+                                runOnUiThread { result.success(layers) }
+                            } catch (error: Exception) {
+                                runOnUiThread { result.error("live2d_failed", error.message, null) }
+                            }
+                        }
+                        "applyLocalLive2D" -> ioExecutor.execute {
+                            try {
+                                val id = call.argument<String>("id") ?: error("이미지 ID가 없습니다.")
+                                galleryStore.item(ownerId!!, id)
+                                val manifest = live2DStore.activate(ownerId, id)
+                                runOnUiThread {
+                                    try {
+                                        getSharedPreferences("live_layer", MODE_PRIVATE).edit()
+                                            .putString("preview_manifest_path", manifest.absolutePath).apply()
+                                        val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
+                                            putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
+                                                ComponentName(this@MainActivity, LiveLayerWallpaperService::class.java))
+                                        }
+                                        startActivityForResult(intent, LIVE_2D_PICKER_REQUEST)
+                                        result.success(null)
+                                    } catch (error: Exception) {
+                                        getSharedPreferences("live_layer", MODE_PRIVATE).edit().remove("preview_manifest_path").apply()
+                                        ioExecutor.execute { live2DStore.discardWallpaper(manifest.absolutePath) }
+                                        result.error("wallpaper_picker_failed", error.message, null)
+                                    }
+                                }
+                            } catch (error: Exception) {
+                                runOnUiThread { result.error("live2d_failed", error.message, null) }
+                            }
+                        }
                         "saveImageToGallery" -> enqueueLocalImageSave(
                             call.argument<String>("sourcePath"),
                             call.argument<String>("fileName"),
@@ -239,7 +320,9 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                         "deleteLocalImage" -> galleryMutation(result) {
-                            galleryStore.delete(ownerId!!, call.argument<String>("id") ?: error("이미지 ID가 없습니다."))
+                            val id = call.argument<String>("id") ?: error("이미지 ID가 없습니다.")
+                            galleryStore.delete(ownerId!!, id)
+                            live2DStore.delete(ownerId, id)
                         }
                         else -> result.notImplemented()
                     }
@@ -250,6 +333,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        tiltSensor.stop()
+        tiltEvents = null
         pendingDownload?.result?.error("cancelled", "다운로드 요청이 취소되었습니다.", null)
         pendingDownload = null
         pendingLocalSave?.result?.error("cancelled", "로컬 저장 요청이 취소되었습니다.", null)
@@ -264,6 +349,10 @@ class MainActivity : FlutterActivity() {
         ioExecutor.shutdownNow()
         super.onDestroy()
     }
+
+    override fun onPause() { tiltSensor.stop(); super.onPause() }
+
+    override fun onResume() { super.onResume(); if (tiltEvents != null) tiltSensor.start() }
 
     override fun onRequestPermissionsResult(
         requestCode: Int,
@@ -429,6 +518,20 @@ class MainActivity : FlutterActivity() {
     @Deprecated("Used for explicit gallery write authorization")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == LIVE_2D_PICKER_REQUEST) {
+            val preferences = getSharedPreferences("live_layer", MODE_PRIVATE)
+            val path = preferences.getString("preview_manifest_path", null)
+            val previous = preferences.getString("manifest_path", null)
+            val edit = preferences.edit().remove("preview_manifest_path")
+            if (resultCode == RESULT_OK && path != null) edit.putString("manifest_path", path)
+            if (edit.commit()) {
+                val expired = if (resultCode == RESULT_OK && path != null) previous else path
+                if (expired != preferences.getString("manifest_path", null)) {
+                    ioExecutor.execute { live2DStore.discardWallpaper(expired) }
+                }
+            }
+            return
+        }
         if (requestCode == GALLERY_EDIT_PERMISSION_REQUEST) {
             val continuation = pendingGalleryAction
             val pendingResult = pendingGalleryResult
@@ -1152,7 +1255,7 @@ class MainActivity : FlutterActivity() {
                     getSharedPreferences("live_layer", MODE_PRIVATE)
                         .edit()
                         .putString("project_id", projectId)
-                        .putString("manifest_path", File(destination, "manifest.json").absolutePath)
+                        .putString("preview_manifest_path", File(destination, "manifest.json").absolutePath)
                         .apply()
                 } catch (error: Exception) {
                     staging.deleteRecursively()
@@ -1194,7 +1297,7 @@ class MainActivity : FlutterActivity() {
                 ComponentName(this@MainActivity, LiveLayerWallpaperService::class.java),
             )
         }
-        startActivity(intent)
+        startActivityForResult(intent, LIVE_2D_PICKER_REQUEST)
     }
 
     private fun downloadToFile(url: String, destination: File) {
@@ -1266,6 +1369,7 @@ class MainActivity : FlutterActivity() {
         }
 
     private companion object {
+        const val LIVE_2D_PICKER_REQUEST = 4105
         val localImagesLock = Any()
         const val DOWNLOAD_PERMISSION_REQUEST = 4101
         const val GALLERY_READ_PERMISSION_REQUEST = 4102

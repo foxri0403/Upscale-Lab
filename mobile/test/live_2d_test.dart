@@ -1,0 +1,263 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:live_layer/live_2d_page.dart';
+import 'package:live_layer/models/local_image.dart';
+import 'package:live_layer/services/live_2d_service.dart';
+import 'package:live_layer/services/local_image_store.dart';
+import 'package:live_layer/services/wallpaper_service.dart';
+import 'package:live_layer/unified_home.dart';
+import 'package:live_layer/widgets/live_2d_preview.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  const wallpaper = MethodChannel('live_layer/wallpaper');
+  const storage = MethodChannel('live_layer/storage');
+  const tilt = MethodChannel('live_layer/tilt');
+  final messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  late Directory directory;
+  late String source;
+  late List<MethodCall> calls;
+  late List<String> discarded;
+  bool failSplit = false;
+  Live2DDraft? selected;
+
+  setUpAll(() async {
+    directory = await Directory.systemTemp.createTemp('live2d-test-');
+    final recorder = ui.PictureRecorder();
+    ui.Canvas(recorder).drawColor(const Color(0xff336699), BlendMode.src);
+    final picture = recorder.endRecording();
+    final bitmap = await picture.toImage(32, 48);
+    final png = await bitmap.toByteData(format: ui.ImageByteFormat.png);
+    source = '${directory.path}/image.png';
+    await File(source).writeAsBytes(png!.buffer.asUint8List());
+    bitmap.dispose();
+    picture.dispose();
+  });
+  tearDownAll(() => directory.delete(recursive: true));
+
+  setUp(() {
+    calls = [];
+    discarded = [];
+    failSplit = false;
+    selected = null;
+    messenger.setMockMethodCallHandler(tilt, (_) async => null);
+    messenger.setMockMethodCallHandler(wallpaper, (call) async {
+      calls.add(call);
+      switch (call.method) {
+        case 'getDisplaySize':
+          return {'width': 360, 'height': 720};
+        case 'splitLive2D':
+          if (failSplit) {
+            throw PlatformException(
+                code: 'model_download', message: '모델 다운로드 후 다시 시도해 주세요.');
+          }
+          return {
+            'draftId': 'draft-1',
+            'backgroundPath': source,
+            'foregroundPath': source,
+            'width': 32,
+            'height': 48
+          };
+        case 'discardLive2D':
+          discarded.add((call.arguments as Map)['draftId'] as String);
+          return null;
+        default:
+          throw StateError('Unexpected wallpaper call ${call.method}');
+      }
+    });
+    messenger.setMockMethodCallHandler(storage, (call) async {
+      calls.add(call);
+      if (call.method == 'getLocalLive2D') {
+        return {'backgroundPath': source, 'foregroundPath': source};
+      }
+      if (call.method == 'attachLocalLive2D' ||
+          call.method == 'applyLocalLive2D') {
+        return null;
+      }
+      throw StateError('Unexpected storage call ${call.method}');
+    });
+  });
+  tearDown(() {
+    messenger.setMockMethodCallHandler(wallpaper, null);
+    messenger.setMockMethodCallHandler(storage, null);
+    messenger.setMockMethodCallHandler(tilt, null);
+  });
+
+  Future<void> settleFiles(WidgetTester tester) async {
+    await tester.runAsync(() async {
+      await tester.pump();
+      for (var i = 0; i < 200; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await tester.pump();
+        if (find.byType(CircularProgressIndicator).evaluate().isEmpty) break;
+      }
+    });
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> open(WidgetTester tester, Widget page) async {
+    await tester.pumpWidget(MaterialApp(
+        home: Builder(
+            builder: (context) => Scaffold(
+                body: TextButton(
+                    onPressed: () async {
+                      final result = await Navigator.of(context)
+                          .push<Live2DDraft>(
+                              MaterialPageRoute(builder: (_) => page));
+                      selected = result;
+                    },
+                    child: const Text('open'))))));
+    await tester.tap(find.text('open'));
+    await settleFiles(tester);
+  }
+
+  testWidgets(
+      'model unavailable shows actionable retry and never accepts a fake split',
+      (tester) async {
+    failSplit = true;
+    await open(tester, Live2DPage(sourcePath: source));
+    expect(find.text('모델 다운로드 후 다시 시도해 주세요.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('use-live2d')), findsNothing);
+    failSplit = false;
+    await tester.tap(find.text('다시 시도'));
+    await settleFiles(tester);
+    expect(find.byType(Live2DPreview), findsOneWidget);
+    await tester.tap(find.text('배경'));
+    await tester.pumpAndSettle();
+    expect(
+        find.byKey(const ValueKey('live2d-moving-foreground')), findsNothing);
+    await tester.tap(find.text('인물·사물'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('live2d-fixed-background')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('use-live2d')));
+    await tester.pumpAndSettle();
+    expect(selected!.id, 'draft-1');
+    expect(discarded, isEmpty);
+    await Live2DService.discard(selected);
+    expect(discarded, ['draft-1']);
+  });
+
+  testWidgets('leaving a split preview discards its temporary layers',
+      (tester) async {
+    await open(tester, Live2DPage(sourcePath: source));
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(selected, isNull);
+    expect(discarded, ['draft-1']);
+  });
+
+  testWidgets('sensor tilt moves only foreground and remains bounded',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: SizedBox(
+            width: 320,
+            height: 480,
+            child: Live2DPreview(
+                backgroundPath: source, foregroundPath: source))));
+    await settleFiles(tester);
+    final background = tester
+        .widget<Transform>(
+            find.byKey(const ValueKey('live2d-fixed-background')))
+        .transform
+        .clone();
+    await messenger.handlePlatformMessage(
+        'live_layer/tilt',
+        const StandardMethodCodec().encodeSuccessEnvelope([50.0, -50.0]),
+        (_) {});
+    await tester.pump();
+    final foreground = tester
+        .widget<Transform>(
+            find.byKey(const ValueKey('live2d-moving-foreground')))
+        .transform;
+    final bounds = tester.getSize(find.byType(Live2DPreview));
+    expect(foreground.getTranslation().x, closeTo(-bounds.width * .035, .001));
+    expect(foreground.getTranslation().y, closeTo(-bounds.height * .035, .001));
+    expect(
+        tester
+            .widget<Transform>(
+                find.byKey(const ValueKey('live2d-fixed-background')))
+            .transform,
+        background);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+      'registration Live 2D button opens working separation and preserves save mode',
+      (tester) async {
+    ImageRegistrationOptions? options;
+    await tester.pumpWidget(MaterialApp(
+        home: Builder(
+            builder: (context) => Scaffold(
+                body: TextButton(
+                    child: const Text('register'),
+                    onPressed: () async {
+                      options = await Navigator.of(context)
+                          .push<ImageRegistrationOptions>(MaterialPageRoute(
+                              builder: (_) => ImageFeaturePage(
+                                  filePath: source, title: 'test')));
+                    })))));
+    await tester.tap(find.text('register'));
+    await settleFiles(tester);
+    final live = find.byKey(const ValueKey('registration-tool-parallax'));
+    await tester.ensureVisible(live);
+    expect(tester.widget<TextButton>(live).onPressed, isNotNull);
+    expect(find.text('2.5D'), findsNothing);
+    await tester.tap(live);
+    await settleFiles(tester);
+    await tester.tap(find.byKey(const ValueKey('use-live2d')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('save-registration')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('보관함에 저장'));
+    await settleFiles(tester);
+    expect(options!.live2D!.id, 'draft-1');
+    expect(options!.applyLive2D, isFalse);
+    expect(options!.upscaleFactor, isNull);
+    expect(options!.wallpaperTarget, isNull);
+    expect(discarded, isEmpty);
+    await options!.editedFile?.dispose();
+    await Live2DService.discard(options!.live2D);
+  });
+
+  testWidgets('saved Live 2D opens native picker through the captured account',
+      (tester) async {
+    final image = LocalImageItem(
+        id: 'image-1',
+        title: 'test',
+        path: source,
+        width: 32,
+        height: 48,
+        mode: 'live2d',
+        tag: 'test',
+        createdAt: DateTime.utc(2026));
+    const store =
+        LocalImageStore(scope: 'server\naccount-1', ownerId: 'account-1');
+    await tester.pumpWidget(MaterialApp(
+        home: HomeWallpaperPreviewPage(
+            image: image,
+            store: store,
+            onEdit: () {},
+            onShare: () {},
+            onDelete: () {})));
+    await settleFiles(tester);
+    expect(find.byType(Live2DPreview), findsOneWidget);
+    expect(find.byType(DropdownButton<WallpaperTarget>), findsNothing);
+    await tester.tap(find.text('Live 2D 배경화면 설정'));
+    await tester.pumpAndSettle();
+    final apply =
+        calls.singleWhere((call) => call.method == 'applyLocalLive2D');
+    expect(apply.arguments, {
+      'scope': 'server\naccount-1',
+      'ownerId': 'account-1',
+      'id': 'image-1'
+    });
+    expect(calls.any((call) => call.method == 'applyLocalWallpaper'), isFalse);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+}
