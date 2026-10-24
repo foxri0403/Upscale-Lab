@@ -115,6 +115,26 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
   bool _creating = false;
   bool _isGrid = true;
   bool _removingWallpaper = false;
+  bool _migratingImages = false;
+
+  Future<void> _migrateGalleryImages() async {
+    setState(() => _migratingImages = true);
+    try {
+      final result = await _localImageStore.migrateGalleryImages();
+      if (!mounted) return;
+      _reload();
+      final remaining = (result['remaining'] as num?)?.toInt() ?? 0;
+      final failed = (result['failed'] as num?)?.toInt() ?? 0;
+      _message(remaining == 0 && failed == 0
+          ? '기존 이미지를 앱 저장소로 이전했습니다. 앱에서 만든 갤러리 복사본은 제거했습니다.'
+          : '앱 저장소로 복사했습니다. 갤러리에 남은 복사본 ${remaining + failed}개는 권한 확인 후 다시 이전해 주세요.');
+    } on PlatformException catch (error) {
+      _message(error.message ?? '기존 이미지를 이전하지 못했습니다.');
+    } finally {
+      if (mounted) setState(() => _migratingImages = false);
+    }
+  }
+
   int _selectedIndex = 0;
   int _galleryRevision = 0;
   final _gallerySelection = GallerySearchSelection();
@@ -719,6 +739,21 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
             trailing: Icon(Icons.chevron_right),
             enabled: !_removingWallpaper,
             onTap: _removingWallpaper ? null : _removeWallpaper,
+          ),
+          const Divider(height: 1),
+          ListTile(
+            key: const ValueKey('migrate-gallery-images'),
+            leading: const Icon(Icons.folder_copy_outlined),
+            title: const Text('기존 갤러리 이미지 이전'),
+            subtitle:
+                const Text('앱에서 저장한 복사본을 앱 내부로 옮깁니다. 새 이미지는 갤러리에 저장하지 않습니다.'),
+            enabled: !_migratingImages,
+            trailing: _migratingImages
+                ? const SizedBox.square(
+                    dimension: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.chevron_right),
+            onTap: _migratingImages ? null : _migrateGalleryImages,
           ),
           const Divider(height: 1),
           ListTile(

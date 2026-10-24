@@ -26,7 +26,7 @@ internal class Live2DStore(private val context: Context) {
     private val saved get() = File(context.filesDir, "live_2d")
 
     private fun safeId(id: String): String {
-        require(id.matches(Regex("[A-Za-z0-9_-]{1,80}"))) { "Live 2D ID가 올바르지 않습니다." }
+        require(id.matches(Regex("[A-Za-z0-9_-]{1,128}"))) { "Live 2D ID가 올바르지 않습니다." }
         return id
     }
 

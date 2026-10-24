@@ -69,9 +69,13 @@ change to preserve existing behavior.
 
 All account-scoped storage operations now carry both the legacy server/account
 `scope` and the stable authenticated `ownerId`. Android resolves registered images
-from `Pictures/Upscale Lab` using the image's embedded owner marker, then regenerates
-an app-cache working copy for wallpaper operations. The scope remains in use for
-sorting and migration of the previous app-private library.
+from its permanent private `files/image_library/<owner>/<image>/` directory.
+Pixels and metadata are separate files; gallery permissions and app-cache working
+copies are unnecessary for normal library operations. The scope remains in use for
+sorting and migration of the previous app-private library. An owned `mode=live2d`
+record always opens the live wallpaper service, including through the generic
+`applyLocalWallpaper`/`previewLocalWallpaper` bridge, and is never flattened to a
+static source. See [private image storage](../../docs/private-image-storage.md).
 
 Local and remote application also accept an optional `ratio` map. An omitted
 ratio defaults to automatic, which detects the full applying display and center

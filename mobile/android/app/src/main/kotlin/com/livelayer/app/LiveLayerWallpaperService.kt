@@ -1,6 +1,7 @@
 package com.livelayer.app
 
 import android.content.SharedPreferences
+import android.app.wallpaper.WallpaperDescription
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -8,6 +9,9 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.os.Handler
 import android.os.Looper
+import android.os.Build
+import android.os.PersistableBundle
+import androidx.annotation.RequiresApi
 import android.service.wallpaper.WallpaperService
 import android.util.Log
 import android.view.SurfaceHolder
@@ -19,15 +23,19 @@ import kotlin.math.max
 class LiveLayerWallpaperService : WallpaperService() {
     override fun onCreateEngine(): Engine = LiveLayerEngine()
 
+    @RequiresApi(36)
+    override fun onCreateEngine(description: WallpaperDescription): Engine =
+        LiveLayerEngine(description.content.getString("manifest_path"))
+
     private data class Layer(val bitmap: Bitmap, val order: Int, val positionX: Float,
         val positionY: Float, val rotation: Float, val scale: Float, val movementX: Float, val movementY: Float)
 
-    private inner class LiveLayerEngine : Engine(), SharedPreferences.OnSharedPreferenceChangeListener {
+    private inner class LiveLayerEngine(private val describedManifest: String? = null) : Engine(), SharedPreferences.OnSharedPreferenceChangeListener {
         private val handler = Handler(Looper.getMainLooper())
         private val preferences = getSharedPreferences("live_layer", MODE_PRIVATE)
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        private var visible = false
-        private var ready = false
+        private var loadedManifest: String? = null
+        private var previewManifest: String? = null
         private var tiltX = 0f
         private var tiltY = 0f
         private var sensitivity = 1f
@@ -37,53 +45,71 @@ class LiveLayerWallpaperService : WallpaperService() {
         private var frameScheduled = false
         private val frame = Runnable { frameScheduled = false; draw() }
         private val sensor = TiltSensor(this@LiveLayerWallpaperService, {
-            (getSystemService(WINDOW_SERVICE) as WindowManager).defaultDisplay.rotation
+            if (Build.VERSION.SDK_INT >= 30) displayContext?.display?.rotation ?: 0
+            else (getSystemService(WINDOW_SERVICE) as WindowManager).defaultDisplay.rotation
         }) { x, y ->
             if (kotlin.math.abs(x - tiltX) + kotlin.math.abs(y - tiltY) > .0005f) {
                 tiltX = x; tiltY = y
                 scheduleDraw()
             }
         }
+        private val lifecycle = WallpaperEngineLifecycle(
+            refresh = { loadActiveProject(surfaceHolder.surfaceFrame.width(), surfaceHolder.surfaceFrame.height()) },
+            startSensor = { sensor.start() }, stopSensor = { sensor.stop() },
+            requestFrame = { scheduleDraw() }, cancelFrames = {
+                handler.removeCallbacks(frame); frameScheduled = false
+            })
 
         override fun onCreate(holder: SurfaceHolder) {
             super.onCreate(holder)
+            if (isPreview) previewManifest = preferences.getString("preview_manifest_path", null)
             preferences.registerOnSharedPreferenceChangeListener(this)
         }
 
         override fun onSharedPreferenceChanged(preferences: SharedPreferences?, key: String?) {
-            if (key == "manifest_path" && !isPreview && ready) {
-                loadActiveProject(surfaceHolder.surfaceFrame.width(), surfaceHolder.surfaceFrame.height())
-                scheduleDraw()
+            if (key == "manifest_path" && !isPreview) {
+                loadedManifest = null
+                lifecycle.selectionChanged()
             }
         }
 
         override fun onVisibilityChanged(isVisible: Boolean) {
-            visible = isVisible
-            if (visible) { sensor.start(); scheduleDraw() }
-            else { sensor.stop(); handler.removeCallbacks(frame); frameScheduled = false }
+            lifecycle.visibilityChanged(isVisible, surfaceHolder.surface.isValid)
+        }
+
+        override fun onSurfaceCreated(holder: SurfaceHolder) {
+            super.onSurfaceCreated(holder)
+            lifecycle.surfaceCreated()
         }
 
         override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
             super.onSurfaceChanged(holder, format, width, height)
-            ready = true
-            loadActiveProject(width, height)
-            if (visible) sensor.start()
+            loadedManifest = null
+            lifecycle.surfaceCreated()
             draw()
         }
 
         override fun onSurfaceDestroyed(holder: SurfaceHolder) {
-            ready = false
-            sensor.stop()
-            handler.removeCallbacks(frame); frameScheduled = false
+            lifecycle.surfaceDestroyed()
             super.onSurfaceDestroyed(holder)
         }
 
         override fun onDestroy() {
-            sensor.stop()
-            handler.removeCallbacks(frame)
+            lifecycle.destroy()
             preferences.unregisterOnSharedPreferenceChangeListener(this)
             recycle()
             super.onDestroy()
+        }
+
+        @RequiresApi(36)
+        override fun onApplyWallpaper(which: Int): WallpaperDescription? {
+            val path = previewManifest ?: loadedManifest ?: return null
+            // Android persists this before it creates the real engine. Do not depend
+            // on MainActivity's later result callback for the selected image.
+            check(preferences.edit().putString("manifest_path", path).commit())
+            val content = PersistableBundle().apply { putString("manifest_path", path) }
+            return WallpaperDescription.Builder().setId(File(path).parentFile?.name ?: path)
+                .setContent(content).build()
         }
 
         private fun recycle() {
@@ -92,8 +118,10 @@ class LiveLayerWallpaperService : WallpaperService() {
         }
 
         private fun loadActiveProject(width: Int, height: Int) {
-            val path = (if (isPreview) preferences.getString("preview_manifest_path", null) else null)
+            if (width <= 0 || height <= 0) return
+            val path = (if (isPreview) previewManifest else describedManifest)
                 ?: preferences.getString("manifest_path", null) ?: return
+            if (loadedManifest == path && layers.isNotEmpty()) return
             recycle()
             try {
                 val file = File(path)
@@ -115,6 +143,7 @@ class LiveLayerWallpaperService : WallpaperService() {
                             item.optDouble("movementX", 0.0).toFloat(), item.optDouble("movementY", 0.0).toFloat()))
                     }
                     layers = loaded.sortedBy { it.order }
+                    loadedManifest = path
                 } catch (error: Exception) { loaded.forEach { it.bitmap.recycle() }; throw error }
             } catch (error: Exception) { Log.w("Live2D", "Cannot load wallpaper layers", error) }
         }
@@ -130,11 +159,11 @@ class LiveLayerWallpaperService : WallpaperService() {
         }
 
         private fun scheduleDraw() {
-            if (visible && ready && !frameScheduled) { frameScheduled = true; handler.postDelayed(frame, 16) }
+            if (lifecycle.visible && lifecycle.surfaceReady && !frameScheduled) { frameScheduled = true; handler.postDelayed(frame, 16) }
         }
 
         private fun draw() {
-            if (!ready || !surfaceHolder.surface.isValid) return
+            if (!lifecycle.surfaceReady || !surfaceHolder.surface.isValid) return
             var canvas: Canvas? = null
             try {
                 canvas = surfaceHolder.lockCanvas() ?: return

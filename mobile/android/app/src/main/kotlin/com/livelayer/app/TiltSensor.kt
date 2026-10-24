@@ -22,7 +22,7 @@ internal class TiltSensor(context: Context, private val rotation: () -> Int,
     private var started = false
 
     fun start() {
-        stop()
+        if (started) return
         motion.reset()
         changed(0f, 0f)
         sensor?.let { started = manager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
@@ -35,6 +35,7 @@ internal class TiltSensor(context: Context, private val rotation: () -> Int,
     }
 
     override fun onSensorChanged(event: SensorEvent) {
+        if (!started) return
         val displayRotation = rotation()
         if (displayRotation != lastRotation) { motion.reset(); lastRotation = displayRotation }
         SensorManager.getRotationMatrixFromVector(matrix, event.values)

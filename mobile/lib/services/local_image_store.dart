@@ -13,6 +13,10 @@ class LocalImageStore {
 
   static const _channel = MethodChannel('live_layer/storage');
 
+  Future<Map<Object?, Object?>> migrateGalleryImages() async =>
+      (await _channel.invokeMapMethod<Object?, Object?>(
+          'migrateGalleryImages', {'scope': scope, 'ownerId': ownerId}))!;
+
   Future<void> attachLive2D(String id, String draftId) =>
       _channel.invokeMethod<void>('attachLocalLive2D',
           {'scope': scope, 'ownerId': ownerId, 'id': id, 'draftId': draftId});

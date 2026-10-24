@@ -142,6 +142,9 @@ void main() {
       expect((call.arguments as Map)['scope'], api.storageScope);
       expect((call.arguments as Map)['ownerId'], api.userId);
       if (call.method == 'listLocalImages') return images;
+      if (call.method == 'migrateGalleryImages') {
+        return {'imported': 2, 'removed': 2, 'remaining': 0, 'failed': 0};
+      }
       if (call.method == 'downloadSharedImage') {
         if (failSharedDownload) throw PlatformException(code: 'download_failed');
         final downloaded = File('${temp.path}/downloaded-shared.png');
@@ -1125,6 +1128,19 @@ void main() {
       });
     }
   }
+  testWidgets('settings migrates old gallery copies through the authenticated account', (tester) async {
+    await show(tester, home());
+    await tester.tap(find.text('설정'));
+    await tester.pumpAndSettle();
+    final migration = find.byKey(const ValueKey('migrate-gallery-images'));
+    await tester.ensureVisible(migration);
+    await tester.tap(migration);
+    await tester.pumpAndSettle();
+    expect(find.text('기존 이미지를 앱 저장소로 이전했습니다. 앱에서 만든 갤러리 복사본은 제거했습니다.'), findsOneWidget);
+    expect(imports, 0);
+    expect(appliedLocalWallpaper, isNull);
+  });
+
   testWidgets('small home supports both layouts, the editor, and settings',
       (tester) async {
     await show(tester, home(), size: const Size(320, 640), scale: 1.6);
