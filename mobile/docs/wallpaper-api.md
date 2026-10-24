@@ -65,16 +65,23 @@ screen when the OS supports it.
 | `live_layer/wallpaper` | `applyLocalStaticWallpaper` | `sourcePath`, `target`, optional `ratio` |
 | `live_layer/wallpaper` | `applyStaticWallpaper` | `url`, `target`, optional `ratio` |
 | `live_layer/wallpaper` | `clearWallpaper` | `target` |
-| `live_layer/storage` | `activateLocalLive2D` | `scope`, `ownerId`, `id` |
+| `live_layer/storage` | `activateLocalLive2D` | `scope`, `ownerId`, `id`, optional `target` |
 | `live_layer/wallpaper` | `activateLive2DDraft` | `draftId` |
 | `live_layer/wallpaper` | `getActiveLive2DTarget` | none (returns Android flags, or `0`) |
+| `live_layer/wallpaper` | `cloneLive2DDraft` | `draftId` |
+| `live_layer/storage` | `getLocalLive2DDraft` | `scope`, `ownerId`, `id` (unshared owned image) |
+| `live_layer/storage` | `saveLocalImageEdits` | `scope`, `ownerId`, `id`, `sourcePath`, `title`, `tags`, `width`, `height`, `ratio`, optional `draftId` |
 
 The wire target is exactly `home`, `lock`, or `both`. An omitted/null target defaults
 to `home` for existing callers. Invalid values fail with `invalid_target`.
 `clearHomeWallpaper` remains a home-only compatibility alias. Settings use one
 **배경화면 제거** action with independent home/lock checkboxes, disabled deletion
-when neither is selected, and **취소 / 삭제** actions. Activation returns `true`
-only after Android confirms the selection; cancelling returns `false`.
+when neither is selected, and **취소 / 삭제** actions. The single Live 2D activation
+button reuses an active service directly and returns `true` without opening a picker.
+Initial activation or a changed target still requires Android confirmation;
+cancelling returns `false`. Successful activation also returns the selected layers
+to the editor. Shared images cannot be modified, including through metadata-only
+edit methods, and edit saves preserve the existing image ID.
 
 All account-scoped storage operations now carry both the legacy server/account
 `scope` and the stable authenticated `ownerId`. Android resolves registered images

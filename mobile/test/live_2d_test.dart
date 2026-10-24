@@ -64,6 +64,14 @@ void main() {
           return activeFlags;
         case 'activateLive2DDraft':
           return confirmActivation;
+        case 'cloneLive2DDraft':
+          return {
+            'draftId': 'cloned-draft',
+            'backgroundPath': source,
+            'foregroundPath': source,
+            'width': 32,
+            'height': 48
+          };
         case 'getDisplaySize':
           return {'width': 360, 'height': 720};
         case 'splitLive2D':
@@ -167,7 +175,7 @@ void main() {
     failSplit = true;
     await open(tester, Live2DPage(sourcePath: source));
     expect(find.text('모델 다운로드 후 다시 시도해 주세요.'), findsOneWidget);
-    expect(find.byKey(const ValueKey('use-live2d')), findsNothing);
+    expect(find.byKey(const ValueKey('activate-live2d')), findsNothing);
     failSplit = false;
     await tester.tap(find.text('다시 시도'));
     await settleFiles(tester);
@@ -179,12 +187,12 @@ void main() {
     await tester.tap(find.text('인물·사물'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('live2d-fixed-background')), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('use-live2d')));
-    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activate-live2d')));
+    await settleFiles(tester);
     expect(selected!.id, 'draft-1');
-    expect(discarded, isEmpty);
+    expect(discarded, isNot(contains('draft-1')));
     await Live2DService.discard(selected);
-    expect(discarded, ['draft-1']);
+    expect(discarded.where((id) => id == 'draft-1').toList(), ['draft-1']);
   });
 
   testWidgets('leaving a split preview discards its temporary layers',
@@ -193,7 +201,7 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(selected, isNull);
-    expect(discarded, ['draft-1']);
+    expect(discarded.where((id) => id == 'draft-1').toList(), ['draft-1']);
   });
 
   testWidgets('sensor tilt moves only foreground and remains bounded',
@@ -255,15 +263,15 @@ void main() {
     expect(find.text('2.5D'), findsNothing);
     await tester.tap(live);
     await settleFiles(tester);
-    await tester.tap(find.byKey(const ValueKey('use-live2d')));
-    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activate-live2d')));
+    await settleFiles(tester);
     await tester.tap(find.byKey(const ValueKey('save-registration')));
     await settleFiles(tester);
     expect(find.text('Live 2D 저장'), findsNothing);
     expect(options!.live2D!.id, 'draft-1');
     expect(options!.upscaleFactor, isNull);
     expect(options!.wallpaperTarget, isNull);
-    expect(discarded, isEmpty);
+    expect(discarded, isNot(contains('draft-1')));
     await options!.editedFile?.dispose();
     await Live2DService.discard(options!.live2D);
   });
@@ -313,8 +321,8 @@ void main() {
     expect(aspect.aspectRatio, closeTo(16 / 9, .00001));
     expect(tester.getSize(find.byType(Live2DPreview)).aspectRatio,
         closeTo(16 / 9, .00001));
-    await tester.tap(find.byKey(const ValueKey('use-live2d')));
-    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activate-live2d')));
+    await settleFiles(tester);
     expect(canvas().crop, initialCrop);
     expect(tester.getSize(find.byType(Live2DPreview)).aspectRatio,
         closeTo(16 / 9, .00001));
@@ -342,19 +350,19 @@ void main() {
     await tool('information');
     await tool('crop');
     expect(canvas().crop, finalCrop);
-    await tool('parallax');
+    await tool('filter');
     expect(calls.where((c) => c.method == 'splitLive2D').length, 1);
     preview = tester.widget<Live2DPreview>(find.byType(Live2DPreview));
     expect(preview.crop, finalCrop);
     expect(preview.filter, PhotoFilter.monochrome);
-    expect(discarded, isEmpty);
+    expect(discarded, isNot(contains('draft-1')));
 
     // A failed layer export must retain the editable source for a retry.
     failEdit = true;
     await tester.tap(find.byKey(const ValueKey('save-registration')));
     await settleFiles(tester);
     expect(options, isNull);
-    expect(discarded, isEmpty);
+    expect(discarded, isNot(contains('draft-1')));
     expect(find.byType(Live2DPreview), findsOneWidget);
     failEdit = false;
     await tester.pump(const Duration(seconds: 5));
@@ -366,7 +374,7 @@ void main() {
     expect(options!.ratio.automatic, isFalse);
     expect(options!.live2D!.width, options!.editedFile!.width);
     expect(options!.live2D!.height, options!.editedFile!.height);
-    expect(discarded, ['draft-1']);
+    expect(discarded.where((id) => id == 'draft-1').toList(), ['draft-1']);
     final temporary =
         calls.lastWhere((c) => c.method == 'editLive2D').arguments as Map;
     for (final key in ['backgroundPath', 'foregroundPath']) {
@@ -413,8 +421,8 @@ void main() {
     await settleFiles(tester);
     expect(tester.getSize(find.byType(Live2DPreview)).aspectRatio,
         closeTo(1, .00001));
-    await tester.tap(find.byKey(const ValueKey('use-live2d')));
-    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activate-live2d')));
+    await settleFiles(tester);
     final crop = find.widgetWithText(TextButton, '자르기');
     await tester.ensureVisible(crop);
     await tester.tap(crop);
@@ -435,7 +443,7 @@ void main() {
     expect(preview.filter, PhotoFilter.sepia);
     expect(preview.crop.width * 32 / (preview.crop.height * 48),
         closeTo(16 / 9, .00001));
-    expect(discarded, isEmpty);
+    expect(discarded, isNot(contains('draft-1')));
     final finish = find.text('완료하고 등록');
     await tester.ensureVisible(finish);
     await tester.tap(finish);
@@ -443,7 +451,7 @@ void main() {
     expect(result!.live2D!.id, 'edited-draft');
     expect(result!.ratio.preset, CropPreset.wide);
     expect(result!.ratio.portrait, isFalse);
-    expect(discarded, ['draft-1']);
+    expect(discarded.where((id) => id == 'draft-1').toList(), ['draft-1']);
     await tester.runAsync(() => result!.editedFile!.dispose());
     await Live2DService.discard(result!.live2D);
   });
@@ -474,14 +482,21 @@ void main() {
       final request =
           calls.singleWhere((c) => c.method == 'activateLive2DDraft');
       expect(request.arguments, {'draftId': 'edited-draft'});
-      expect(discarded, ['edited-draft']);
-      expect(selected, isNull);
-      expect(find.text('Live 2D를 활성화했습니다. 이후 같은 화면에는 미리보기 없이 적용됩니다.'),
-          confirmed ? findsOneWidget : findsNothing);
+      if (confirmed) {
+        expect(selected!.id, 'edited-draft');
+        expect(discarded, ['draft-1']);
+        await Live2DService.discard(selected);
+        expect(discarded, ['draft-1', 'edited-draft']);
+      } else {
+        expect(discarded, ['edited-draft']);
+        expect(selected, isNull);
+        expect(find.text('Live 2D 사용'), findsNothing);
+        expect(find.text('배경화면에서 Live 2D 활성화'), findsOneWidget);
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+        expect(discarded, ['edited-draft', 'draft-1']);
+      }
       expect(tester.takeException(), isNull);
-      await tester.pageBack();
-      await tester.pumpAndSettle();
-      expect(discarded, ['edited-draft', 'draft-1']);
     });
   }
 
@@ -522,7 +537,8 @@ void main() {
         calls.singleWhere((c) => c.method == 'activateLocalLive2D').arguments, {
       'scope': 'server\naccount-1',
       'ownerId': 'account-1',
-      'id': 'image-1'
+      'id': 'image-1',
+      'target': 'home',
     });
     expect(
         tester
@@ -542,6 +558,43 @@ void main() {
     expect(find.text('배경화면을 적용했습니다.'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+      'existing layers reopen without segmentation and cancellation retains the editor draft',
+      (tester) async {
+    activeFlags = 0;
+    confirmActivation = false;
+    await open(
+        tester,
+        ImageFeaturePage(
+            filePath: source,
+            title: 'existing',
+            loadLive2D: () async => Live2DDraft(
+                id: 'owned-draft',
+                backgroundPath: source,
+                foregroundPath: source,
+                width: 32,
+                height: 48)));
+    final live = find.byKey(const ValueKey('registration-tool-parallax'));
+    await tester.ensureVisible(live);
+    await tester.tap(live);
+    await settleFiles(tester);
+    expect(calls.where((c) => c.method == 'splitLive2D'), isEmpty);
+    expect(calls.singleWhere((c) => c.method == 'cloneLive2DDraft').arguments,
+        {'draftId': 'owned-draft'});
+    await tester.tap(find.byKey(const ValueKey('activate-live2d')));
+    await settleFiles(tester);
+    expect(find.byType(Live2DPage), findsOneWidget);
+    expect(discarded, isNot(contains('owned-draft')));
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(discarded, contains('cloned-draft'));
+    expect(discarded, isNot(contains('owned-draft')));
+    expect(find.byType(ImageFeaturePage), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(discarded, contains('owned-draft'));
   });
 
   testWidgets(

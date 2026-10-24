@@ -107,6 +107,12 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "getActiveLive2DTarget" -> result.success(activeLiveWallpaperFlags())
+                    "cloneLive2DDraft" -> ioExecutor.execute {
+                        try {
+                            val draft = live2DStore.cloneDraft(call.argument<String>("draftId") ?: error("분리 ID가 없습니다."))
+                            runOnUiThread { result.success(draft) }
+                        } catch (error: Exception) { runOnUiThread { result.error("live2d_failed", error.message, null) } }
+                    }
                     "activateLive2DDraft" -> ioExecutor.execute {
                         try {
                             val manifest = live2DStore.activateDraft(call.argument<String>("draftId") ?: error("분리 ID가 없습니다."))
@@ -204,7 +210,7 @@ class MainActivity : FlutterActivity() {
                     when (call.method) {
                         "attachLocalLive2D" -> storageMutation(result) {
                             val id = call.argument<String>("id") ?: error("이미지 ID가 없습니다.")
-                            val item = imageStore.item(ownerId!!, id)
+                            val item = imageStore.requireEditable(ownerId!!, id)
                             live2DStore.attach(ownerId, id, call.argument<String>("draftId") ?: error("분리 ID가 없습니다."))
                             try {
                                 if (item.optString("mode") != "live2d") {
@@ -225,8 +231,32 @@ class MainActivity : FlutterActivity() {
                                 runOnUiThread { result.error("live2d_failed", error.message, null) }
                             }
                         }
+                        "getLocalLive2DDraft" -> ioExecutor.execute {
+                            try {
+                                val id = call.argument<String>("id") ?: error("이미지 ID가 없습니다.")
+                                val item = imageStore.requireEditable(ownerId!!, id)
+                                require(item.optString("mode") == "live2d") { "Live 2D 이미지가 아닙니다." }
+                                val draft = live2DStore.editableLayers(ownerId, id)
+                                runOnUiThread { result.success(draft) }
+                            } catch (error: Exception) { runOnUiThread { result.error("image_edit_failed", error.message, null) } }
+                        }
+                        "saveLocalImageEdits" -> ioExecutor.execute {
+                            try {
+                                val id = call.argument<String>("id") ?: error("이미지 ID가 없습니다.")
+                                val draftId = call.argument<String>("draftId")
+                                val updated = imageStore.saveEdits(ownerId!!, id,
+                                    File(call.argument<String>("sourcePath") ?: error("이미지가 없습니다.")),
+                                    call.argument<String>("title") ?: error("이름이 없습니다."),
+                                    call.argument<List<String>>("tags") ?: error("태그가 없습니다."),
+                                    call.argument<Int>("width") ?: 0, call.argument<Int>("height") ?: 0,
+                                    JSONObject(WallpaperRatio.fromMap(call.argument<Map<*, *>>("ratio")).toMap()),
+                                    draftId != null,
+                                    if (draftId == null) null else { destination -> live2DStore.copyDraftLayers(draftId, destination) })
+                                runOnUiThread { result.success(updated) }
+                            } catch (error: Exception) { runOnUiThread { result.error("image_edit_failed", error.message, null) } }
+                        }
                         "activateLocalLive2D" -> prepareOwnedLiveWallpaper(ownerId!!,
-                            call.argument<String>("id"), result)
+                            call.argument<String>("id"), result, call.argument<Any>("target"))
                         "applyLocalLive2D" -> applyOwnedLiveWallpaper(ownerId!!,
                             call.argument<String>("id"), call.argument<Any>("target"), result)
                         "saveImageToGallery" -> enqueueLocalImageSave(
@@ -289,6 +319,7 @@ class MainActivity : FlutterActivity() {
                         "updateLocalImageTag" -> storageMutation(result) {
                             val args = call.arguments as? Map<*, *>
                             val id = args?.get("id") as? String ?: error("이미지 ID가 없습니다.")
+                            imageStore.requireEditable(ownerId!!, id)
                             val tags = (args["tags"] as? List<*>)?.filterIsInstance<String>()
                                 ?.filter { it.isNotBlank() } ?: error("태그가 없습니다.")
                             require(tags.isNotEmpty())
@@ -299,6 +330,7 @@ class MainActivity : FlutterActivity() {
                         "updateLocalImageDetails" -> storageMutation(result) {
                             val args = call.arguments as? Map<*, *>
                             val id = args?.get("id") as? String ?: error("이미지 ID가 없습니다.")
+                            imageStore.requireEditable(ownerId!!, id)
                             val title = (args["title"] as? String)?.trim() ?: error("이름이 없습니다.")
                             val tags = (args["tags"] as? List<*>)?.filterIsInstance<String>()
                                 ?.filter { it.isNotBlank() } ?: error("태그가 없습니다.")
@@ -644,24 +676,40 @@ class MainActivity : FlutterActivity() {
         return imageStore.item(ownerId, id)
     }
 
-    private fun prepareOwnedLiveWallpaper(ownerId: String, id: String?, result: MethodChannel.Result) {
+    private fun prepareOwnedLiveWallpaper(ownerId: String, id: String?, result: MethodChannel.Result,
+        requestedTarget: Any? = null, forcePreview: Boolean = false) {
         ioExecutor.execute {
             try {
                 val item = localWallpaperItem(ownerId, id)
                 require(item.optString("mode") == "live2d") { "먼저 Live 2D 이미지를 분리해 주세요." }
                 val manifest = live2DStore.activate(ownerId, item.getString("id"))
-                runOnUiThread { launchLiveActivation(manifest, result) }
+                val requestedFlags = requestedTarget?.let { WallpaperTarget.fromArgument(it).flags }
+                runOnUiThread { launchLiveActivation(manifest, result, requestedFlags, !forcePreview) }
             } catch (error: Exception) { runOnUiThread { result.error("live2d_failed", error.message, null) } }
         }
     }
 
-    private fun launchLiveActivation(manifest: File, result: MethodChannel.Result) {
+    private fun launchLiveActivation(manifest: File, result: MethodChannel.Result,
+        requestedFlags: Int? = null, allowDirect: Boolean = true) {
         if (pendingLiveActivation != null) {
             ioExecutor.execute { live2DStore.discardWallpaper(manifest.absolutePath) }
             result.error("live2d_busy", "다른 Live 2D 활성화가 진행 중입니다.", null)
             return
         }
         try {
+            val active = activeLiveWallpaperFlags()
+            if (allowDirect && LiveWallpaperSelection.canActivateDirect(active, requestedFlags)) {
+                ioExecutor.execute {
+                    try {
+                        commitLiveSelection(manifest)
+                        runOnUiThread { result.success(true) }
+                    } catch (error: Exception) {
+                        live2DStore.discardWallpaper(manifest.absolutePath)
+                        runOnUiThread { result.error("live2d_failed", error.message, null) }
+                    }
+                }
+                return
+            }
             check(getSharedPreferences("live_layer", MODE_PRIVATE).edit()
                 .putString("preview_manifest_path", manifest.absolutePath).commit())
             pendingLiveActivation = result
@@ -684,6 +732,19 @@ class MainActivity : FlutterActivity() {
         return (if (home) WallpaperManager.FLAG_SYSTEM else 0) or (if (lock) WallpaperManager.FLAG_LOCK else 0)
     }
 
+    private fun commitLiveSelection(manifest: File) {
+        val manager = WallpaperManager.getInstance(this)
+        check(manager.isWallpaperSupported && manager.isSetWallpaperAllowed) { "이 기기에서 배경화면 변경이 허용되지 않습니다." }
+        val preferences = getSharedPreferences("live_layer", MODE_PRIVATE)
+        val previous = preferences.getString("manifest_path", null)
+        val direct = preferences.getString("direct_manifest_path", null)
+        if (!preferences.edit().putString("manifest_path", manifest.absolutePath)
+                .putString("direct_manifest_path", manifest.absolutePath).commit()) {
+            preferences.edit().putString("manifest_path", previous).putString("direct_manifest_path", direct).commit()
+            error("배경화면 설정을 저장하지 못했습니다.")
+        }
+    }
+
     private fun applyOwnedLiveWallpaper(ownerId: String, id: String?, rawTarget: Any?, result: MethodChannel.Result) {
         val target = wallpaperTarget(rawTarget, result) ?: return
         ioExecutor.execute {
@@ -701,9 +762,7 @@ class MainActivity : FlutterActivity() {
                 check(pendingLiveActivation == null) { "Live 2D 활성화 확인이 진행 중입니다." }
                 val snapshot = live2DStore.activate(ownerId, item.getString("id"))
                 manifest = snapshot
-                check(getSharedPreferences("live_layer", MODE_PRIVATE).edit()
-                    .putString("direct_manifest_path", snapshot.absolutePath)
-                    .putString("manifest_path", snapshot.absolutePath).commit())
+                commitLiveSelection(snapshot)
                 runOnUiThread { result.success(null) }
             } catch (error: Exception) {
                 manifest?.let { live2DStore.discardWallpaper(it.absolutePath) }
@@ -715,7 +774,7 @@ class MainActivity : FlutterActivity() {
     private fun previewLocalWallpaper(ownerId: String, id: String?, result: MethodChannel.Result) {
         val item = localWallpaperItem(ownerId, id)
         if (item.optString("mode") == "live2d") {
-            prepareOwnedLiveWallpaper(ownerId, id, result)
+            prepareOwnedLiveWallpaper(ownerId, id, result, forcePreview = true)
             return
         }
         val source = File(item.getString("path")).canonicalFile

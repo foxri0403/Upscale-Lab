@@ -10,10 +10,12 @@ class Live2DPage extends StatefulWidget {
       required this.sourcePath,
       this.crop = const Rect.fromLTWH(0, 0, 1, 1),
       this.filter = PhotoFilter.original,
-      this.keepSourceLayers = false});
+      this.keepSourceLayers = false,
+      this.initialDraft});
   final String sourcePath;
   final Rect crop;
   final PhotoFilter filter;
+  final Live2DDraft? initialDraft;
 
   /// Editors retain the full layers so subsequent crops remain reversible.
   final bool keepSourceLayers;
@@ -24,13 +26,17 @@ class Live2DPage extends StatefulWidget {
 class _Live2DPageState extends State<Live2DPage> {
   Live2DDraft? _draft;
   bool _processing = true;
-  bool _activating = false;
   String? _error;
   String _layer = 'composite';
   @override
   void initState() {
     super.initState();
-    _split();
+    _draft = widget.initialDraft;
+    if (_draft == null) {
+      _split();
+    } else {
+      _processing = false;
+    }
   }
 
   Future<void> _split() async {
@@ -56,16 +62,18 @@ class _Live2DPageState extends State<Live2DPage> {
     }
   }
 
-  Future<void> _use() async {
+  Future<void> _activate() async {
     final original = _draft;
     if (original == null || _processing) return;
     setState(() => _processing = true);
     Live2DDraft? output;
+    Live2DDraft? applied;
     try {
-      output = widget.keepSourceLayers
-          ? original
-          : await Live2DService.export(original,
-              crop: widget.crop, filter: widget.filter);
+      applied = await Live2DService.export(original,
+          crop: widget.crop, filter: widget.filter);
+      final confirmed = await Live2DService.activate(applied);
+      if (!confirmed) return;
+      output = widget.keepSourceLayers ? original : applied;
       if (!mounted) return;
       setState(() => _processing = false);
       await WidgetsBinding.instance.endOfFrame;
@@ -73,43 +81,21 @@ class _Live2DPageState extends State<Live2DPage> {
       _draft = null;
       if (output.id != original.id) Live2DService.discard(original);
       Navigator.pop(context, output);
+      if (applied.id == output.id) applied = null;
       output = null; // Ownership transfers to the caller.
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Live 2D를 저장하지 못했습니다. 다시 시도해 주세요.')));
-      }
-    } finally {
-      if (output != null && output.id != _draft?.id) {
-        await Live2DService.discard(output);
-      }
-      if (mounted) setState(() => _processing = false);
-    }
-  }
-
-  Future<void> _activate() async {
-    final draft = _draft;
-    if (draft == null || _processing || _activating) return;
-    setState(() => _activating = true);
-    Live2DDraft? edited;
-    try {
-      edited = await Live2DService.export(draft,
-          crop: widget.crop, filter: widget.filter);
-      final confirmed = await Live2DService.activate(edited);
-      if (mounted && confirmed) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Live 2D를 활성화했습니다. 이후 같은 화면에는 미리보기 없이 적용됩니다.')));
-      }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Live 2D를 활성화하지 못했습니다. 다시 시도해 주세요.')));
       }
     } finally {
-      if (edited != null && edited.id != draft.id) {
-        await Live2DService.discard(edited);
+      if (output != null && output.id != _draft?.id) {
+        await Live2DService.discard(output);
       }
-      if (mounted) setState(() => _activating = false);
+      if (applied != null && applied.id != _draft?.id) {
+        await Live2DService.discard(applied);
+      }
+      if (mounted) setState(() => _processing = false);
     }
   }
 
@@ -123,7 +109,7 @@ class _Live2DPageState extends State<Live2DPage> {
   Widget build(BuildContext context) {
     final draft = _draft;
     return PopScope(
-        canPop: !_processing && !_activating,
+        canPop: !_processing,
         child: Scaffold(
             appBar: AppBar(title: const Text('Live 2D')),
             body: SafeArea(
@@ -203,18 +189,9 @@ class _Live2DPageState extends State<Live2DPage> {
                                       textAlign: TextAlign.center),
                                   const SizedBox(height: 12),
                                   FilledButton(
-                                      key: const ValueKey('use-live2d'),
-                                      onPressed: _processing || _activating
-                                          ? null
-                                          : _use,
-                                      child: const Text('Live 2D 사용')),
-                                  const SizedBox(height: 8),
-                                  TextButton(
                                       key: const ValueKey('activate-live2d'),
-                                      onPressed: _processing || _activating
-                                          ? null
-                                          : _activate,
-                                      child: _activating
+                                      onPressed: _processing ? null : _activate,
+                                      child: _processing
                                           ? const Row(
                                               mainAxisSize: MainAxisSize.min,
                                               children: [
@@ -228,7 +205,7 @@ class _Live2DPageState extends State<Live2DPage> {
                                                 ])
                                           : const Text('배경화면에서 Live 2D 활성화')),
                                   const Text(
-                                      '최초 활성화·대상 변경에는 Android 확인이 필요하며 현재 이미지가 배경화면에 적용됩니다. 저장만 할 때는 활성화하지 않아도 됩니다.',
+                                      '현재 이미지를 배경화면에 적용하고 편집에 사용합니다. 이미 활성화되어 있으면 바로 적용하며, 최초 활성화에는 Android 확인이 필요합니다.',
                                       textAlign: TextAlign.center),
                                 ] else
                                   const Text(

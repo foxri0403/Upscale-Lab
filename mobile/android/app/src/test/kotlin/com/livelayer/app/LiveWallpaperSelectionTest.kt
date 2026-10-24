@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LiveWallpaperSelectionTest {
+    @Test fun activationReusesAnActiveServiceWithoutOpeningAnotherPreview() {
+        assertFalse(LiveWallpaperSelection.canActivateDirect(0, null))
+        for (active in 1..3) {
+            assertTrue(LiveWallpaperSelection.canActivateDirect(active, null))
+            assertTrue(LiveWallpaperSelection.canActivateDirect(active, active))
+        }
+        assertFalse(LiveWallpaperSelection.canActivateDirect(1, 3))
+        assertFalse(LiveWallpaperSelection.canActivateDirect(3, 2))
+    }
     @Test fun directUpdatesRequireTheAlreadyActiveAndroidDestinations() {
         for (active in 0..3) for (requested in 1..3) {
             assertEquals(active != 0 && requested == active,

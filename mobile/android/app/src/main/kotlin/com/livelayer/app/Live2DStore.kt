@@ -36,6 +36,13 @@ internal class Live2DStore(private val context: Context) {
         return File(saved, key)
     }
 
+    private fun privateLayers(owner: String, id: String): File =
+        File(context.filesDir, "image_library/${GalleryImageMetadata.ownerKey(owner)}/${safeId(id)}/live2d")
+
+    private fun savedLayers(owner: String, id: String): File = privateLayers(owner, id).let {
+        if (it.isDirectory) it else File(ownerDirectory(owner), safeId(id))
+    }
+
     fun split(source: File): Map<String, Any> {
         val segmenter = SubjectSegmentation.getClient(SubjectSegmenterOptions.Builder()
             .enableForegroundConfidenceMask().build())
@@ -134,6 +141,18 @@ internal class Live2DStore(private val context: Context) {
     /** Import both edited PNGs atomically; leave the raw separation reversible. */
     fun edit(draftId: String, background: File, foreground: File): Map<String, Any> {
         val original = File(drafts, safeId(draftId))
+        return copyDraft(original, background, foreground)
+    }
+
+    fun cloneDraft(id: String): Map<String, Any> = File(drafts, safeId(id)).let {
+        copyDraft(it, File(it, "background.png"), File(it, "foreground.png"))
+    }
+
+    fun editableLayers(owner: String, id: String): Map<String, Any> = savedLayers(owner, id).let {
+        copyDraft(it, File(it, "background.png"), File(it, "foreground.png"))
+    }
+
+    private fun copyDraft(original: File, background: File, foreground: File): Map<String, Any> {
         val manifest = JSONObject(File(original, "manifest.json").readText())
         val sizes = listOf(background, foreground).map { file ->
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -165,9 +184,9 @@ internal class Live2DStore(private val context: Context) {
     fun attach(owner: String, imageId: String, draftId: String) {
         val source = File(drafts, safeId(draftId))
         require(File(source, "manifest.json").isFile) { "분리된 이미지가 만료되었습니다. 다시 분리해 주세요." }
-        val destination = File(ownerDirectory(owner), safeId(imageId))
-        val staging = File(ownerDirectory(owner), ".${safeId(imageId)}-${UUID.randomUUID()}")
-        val previous = File(ownerDirectory(owner), ".previous-${UUID.randomUUID()}")
+        val destination = privateLayers(owner, imageId)
+        val staging = File(destination.parentFile, ".live2d-${UUID.randomUUID()}")
+        val previous = File(destination.parentFile, ".previous-${UUID.randomUUID()}")
         try {
             check(staging.mkdirs())
             for (name in listOf("background.png", "foreground.png", "manifest.json")) {
@@ -183,10 +202,21 @@ internal class Live2DStore(private val context: Context) {
         }
     }
 
-    fun delete(owner: String, imageId: String) { File(ownerDirectory(owner), safeId(imageId)).deleteRecursively() }
+    fun delete(owner: String, imageId: String) {
+        privateLayers(owner, imageId).deleteRecursively()
+        File(ownerDirectory(owner), safeId(imageId)).deleteRecursively()
+    }
+
+    fun copyDraftLayers(draftId: String, destination: File) {
+        val source = File(drafts, safeId(draftId))
+        require(listOf("manifest.json", "background.png", "foreground.png").all { File(source, it).isFile }) {
+            "Live 2D 레이어가 만료되었습니다. 다시 분리해 주세요."
+        }
+        check(source.copyRecursively(destination))
+    }
 
     fun layers(owner: String, imageId: String): Map<String, Any> {
-        val directory = File(ownerDirectory(owner), safeId(imageId))
+        val directory = savedLayers(owner, imageId)
         require(listOf("manifest.json", "background.png", "foreground.png").all { File(directory, it).isFile }) {
             "Live 2D 레이어가 없습니다. 원본 사진에서 다시 분리해 주세요."
         }
@@ -203,7 +233,7 @@ internal class Live2DStore(private val context: Context) {
 
     fun activate(owner: String, imageId: String): File {
         layers(owner, imageId)
-        val source = File(ownerDirectory(owner), safeId(imageId))
+        val source = savedLayers(owner, imageId)
         return snapshot(source)
     }
 

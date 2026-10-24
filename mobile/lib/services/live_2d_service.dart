@@ -38,6 +38,10 @@ abstract final class Live2DService {
           .invokeMethod<bool>('activateLive2DDraft', {'draftId': draft.id}) ??
       false;
 
+  static Future<Live2DDraft> clone(Live2DDraft draft) async =>
+      Live2DDraft.fromMap((await _channel.invokeMapMethod<Object?, Object?>(
+          'cloneLive2DDraft', {'draftId': draft.id}))!);
+
   static Future<WallpaperTarget?> activeTarget() async {
     try {
       return switch (

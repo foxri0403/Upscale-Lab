@@ -23,11 +23,18 @@ internal class PrivateImageStore(private val root: File) {
     }
 
     @Synchronized fun list(owner: String): List<Map<String, Any?>> =
-        ownerRoot(owner).listFiles().orEmpty().filter { it.isDirectory && idPattern.matches(it.name) }
+        ownerRoot(owner).let { parent ->
+            parent.listFiles().orEmpty().filter { it.name.startsWith(".edit-backup-") }.forEach { backup ->
+                val id = backup.name.removePrefix(".edit-backup-")
+                if (idPattern.matches(id)) recover(owner, id)
+            }
+            parent.listFiles().orEmpty()
+        }.filter { it.isDirectory && idPattern.matches(it.name) }
             .mapNotNull { runCatching { toMap(item(owner, it.name)) }.getOrNull() }
             .sortedByDescending { it["createdAt"] as String }
 
     @Synchronized fun item(owner: String, id: String): JSONObject {
+        recover(owner, id)
         val folder = directory(owner, id)
         val json = File(folder, "item.json")
         // Recover an interrupted metadata replacement without discarding the image.
@@ -40,7 +47,7 @@ internal class PrivateImageStore(private val root: File) {
             "로그인한 사용자의 이미지가 없습니다."
         }
         val name = metadata.getString("fileName")
-        require(name.matches(Regex("source\\.[a-z0-9]{1,10}"))) { "이미지 경로가 올바르지 않습니다." }
+        require(name.matches(Regex("source(?:-[A-Za-z0-9_-]+)?\\.[a-z0-9]{1,10}"))) { "이미지 경로가 올바르지 않습니다." }
         val file = File(folder, name).canonicalFile
         require(file.parentFile == folder && file.isFile && file.length() > 0) { "저장된 이미지 파일이 없습니다." }
         return metadata.put("path", file.absolutePath)
@@ -87,6 +94,60 @@ internal class PrivateImageStore(private val root: File) {
             .put("fileName", current.getString("fileName")).put("updatedAt", timestamp())
         updated.remove("path")
         writeJson(File(directory(owner, id), "item.json"), updated)
+    }
+
+    @Synchronized fun requireEditable(owner: String, id: String): JSONObject = item(owner, id).also {
+        require(it.optString("galleryPostId").let { value -> value.isBlank() || value == "null" }) {
+            "공유 중인 이미지는 수정할 수 없습니다. 먼저 공유를 취소해 주세요."
+        }
+    }
+
+    /** Replace pixels, metadata and optional layers together without changing identity. */
+    @Synchronized fun saveEdits(owner: String, id: String, source: File, title: String,
+        tags: List<String>, width: Int, height: Int, ratio: JSONObject, live: Boolean,
+        prepareLayers: ((File) -> Unit)? = null): Map<String, Any?> {
+        val current = requireEditable(owner, id)
+        require(source.isFile && source.length() > 0 && title.isNotBlank() && title.length <= 160 &&
+            width > 0 && height > 0 && tags.isNotEmpty()) { "이미지 정보가 올바르지 않습니다." }
+        require(!live || prepareLayers != null) { "Live 2D 레이어가 없습니다." }
+        val destination = directory(owner, id)
+        val staging = File(destination.parentFile, ".edit-${UUID.randomUUID()}")
+        val backup = File(destination.parentFile, ".edit-backup-$id")
+        val extension = source.extension.lowercase(Locale.US)
+            .takeIf { it.matches(Regex("[a-z0-9]{1,10}")) } ?: "img"
+        val name = "source-${UUID.randomUUID()}.$extension"
+        val metadata = JSONObject(current.toString()).apply {
+            remove("path")
+            put("title", title).put("tags", JSONArray(tags)).put("tag", tags.first())
+            put("width", width).put("height", height).put("ratio", ratio)
+            put("mode", if (live) "live2d" else "original").put("fileName", name).put("updatedAt", timestamp())
+        }
+        check(staging.mkdir())
+        try {
+            val pixels = File(staging, name)
+            source.inputStream().use { input -> FileOutputStream(pixels).use { output ->
+                input.copyTo(output); output.fd.sync()
+            } }
+            check(sha256(source) == sha256(pixels)) { "이미지 복사 검증에 실패했습니다." }
+            if (live) prepareLayers!!(File(staging, "live2d"))
+            writeJson(File(staging, "item.json"), metadata)
+            check(!backup.exists() || backup.deleteRecursively())
+            check(destination.renameTo(backup))
+            try {
+                check(staging.renameTo(destination)) { "수정한 이미지를 저장하지 못했습니다." }
+            } catch (error: Exception) {
+                check(backup.renameTo(destination)) { "원본 이미지를 복구하지 못했습니다." }
+                throw error
+            }
+            backup.deleteRecursively()
+            return toMap(item(owner, id))
+        } finally { if (staging.exists()) staging.deleteRecursively() }
+    }
+
+    private fun recover(owner: String, id: String) {
+        val destination = directory(owner, id)
+        val backup = File(destination.parentFile, ".edit-backup-$id")
+        if (!destination.exists() && backup.isDirectory) check(backup.renameTo(destination))
     }
 
     @Synchronized fun delete(owner: String, id: String) {

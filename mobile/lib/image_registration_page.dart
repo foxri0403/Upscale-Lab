@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter/rendering.dart' show OverflowBoxFit;
 import 'live_2d_page.dart';
 import 'services/live_2d_service.dart';
@@ -50,9 +51,19 @@ enum _RegistrationTool {
 
 class ImageFeaturePage extends StatefulWidget {
   const ImageFeaturePage(
-      {super.key, required this.filePath, required this.title});
+      {super.key,
+      required this.filePath,
+      required this.title,
+      this.initialTags = const [],
+      this.initialRatio = const ImageRatioSettings(),
+      this.loadLive2D,
+      this.onSave});
   final String filePath;
   final String title;
+  final List<String> initialTags;
+  final ImageRatioSettings initialRatio;
+  final Future<Live2DDraft?> Function()? loadLive2D;
+  final Future<void> Function(ImageRegistrationOptions)? onSave;
 
   @override
   State<ImageFeaturePage> createState() => _ImageFeaturePageState();
@@ -64,7 +75,8 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   final _toolKeys = {
     for (final tool in _RegistrationTool.values) tool: GlobalKey()
   };
-  final Set<String> _tags = {};
+  late final Set<String> _tags =
+      widget.initialTags.where(selectableGalleryTags.contains).toSet();
   EditorImageSource? _source;
   String? _error;
   String? _titleError;
@@ -72,11 +84,12 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   bool _exporting = false;
   _RegistrationTool _tool = _RegistrationTool.information;
   int _upscaleFactor = 2;
-  ImageRatioSettings _ratio = const ImageRatioSettings();
+  late ImageRatioSettings _ratio = widget.initialRatio;
   PhotoFilter _filter = PhotoFilter.original;
   Rect _crop = const Rect.fromLTWH(0, 0, 1, 1);
   int _canvasRevision = 0;
   Live2DDraft? _live2D;
+  bool _openingLive2D = false;
 
   void _clearLive2D() {
     final draft = _live2D;
@@ -85,28 +98,42 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   }
 
   Future<void> _openLive2D() async {
-    if (_source == null || _saving) return;
-    if (_live2D != null) {
-      setState(() => _tool = _RegistrationTool.parallax);
-      return;
+    if (_source == null || _saving || _openingLive2D) return;
+    _openingLive2D = true;
+    Live2DDraft? initial;
+    try {
+      if (_live2D case final draft?) initial = await Live2DService.clone(draft);
+      if (!mounted) {
+        await Live2DService.discard(initial);
+        return;
+      }
+      final result = await Navigator.of(context).push<Live2DDraft>(
+          MaterialPageRoute(
+              builder: (_) => Live2DPage(
+                  sourcePath: widget.filePath,
+                  crop: _crop,
+                  filter: _filter,
+                  initialDraft: initial,
+                  keepSourceLayers: true)));
+      if (result == null) return;
+      if (!mounted) {
+        await Live2DService.discard(result);
+        return;
+      }
+      _clearLive2D();
+      setState(() {
+        _live2D = result;
+        _tool = _RegistrationTool.parallax;
+      });
+    } catch (_) {
+      await Live2DService.discard(initial);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Live 2D를 불러오지 못했습니다. 다시 시도해 주세요.')));
+      }
+    } finally {
+      _openingLive2D = false;
     }
-    final result = await Navigator.of(context).push<Live2DDraft>(
-        MaterialPageRoute(
-            builder: (_) => Live2DPage(
-                sourcePath: widget.filePath,
-                crop: _crop,
-                filter: _filter,
-                keepSourceLayers: true)));
-    if (result == null) return;
-    if (!mounted) {
-      await Live2DService.discard(result);
-      return;
-    }
-    _clearLive2D();
-    setState(() {
-      _live2D = result;
-      _tool = _RegistrationTool.parallax;
-    });
   }
 
   @override
@@ -117,14 +144,23 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
 
   Future<void> _load() async {
     setState(() => _error = null);
+    EditorImageSource? source;
+    Live2DDraft? live;
     try {
-      final source = await ImageEditorService.loadPreview(widget.filePath);
+      source = await ImageEditorService.loadPreview(widget.filePath);
+      live = await widget.loadLive2D?.call();
       if (!mounted) {
         source.preview.dispose();
+        await Live2DService.discard(live);
         return;
       }
-      setState(() => _source = source);
+      setState(() {
+        _source = source;
+        _live2D = live;
+      });
     } catch (_) {
+      source?.preview.dispose();
+      await Live2DService.discard(live);
       if (mounted) setState(() => _error = '이미지를 불러오지 못했습니다.');
     }
   }
@@ -208,6 +244,21 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
         prepared =
             await Live2DService.export(draft, crop: _crop, filter: _filter);
       }
+      final options = ImageRegistrationOptions(
+          title: title,
+          tags: registrationTags(_tags),
+          editedFile: edited,
+          upscaleFactor:
+              _tool == _RegistrationTool.upscale ? _upscaleFactor : null,
+          ratio: !_ratio.automatic && _ratio.preset == CropPreset.free
+              ? _ratio.copyWith(
+                  freeAspectRatio: _crop.width *
+                      _source!.size.width /
+                      (_crop.height * _source!.size.height))
+              : _ratio,
+          wallpaperTarget: selection.target,
+          live2D: prepared);
+      await widget.onSave?.call(options);
       if (!mounted) {
         await edited?.dispose();
         return;
@@ -219,32 +270,24 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
         await edited?.dispose();
         return;
       }
+      if (widget.onSave != null) {
+        await edited?.dispose();
+        if (!mounted) return;
+        Navigator.pop(context);
+        return;
+      }
       final original = _live2D;
       _live2D = null;
       if (original?.id != prepared?.id) Live2DService.discard(original);
-      Navigator.pop(
-          context,
-          ImageRegistrationOptions(
-            title: title,
-            tags: registrationTags(_tags),
-            editedFile: edited,
-            upscaleFactor:
-                _tool == _RegistrationTool.upscale ? _upscaleFactor : null,
-            ratio: !_ratio.automatic && _ratio.preset == CropPreset.free
-                ? _ratio.copyWith(
-                    freeAspectRatio: _crop.width *
-                        _source!.size.width /
-                        (_crop.height * _source!.size.height))
-                : _ratio,
-            wallpaperTarget: selection.target,
-            live2D: prepared,
-          ));
+      Navigator.pop(context, options);
       prepared = null;
-    } catch (_) {
+    } catch (error) {
       await edited?.dispose();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('이미지를 저장하지 못했습니다. 다시 시도해 주세요.')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(error is PlatformException
+                ? error.message ?? '이미지를 저장하지 못했습니다.'
+                : '이미지를 저장하지 못했습니다. 다시 시도해 주세요.')));
       }
     } finally {
       if (prepared != null && prepared.id != _live2D?.id) {
@@ -262,7 +305,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   void _reset() => setState(() {
         _clearLive2D();
         _crop = const Rect.fromLTWH(0, 0, 1, 1);
-        _ratio = const ImageRatioSettings();
+        _ratio = widget.initialRatio;
         _filter = PhotoFilter.original;
         _canvasRevision++;
       });
@@ -278,12 +321,14 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     return PopScope(
       canPop: !_saving,
       child: Scaffold(
-        appBar: AppBar(title: const Text('새 이미지 등록'), actions: [
-          IconButton(
-              tooltip: '편집 초기화',
-              onPressed: source == null || _saving ? null : _reset,
-              icon: const Icon(Icons.restart_alt)),
-        ]),
+        appBar: AppBar(
+            title: Text(widget.onSave == null ? '새 이미지 등록' : '이미지 수정'),
+            actions: [
+              IconButton(
+                  tooltip: '편집 초기화',
+                  onPressed: source == null || _saving ? null : _reset,
+                  icon: const Icon(Icons.restart_alt)),
+            ]),
         body: SafeArea(
             child: Column(children: [
           Expanded(

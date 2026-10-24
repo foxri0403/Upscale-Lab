@@ -25,6 +25,24 @@ class _UiApi extends ApiClient {
   bool failEdit = false;
   List<GalleryPostItem> gallery = [];
   int downloadReports = 0;
+  int cloudEdits = 0;
+  int upscaleScale = 0;
+  int? uploadedWidth;
+  int? uploadedHeight;
+  @override
+  Future<LiveLayerProject> createProject({required String title, required String filePath,
+      required int width, required int height}) async {
+    uploadedWidth = width;
+    uploadedHeight = height;
+    return LiveLayerProject(id: 'upscale-project', title: title, status: 'Uploaded', originalImageUrl: '', layers: const []);
+  }
+  @override
+  Future<void> startUpscaling(String projectId, {required int scale}) async { upscaleScale = scale; }
+  @override
+  Future<Map<String, dynamic>> waitForUpscaling(String projectId,
+      {Duration interval = const Duration(seconds: 2), int maxAttempts = 120}) async => {'jobId': 'upscale-job'};
+  @override
+  Future<String> getUpscaledDownloadUrl(String projectId, String jobId) async => 'https://images.example.test/upscaled.png';
   @override
   Future<int> recordGalleryDownload(String postId) async {
     downloadReports++;
@@ -48,6 +66,7 @@ class _UiApi extends ApiClient {
       {required String postId,
       required String title,
       required List<String> tags}) async {
+    cloudEdits++;
     if (failEdit) throw StateError('offline');
     return tags;
   }
@@ -71,9 +90,12 @@ void main() {
   var failSharedDownload = false;
   String? clearedTarget;
   var failWallpaperClear = false;
+  var failImageEdit = false;
+  Map<Object?, Object?>? savedEdits;
   Map<Object?, Object?>? appliedLocalWallpaper;
   const pickerChannel = MethodChannel('plugins.flutter.io/image_picker');
   const wallpaperChannel = MethodChannel('live_layer/wallpaper');
+  const tiltChannel = MethodChannel('live_layer/tilt');
 
   setUpAll(() async {
     temp = Directory.systemTemp.createTempSync('upscale-ui-test-');
@@ -92,6 +114,8 @@ void main() {
   tearDownAll(() => temp.deleteSync(recursive: true));
 
   setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(tiltChannel, (_) async => null);
     api = _UiApi();
     localWrites = 0;
     libraryOrder = {'sort': 'manual', 'ids': <String>[]};
@@ -104,6 +128,8 @@ void main() {
     failSharedDownload = false;
     clearedTarget = null;
     failWallpaperClear = false;
+    failImageEdit = false;
+    savedEdits = null;
     appliedLocalWallpaper = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(pickerChannel, (call) async {
@@ -131,6 +157,12 @@ void main() {
         }
         clearedTarget = (call.arguments as Map)['target'] as String;
         return null;
+      }
+      if (call.method == 'getActiveLive2DTarget') return 1;
+      if (call.method == 'discardLive2D') return null;
+      if (call.method == 'editLive2D' || call.method == 'cloneLive2DDraft') {
+        return {'draftId': 'edited-layers', 'backgroundPath': imagePath,
+          'foregroundPath': imagePath, 'width': 40, 'height': 40};
       }
       throw StateError('Unexpected wallpaper method: ${call.method}');
     });
@@ -160,7 +192,17 @@ void main() {
       if (call.method == 'downloadSharedImage') {
         if (failSharedDownload) throw PlatformException(code: 'download_failed');
         final downloaded = File('${temp.path}/downloaded-shared.png');
-        File(imagePath).copySync(downloaded.path);
+        if (api.upscaleScale > 0) {
+          final recorder = ui.PictureRecorder();
+          Canvas(recorder).drawColor(AppTheme.tint, BlendMode.src);
+          final picture = recorder.endRecording();
+          final scaled = await picture.toImage(api.uploadedWidth! * api.upscaleScale, api.uploadedHeight! * api.upscaleScale);
+          final bytes = await scaled.toByteData(format: ui.ImageByteFormat.png);
+          await downloaded.writeAsBytes(bytes!.buffer.asUint8List());
+          scaled.dispose(); picture.dispose();
+        } else {
+          File(imagePath).copySync(downloaded.path);
+        }
         return downloaded.path;
       }
       if (call.method == 'importLocalImage') {
@@ -199,15 +241,32 @@ void main() {
         previewedId = (call.arguments as Map)['id'] as String;
         return nativePreviewAvailable;
       }
-      if (call.method == 'updateLocalImageDetails') {
-        localWrites++;
+      if (call.method == 'getLocalLive2DDraft') {
+        return {'draftId': 'owned-layers', 'backgroundPath': imagePath,
+          'foregroundPath': imagePath, 'width': 40, 'height': 40};
+      }
+      if (call.method == 'saveLocalImageEdits') {
         final args = call.arguments as Map;
         final image = images.singleWhere((item) => item['id'] == args['id']);
+        if (failImageEdit) {
+          throw PlatformException(code: 'image_edit_failed', message: '수정 저장 실패');
+        }
+        if (image['galleryPostId'] != null) {
+          throw PlatformException(code: 'image_edit_failed', message: '공유 중인 이미지는 수정할 수 없습니다.');
+        }
+        localWrites++;
+        savedEdits = Map<Object?, Object?>.from(args);
+        final replacement = '${temp.path}/replacement-$localWrites.png';
+        await File(args['sourcePath'] as String).copy(replacement);
+        image['path'] = replacement;
         image['title'] = args['title'];
         image['tags'] = args['tags'];
         image['tag'] = (args['tags'] as List).first;
         if (args['ratio'] != null) image['ratio'] = args['ratio'];
-        return null;
+        image['width'] = args['width'];
+        image['height'] = args['height'];
+        image['mode'] = args['draftId'] == null ? 'original' : 'live2d';
+        return image;
       }
       throw StateError('Unexpected method: ${call.method}');
     });
@@ -221,13 +280,15 @@ void main() {
   tearDown(() => TestDefaultBinaryMessengerBinding
       .instance.defaultBinaryMessenger
       .setMockMethodCallHandler(wallpaperChannel, null));
+  tearDown(() => TestDefaultBinaryMessengerBinding
+      .instance.defaultBinaryMessenger.setMockMethodCallHandler(tiltChannel, null));
 
   Future<void> settleFileWork(WidgetTester tester, Finder ready) async {
     await tester.runAsync(() async {
       for (var attempt = 0; attempt < 200; attempt++) {
         await Future<void>.delayed(const Duration(milliseconds: 10));
         await tester.pump(const Duration(milliseconds: 16));
-        if (ready.evaluate().isNotEmpty) break;
+        if (ready.evaluate().isNotEmpty && find.byType(CircularProgressIndicator).evaluate().isEmpty) break;
       }
     });
     expect(ready, findsWidgets,
@@ -312,6 +373,38 @@ void main() {
     await tester.tap(menu);
     await tester.pumpAndSettle();
     await tester.tap(find.text('수정'));
+    await settleFileWork(tester, find.byKey(const ValueKey('registration-original-image')));
+  }
+
+  Future<void> editTool(WidgetTester tester, String name) async {
+    final button = find.byKey(ValueKey('registration-tool-$name'));
+    await tester.ensureVisible(button);
+    await tester.pumpAndSettle();
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> saveEdit(WidgetTester tester, Finder ready) async {
+    await tester.tap(find.byKey(const ValueKey('save-registration')));
+    await tester.pump();
+    final confirm = find.byKey(const ValueKey('confirm-image-save'));
+    if (confirm.evaluate().isNotEmpty) {
+      await tester.pumpAndSettle();
+      await tester.tap(confirm);
+    }
+    await settleFileWork(tester, ready);
+  }
+
+  Future<void> selectTag(WidgetTester tester, String tag) async {
+    await editTool(tester, 'information');
+    await tester.tap(find.byKey(const ValueKey('registration-tag-picker')));
+    await tester.pumpAndSettle();
+    final checkbox = find.widgetWithText(CheckboxListTile, tag);
+    await tester.scrollUntilVisible(checkbox, 200,
+        scrollable: find.descendant(of: find.byType(BottomSheet), matching: find.byType(Scrollable)).first);
+    await tester.pumpAndSettle();
+    await tester.tap(checkbox);
+    await tester.tap(find.text('적용하기'));
     await tester.pumpAndSettle();
   }
 
@@ -624,44 +717,47 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('이미지 이름을 입력해 주세요.'), findsOneWidget);
     expect(localWrites, 0);
-    await tester.tap(find.text('취소'));
+    await tester.pageBack();
     await tester.pumpAndSettle();
     expect(localWrites, 0);
     await edit(tester, 0);
     await tester.enterText(find.byType(TextFormField), '  새 이미지 이름  ');
-    await selectManual(tester);
+    await selectTag(tester, 'SF');
+    await editTool(tester, 'crop');
     final square = find.byKey(const ValueKey(CropPreset.square));
     await tester.ensureVisible(square);
     await tester.tap(square);
-    await tester.tap(find.widgetWithText(FilterChip, 'SF'));
-    await tester.tap(find.text('저장'));
-    await tester.pumpAndSettle();
+    await saveEdit(tester, find.text('이미지 수정을 저장했습니다.'));
     expect(images[0]['title'], '새 이미지 이름');
     expect((images[0]['tags'] as List).toSet(), {'풍경', 'SF'});
     expect(localWrites, 1);
     expect((images[0]['ratio'] as Map)['mode'], 'manual');
     expect((images[0]['ratio'] as Map)['preset'], 'square');
     await edit(tester, 0);
-    expect(
-        tester
-            .widget<SegmentedButton<bool>>(find.byType(SegmentedButton<bool>))
-            .selected,
-        {false});
-    await tester.tap(find.text('취소'));
+    await editTool(tester, 'crop');
+    expect(tester.widget<RegistrationImageCanvas>(find.byType(RegistrationImageCanvas)).aspectRatio, 1);
+    await tester.pageBack();
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('failed shared edit preserves local name and tags',
+  testWidgets('shared images expose no editing or conversion actions',
       (tester) async {
-    api.failEdit = true;
     await show(tester, home());
-    await edit(tester, 1);
-    await tester.enterText(find.byType(TextFormField), '저장되면 안 되는 이름');
-    await tester.tap(find.widgetWithText(FilterChip, 'SF'));
-    await tester.tap(find.text('저장'));
+    await tester.tap(find.descendant(of: card(1), matching: find.byType(PopupMenuButton<String>)));
     await tester.pumpAndSettle();
+    expect(find.text('수정'), findsNothing);
+    await tester.tapAt(const Offset(1, 1));
+    await tester.pumpAndSettle();
+    await tester.tap(card(1));
+    await settleFileWork(tester, find.byKey(const ValueKey('wallpaper-preview-image')));
+    expect(find.text('Live 2D'), findsNothing);
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    expect(find.text('수정'), findsNothing);
+    expect(find.byType(ImageFeaturePage), findsNothing);
     expect(localWrites, 0);
+    expect(api.cloudEdits, 0);
     expect(images[1]['title'], '공유 이미지 이름');
     expect(images[1]['tags'], ['풍경']);
     expect(tester.takeException(), isNull);
@@ -1068,19 +1164,118 @@ void main() {
     await edit(tester, 0);
     expect(find.descendant(of: find.byType(AlertDialog),
         matching: find.text(unspecifiedGalleryTag)), findsNothing);
-    await tester.tap(find.widgetWithText(FilterChip, '풍경'));
-    await tester.tap(find.text('저장'));
-    await tester.pumpAndSettle();
+    await selectTag(tester, '풍경');
+    await saveEdit(tester, find.text('이미지 수정을 저장했습니다.'));
     expect(images[0]['tags'], [unspecifiedGalleryTag]);
     expect(localWrites, 1);
     await edit(tester, 0);
     expect(find.descendant(of: find.byType(AlertDialog),
         matching: find.text(unspecifiedGalleryTag)), findsNothing);
-    expect(tester.widgetList<FilterChip>(find.byType(FilterChip))
-        .where((chip) => chip.selected), isEmpty);
-    await tester.tap(find.text('취소'));
+    await tester.tap(find.byKey(const ValueKey('registration-tag-picker')));
+    await tester.pumpAndSettle();
+    expect(tester.widgetList<CheckboxListTile>(find.byType(CheckboxListTile))
+        .where((tile) => tile.value == true), isEmpty);
+    await tester.tap(find.byTooltip('태그 선택 닫기'));
+    await tester.pumpAndSettle();
+    await tester.pageBack();
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('editing uses registration crop and filters without creating another image', (tester) async {
+    final created = images[0]['createdAt'];
+    await show(tester, home());
+    await edit(tester, 0);
+    for (final name in ['information', 'crop', 'filter', 'upscale', 'parallax']) {
+      expect(find.byKey(ValueKey('registration-tool-$name')), findsOneWidget);
+    }
+    await editTool(tester, 'crop');
+    final standard = find.byKey(const ValueKey(CropPreset.standard));
+    await tester.ensureVisible(standard);
+    await tester.tap(standard);
+    await tester.pumpAndSettle();
+    await editTool(tester, 'filter');
+    final mono = find.byKey(const ValueKey(PhotoFilter.monochrome));
+    await tester.ensureVisible(mono);
+    await tester.tap(mono);
+    await tester.pumpAndSettle();
+    await saveEdit(tester, find.text('이미지 수정을 저장했습니다.'));
+    expect(images.length, 2);
+    expect(images[0]['id'], 'image-0');
+    expect(images[0]['createdAt'], created);
+    expect(images[0]['width'], 30);
+    expect(images[0]['height'], 40);
+    expect((images[0]['ratio'] as Map)['preset'], 'standard');
+    expect(localWrites, 1);
+    expect(imports, 0);
+    await tester.runAsync(() async {
+      final codec = await ui.instantiateImageCodec(await File(images[0]['path'] as String).readAsBytes());
+      final image = (await codec.getNextFrame()).image;
+      final pixels = (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!.buffer.asUint8List();
+      expect((pixels[0] - pixels[1]).abs(), lessThanOrEqualTo(1));
+      expect((pixels[1] - pixels[2]).abs(), lessThanOrEqualTo(1));
+      image.dispose(); codec.dispose();
+    });
+  });
+
+  testWidgets('saved Live 2D remains live through the common editor', (tester) async {
+    images[0]['mode'] = 'live2d';
+    await show(tester, home());
+    await edit(tester, 0);
+    await editTool(tester, 'filter');
+    final mono = find.byKey(const ValueKey(PhotoFilter.monochrome));
+    await tester.ensureVisible(mono);
+    await tester.tap(mono);
+    await tester.pumpAndSettle();
+    await saveEdit(tester, find.text('이미지 수정을 저장했습니다.'));
+    expect(images[0]['mode'], 'live2d');
+    expect(savedEdits!['draftId'], 'edited-layers');
+    expect(images.length, 2);
+    expect(localWrites, 1);
+  });
+
+  testWidgets('upscaling an existing image updates its pixels and retains its ID', (tester) async {
+    await show(tester, home());
+    await edit(tester, 0);
+    await editTool(tester, 'upscale');
+    await saveEdit(tester, find.text('이미지 수정을 저장했습니다.'));
+    expect(api.upscaleScale, 2);
+    expect(images[0]['id'], 'image-0');
+    expect(images[0]['width'], 80);
+    expect(images[0]['height'], 80);
+    expect(images.length, 2);
+    expect(imports, 0);
+    expect(File('${temp.path}/downloaded-shared.png').existsSync(), isFalse);
+  });
+
+  testWidgets('a failed image edit retains the form and original for retry', (tester) async {
+    final originalPath = images[0]['path'];
+    failImageEdit = true;
+    await show(tester, home());
+    await edit(tester, 0);
+    await tester.enterText(find.byType(TextFormField), '재시도할 이름');
+    await saveEdit(tester, find.text('수정 저장 실패'));
+    expect(find.byType(ImageFeaturePage), findsOneWidget);
+    expect(images[0]['path'], originalPath);
+    expect(images[0]['title'], '로컬 이미지 이름');
+    expect(localWrites, 0);
+    failImageEdit = false;
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await saveEdit(tester, find.text('이미지 수정을 저장했습니다.'));
+    expect(images[0]['title'], '재시도할 이름');
+    expect(localWrites, 1);
+  });
+
+  testWidgets('sharing after the editor opens prevents its save', (tester) async {
+    await show(tester, home());
+    await edit(tester, 0);
+    images[0]['galleryPostId'] = 'new-shared-post';
+    images[0]['cloudProjectId'] = 'project-1';
+    await saveEdit(tester, find.text('공유 중인 이미지는 수정할 수 없습니다.'));
+    expect(localWrites, 0);
+    expect(find.byType(ImageFeaturePage), findsOneWidget);
+    expect(images[0]['title'], '로컬 이미지 이름');
   });
 
   testWidgets('failed image downloads do not report a completion', (tester) async {
@@ -1235,10 +1430,10 @@ void main() {
     await tester.tap(find.byTooltip('1열 목록'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    await edit(tester, 1);
+    await edit(tester, 0);
     expect(find.text('이미지 수정'), findsOneWidget);
     expect(tester.takeException(), isNull);
-    await tester.tap(find.text('취소'));
+    await tester.pageBack();
     await tester.pumpAndSettle();
     await tester.tap(find.text('설정'));
     await tester.pumpAndSettle();

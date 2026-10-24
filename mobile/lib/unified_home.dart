@@ -22,7 +22,6 @@ import 'theme/app_theme.dart';
 import 'widgets/app_components.dart';
 import 'widgets/device_display_builder.dart';
 import 'widgets/gallery_tag_picker.dart';
-import 'widgets/image_edit_dialog.dart';
 import 'widgets/wallpaper_remove_dialog.dart';
 import 'widgets/local_image_card.dart';
 
@@ -404,36 +403,71 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
 
   Future<void> _editImage(LocalImageItem image) async {
     if (_busyIds.contains(image.id)) return;
-    final edited = await showDialog<ImageEditResult>(
-      context: context,
-      builder: (_) => ImageEditDialog(
-          title: image.title, tags: image.tags, ratio: image.ratio),
-    );
-    if (edited == null || !mounted) return;
-
+    if (image.isShared) {
+      _message('공유 중인 이미지는 수정할 수 없습니다. 먼저 공유를 취소해 주세요.');
+      return;
+    }
+    final store = _localImageStore;
     setState(() => _busyIds.add(image.id));
     try {
-      var confirmedTags = edited.tags;
-      if (image.isShared) {
-        confirmedTags = await widget.apiClient.updateGalleryPost(
-          postId: image.galleryPostId!,
-          title: edited.title,
-          tags: edited.tags,
-        );
-      }
-      await _localImageStore.updateDetails(
-          id: image.id,
-          title: edited.title,
-          tags: confirmedTags,
-          ratio: edited.ratio);
-      if (!mounted) return;
-      setState(() => _galleryRevision++);
-      _reload();
-      _message('이미지 이름과 태그를 수정했습니다.');
+      await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => ImageFeaturePage(
+          filePath: image.path, title: image.title, initialTags: image.tags, initialRatio: image.ratio,
+          loadLive2D: image.isLive2D ? () => store.editableLive2D(image.id) : null,
+          onSave: (options) => _saveImageEdit(image, options, store))));
     } catch (error) {
       _message('이미지를 수정하지 못했습니다.\n$error');
     } finally {
-      if (mounted) setState(() => _busyIds.remove(image.id));
+      if (mounted) {
+        setState(() => _busyIds.remove(image.id));
+        _reload();
+      }
+    }
+  }
+
+  Future<void> _saveImageEdit(LocalImageItem image, ImageRegistrationOptions options, LocalImageStore store) async {
+    var source = options.editedFile?.path ?? image.path;
+    var width = options.editedFile?.width ?? image.width;
+    var height = options.editedFile?.height ?? image.height;
+    String? downloaded;
+    try {
+      if (options.upscaleFactor case final scale?) {
+        final project = await widget.apiClient.createProject(title: options.title,
+            filePath: source, width: width, height: height);
+        await widget.apiClient.startUpscaling(project.id, scale: scale);
+        final status = await widget.apiClient.waitForUpscaling(project.id);
+        final jobId = status['jobId']?.toString();
+        if (jobId == null || jobId.isEmpty) throw StateError('업스케일링 작업 ID가 없습니다.');
+        final url = await widget.apiClient.getUpscaledDownloadUrl(project.id, jobId);
+        downloaded = await store.downloadShared(url: url, fileName: 'upscaled_${scale}x.png');
+        final codec = await ui.instantiateImageCodec(await File(downloaded).readAsBytes());
+        try {
+          final frame = await codec.getNextFrame();
+          try {
+            if (frame.image.width != width * scale || frame.image.height != height * scale) {
+              throw StateError('AI 결과 해상도가 예상과 다릅니다.');
+            }
+            width = frame.image.width;
+            height = frame.image.height;
+          } finally { frame.image.dispose(); }
+        } finally { codec.dispose(); }
+        source = downloaded;
+      }
+      final saved = await store.saveEdits(id: image.id, sourcePath: source,
+          title: options.title, tags: options.tags, width: width, height: height,
+          ratio: options.ratio, draftId: options.live2D?.id);
+      if (options.wallpaperTarget case final target?) {
+        try {
+          await store.applyWallpaper(saved.id, target: target);
+        } catch (error) {
+          _message('수정은 저장했지만 배경화면을 적용하지 못했습니다.\n$error');
+          return;
+        }
+      }
+      _message('이미지 수정을 저장했습니다.');
+    } finally {
+      if (downloaded != null) {
+        try { await File(downloaded).delete(); } catch (_) {}
+      }
     }
   }
 
@@ -1249,6 +1283,11 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
   }
 
   Future<void> _convertLive2D() async {
+    if (widget.image.isShared) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('공유 중인 이미지는 수정할 수 없습니다. 먼저 공유를 취소해 주세요.')));
+      return;
+    }
     final draft = await Navigator.of(context).push<Live2DDraft>(
         MaterialPageRoute(
             builder: (_) => Live2DPage(sourcePath: widget.image.path)));
@@ -1307,7 +1346,7 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
     ScaffoldMessenger.of(context).clearSnackBars();
     setState(() => _busy = true);
     try {
-      final confirmed = await widget.store.activateLive2D(widget.image.id);
+      final confirmed = await widget.store.activateLive2D(widget.image.id, target: _target);
       if (mounted && confirmed) {
         _targetTouched = false;
         await _syncLiveTarget();
@@ -1377,7 +1416,7 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
                         ),
                       ),
                     const SizedBox(height: 10),
-                    if (!_live2D)
+                    if (!_live2D && !widget.image.isShared)
                       TextButton.icon(
                           onPressed: _busy ? null : _convertLive2D,
                           icon: const Icon(Icons.view_in_ar_outlined),
@@ -1387,7 +1426,7 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
                           key: const ValueKey('activate-saved-live2d'),
                           onPressed: _busy ? null : _activateLive2D,
                           icon: const Icon(Icons.view_in_ar_outlined),
-                          label: const Text('Live 2D 활성화 · 대상 변경')),
+                          label: const Text('배경화면에서 Live 2D 활성화')),
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
@@ -1473,7 +1512,8 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
                         }
                       },
                       itemBuilder: (_) => [
-                        const PopupMenuItem(value: 'edit', child: Text('수정')),
+                        if (!widget.image.isShared)
+                          const PopupMenuItem(value: 'edit', child: Text('수정')),
                         PopupMenuItem(
                           value: 'share',
                           child: Text(widget.image.isShared ? '공유 취소' : '공유'),

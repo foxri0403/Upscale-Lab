@@ -67,6 +67,76 @@ class PrivateImageStoreTest {
         assertEquals("project-1", store.list("account-a").single()["cloudProjectId"])
     }
 
+    @Test fun editsReplacePixelsMetadataAndLayersTogetherWhilePreservingIdentity() {
+        val store = store()
+        val original = source()
+        val first = import(store, original)
+        val id = first["id"] as String
+        val edited = source("edited.png").apply { writeBytes(byteArrayOf(7, 6, 5, 4)) }
+        val saved = store.saveEdits("account-a", id, edited, "편집", listOf("SF"), 600, 800,
+            JSONObject().put("mode", "manual"), true) { layers ->
+            check(layers.mkdir())
+            File(layers, "manifest.json").writeText("layers")
+        }
+        assertEquals(id, saved["id"])
+        assertEquals(first["createdAt"], saved["createdAt"])
+        assertEquals("live2d", saved["mode"])
+        assertEquals(600, saved["width"])
+        assertEquals(800, saved["height"])
+        assertEquals("편집", saved["title"])
+        assertNotEquals(first["path"], saved["path"])
+        assertFalse(File(first["path"] as String).exists())
+        assertArrayEquals(edited.readBytes(), File(saved["path"] as String).readBytes())
+        assertTrue(File(File(saved["path"] as String).parentFile, "live2d/manifest.json").isFile)
+        assertTrue(store.item("account-a", id).getString("updatedAt").endsWith("Z"))
+        assertEquals(1, store.list("account-a").size)
+        assertTrue(original.isFile)
+    }
+
+    @Test fun failedLayerPreparationPreservesThePreviousImageAndMetadata() {
+        val store = store()
+        val original = source()
+        val saved = import(store, original)
+        val id = saved["id"] as String
+        val before = store.item("account-a", id).toString()
+        assertThrows(IllegalStateException::class.java) {
+            store.saveEdits("account-a", id, original, "실패", listOf("SF"), 50, 50, JSONObject(), true) {
+                check(it.mkdir())
+                File(it, "foreground.png").writeText("partial")
+                error("disk full")
+            }
+        }
+        assertEquals(before, store.item("account-a", id).toString())
+        assertArrayEquals(original.readBytes(), File(saved["path"] as String).readBytes())
+        assertEquals(1, store.list("account-a").size)
+    }
+
+    @Test fun sharedImagesAndOtherAccountsCannotBeEdited() {
+        val store = store()
+        val original = source()
+        val saved = import(store, original)
+        val id = saved["id"] as String
+        store.update("account-a", id) { it.put("galleryPostId", "post-1").put("cloudProjectId", "project-1") }
+        val before = store.item("account-a", id).toString()
+        for (owner in listOf("account-a", "account-b")) {
+            assertThrows(IllegalArgumentException::class.java) {
+                store.saveEdits(owner, id, original, "차단", listOf("SF"), 50, 50, JSONObject(), false)
+            }
+        }
+        assertEquals(before, store.item("account-a", id).toString())
+        assertTrue(File(saved["path"] as String).isFile)
+    }
+
+    @Test fun interruptedPixelReplacementIsRecoveredBeforeListing() {
+        val store = store()
+        val saved = import(store, source())
+        val id = saved["id"] as String
+        val folder = File(saved["path"] as String).parentFile!!
+        assertTrue(folder.renameTo(File(folder.parentFile, ".edit-backup-$id")))
+        assertEquals(id, store().list("account-a").single()["id"])
+        assertTrue(File(saved["path"] as String).isFile)
+    }
+
     @Test fun interruptedMetadataReplacementRestoresBackup() {
         val store = store()
         val saved = import(store, source())
