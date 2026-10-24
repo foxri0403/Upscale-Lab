@@ -88,10 +88,17 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
 
   Future<void> _openLive2D() async {
     if (_source == null || _saving) return;
+    if (_live2D != null) {
+      setState(() => _tool = _RegistrationTool.parallax);
+      return;
+    }
     final result = await Navigator.of(context).push<Live2DDraft>(
         MaterialPageRoute(
             builder: (_) => Live2DPage(
-                sourcePath: widget.filePath, crop: _crop, filter: _filter)));
+                sourcePath: widget.filePath,
+                crop: _crop,
+                filter: _filter,
+                keepSourceLayers: true)));
     if (result == null) return;
     if (!mounted) {
       await Live2DService.discard(result);
@@ -139,7 +146,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
       _openLive2D();
       return;
     }
-    if (tool == _RegistrationTool.upscale || tool == _RegistrationTool.crop) {
+    if (tool == _RegistrationTool.upscale) {
       _clearLive2D();
     }
     setState(() => _tool = tool);
@@ -189,6 +196,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     FocusScope.of(context).unfocus();
     setState(() => _saving = true);
     EditedImageFile? edited;
+    Live2DDraft? prepared;
     try {
       final applyLive2D = _live2D == null
           ? false
@@ -215,6 +223,10 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
       setState(() => _exporting = true);
       edited = await ImageEditorService.export(
           sourcePath: widget.filePath, crop: _crop, filter: _filter);
+      if (_live2D case final draft?) {
+        prepared =
+            await Live2DService.export(draft, crop: _crop, filter: _filter);
+      }
       if (!mounted) {
         await edited?.dispose();
         return;
@@ -226,8 +238,9 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
         await edited?.dispose();
         return;
       }
-      final live2D = _live2D;
+      final original = _live2D;
       _live2D = null;
+      if (original?.id != prepared?.id) Live2DService.discard(original);
       Navigator.pop(
           context,
           ImageRegistrationOptions(
@@ -243,9 +256,10 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                         (_crop.height * _source!.size.height))
                 : _ratio,
             wallpaperTarget: selection.target,
-            live2D: live2D,
+            live2D: prepared,
             applyLive2D: applyLive2D,
           ));
+      prepared = null;
     } catch (_) {
       await edited?.dispose();
       if (mounted) {
@@ -253,6 +267,9 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
             const SnackBar(content: Text('이미지를 저장하지 못했습니다. 다시 시도해 주세요.')));
       }
     } finally {
+      if (prepared != null && prepared.id != _live2D?.id) {
+        await Live2DService.discard(prepared);
+      }
       if (mounted) {
         setState(() {
           _saving = false;
@@ -322,7 +339,6 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                                           onChanged: source == null || _saving
                                               ? null
                                               : (ratio) => setState(() {
-                                                    _clearLive2D();
                                                     _ratio = ratio;
                                                   })),
                                     _RegistrationTool.filter => _filters(),
@@ -398,15 +414,6 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                       ]));
           }
           final draft = _live2D;
-          if (draft != null) {
-            return Center(
-                child: AspectRatio(
-                    aspectRatio: _ratio.aspectRatio(source.size, display) ??
-                        source.size.aspectRatio,
-                    child: Live2DPreview(
-                        backgroundPath: draft.backgroundPath,
-                        foregroundPath: draft.foregroundPath)));
-          }
           return Center(
               child: Semantics(
             button: true,
@@ -420,11 +427,17 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                 source: source,
                 crop: _crop,
                 filter: _filter,
+                preview: draft == null
+                    ? null
+                    : Live2DPreview(
+                        backgroundPath: draft.backgroundPath,
+                        foregroundPath: draft.foregroundPath,
+                        crop: _crop,
+                        filter: _filter),
                 cropping: _tool == _RegistrationTool.crop,
                 aspectRatio:
                     _ratio.aspectRatio(source.size, display, editing: true),
                 onCropChanged: (crop) => setState(() {
-                  _clearLive2D();
                   _crop = crop;
                 }),
                 enabled: !_saving,
@@ -539,7 +552,6 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                       onTap: _saving
                           ? null
                           : () => setState(() {
-                                _clearLive2D();
                                 _filter = filter;
                               }),
                       borderRadius: BorderRadius.circular(12),

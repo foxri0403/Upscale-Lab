@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'models/image_editor.dart';
-import 'services/image_editor_service.dart';
 import 'services/live_2d_service.dart';
 import 'widgets/live_2d_preview.dart';
 
@@ -10,10 +9,14 @@ class Live2DPage extends StatefulWidget {
       {super.key,
       required this.sourcePath,
       this.crop = const Rect.fromLTWH(0, 0, 1, 1),
-      this.filter = PhotoFilter.original});
+      this.filter = PhotoFilter.original,
+      this.keepSourceLayers = false});
   final String sourcePath;
   final Rect crop;
   final PhotoFilter filter;
+
+  /// Editors retain the full layers so subsequent crops remain reversible.
+  final bool keepSourceLayers;
   @override
   State<Live2DPage> createState() => _Live2DPageState();
 }
@@ -34,14 +37,8 @@ class _Live2DPageState extends State<Live2DPage> {
       _processing = true;
       _error = null;
     });
-    EditedImageFile? edited;
     try {
-      edited = await ImageEditorService.export(
-          sourcePath: widget.sourcePath,
-          crop: widget.crop,
-          filter: widget.filter);
-      final draft =
-          await Live2DService.split(edited?.path ?? widget.sourcePath);
+      final draft = await Live2DService.split(widget.sourcePath);
       if (!mounted) {
         await Live2DService.discard(draft);
         return;
@@ -54,7 +51,37 @@ class _Live2DPageState extends State<Live2DPage> {
             : '이미지를 분리하지 못했습니다. 다시 시도해 주세요.');
       }
     } finally {
-      await edited?.dispose();
+      if (mounted) setState(() => _processing = false);
+    }
+  }
+
+  Future<void> _use() async {
+    final original = _draft;
+    if (original == null || _processing) return;
+    setState(() => _processing = true);
+    Live2DDraft? output;
+    try {
+      output = widget.keepSourceLayers
+          ? original
+          : await Live2DService.export(original,
+              crop: widget.crop, filter: widget.filter);
+      if (!mounted) return;
+      setState(() => _processing = false);
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      _draft = null;
+      if (output.id != original.id) Live2DService.discard(original);
+      Navigator.pop(context, output);
+      output = null; // Ownership transfers to the caller.
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Live 2D를 저장하지 못했습니다. 다시 시도해 주세요.')));
+      }
+    } finally {
+      if (output != null && output.id != _draft?.id) {
+        await Live2DService.discard(output);
+      }
       if (mounted) setState(() => _processing = false);
     }
   }
@@ -102,10 +129,22 @@ class _Live2DPageState extends State<Live2DPage> {
                                                   onPressed: _split,
                                                   child: const Text('다시 시도'))
                                             ])))
-                                      : Live2DPreview(
-                                          backgroundPath: draft.backgroundPath,
-                                          foregroundPath: draft.foregroundPath,
-                                          layer: _layer)),
+                                      : Center(
+                                          child: AspectRatio(
+                                              key: const ValueKey(
+                                                  'live2d-preview-aspect'),
+                                              aspectRatio: widget.crop.width *
+                                                  draft.width /
+                                                  (widget.crop.height *
+                                                      draft.height),
+                                              child: Live2DPreview(
+                                                  backgroundPath:
+                                                      draft.backgroundPath,
+                                                  foregroundPath:
+                                                      draft.foregroundPath,
+                                                  crop: widget.crop,
+                                                  filter: widget.filter,
+                                                  layer: _layer)))),
                           const SizedBox(height: 12),
                           if (draft != null) ...[
                             SegmentedButton<String>(
@@ -130,11 +169,7 @@ class _Live2DPageState extends State<Live2DPage> {
                             const SizedBox(height: 12),
                             FilledButton(
                                 key: const ValueKey('use-live2d'),
-                                onPressed: () {
-                                  _draft =
-                                      null; // Transfer ownership to the registration/library flow.
-                                  Navigator.pop(context, draft);
-                                },
+                                onPressed: _processing ? null : _use,
                                 child: const Text('Live 2D 사용')),
                           ] else
                             const Text(

@@ -1,4 +1,7 @@
 import 'package:flutter/services.dart';
+import 'dart:ui' as ui;
+import '../models/image_editor.dart';
+import 'image_editor_service.dart';
 
 class Live2DDraft {
   const Live2DDraft(
@@ -28,6 +31,31 @@ abstract final class Live2DService {
   static Future<Live2DDraft> split(String path) async =>
       Live2DDraft.fromMap((await _channel.invokeMapMethod<Object?, Object?>(
           'splitLive2D', {'sourcePath': path}))!);
+
+  /// Keep the separation untouched while editing. Bake the same crop/filter
+  /// into both planes only when saving, preserving the foreground alpha.
+  /// The caller owns the returned draft and the original until transfer.
+  static Future<Live2DDraft> export(Live2DDraft draft,
+      {required ui.Rect crop, required PhotoFilter filter}) async {
+    if (!ImageEditorService.hasEdits(crop, filter)) return draft;
+    EditedImageFile? background;
+    EditedImageFile? foreground;
+    try {
+      background = await ImageEditorService.export(
+          sourcePath: draft.backgroundPath, crop: crop, filter: filter);
+      foreground = await ImageEditorService.export(
+          sourcePath: draft.foregroundPath, crop: crop, filter: filter);
+      return Live2DDraft.fromMap(
+          (await _channel.invokeMapMethod<Object?, Object?>('editLive2D', {
+        'draftId': draft.id,
+        'backgroundPath': background!.path,
+        'foregroundPath': foreground!.path,
+      }))!);
+    } finally {
+      await background?.dispose();
+      await foreground?.dispose();
+    }
+  }
 
   static Future<void> discard(Live2DDraft? draft) async {
     if (draft == null) return;

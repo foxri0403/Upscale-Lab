@@ -20,6 +20,7 @@ class RegistrationImageCanvas extends StatefulWidget {
     required this.onCropChanged,
     this.enabled = true,
     this.maxHeight = 360,
+    this.preview,
   });
 
   final EditorImageSource source;
@@ -30,6 +31,7 @@ class RegistrationImageCanvas extends StatefulWidget {
   final ValueChanged<Rect> onCropChanged;
   final bool enabled;
   final double maxHeight;
+  final Widget? preview;
 
   @override
   State<RegistrationImageCanvas> createState() =>
@@ -112,7 +114,7 @@ class _RegistrationImageCanvasState extends State<RegistrationImageCanvas> {
                 child: AspectRatio(
                   key: const ValueKey('registration-preview-aspect'),
                   aspectRatio: aspect,
-                  child: CustomPaint(
+                  child: widget.preview ?? CustomPaint(
                     painter: _RegistrationPreviewPainter(
                         widget.source.preview, widget.crop, widget.filter),
                     child: const SizedBox.expand(),

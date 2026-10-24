@@ -114,6 +114,18 @@ class MainActivity : FlutterActivity() {
                             runOnUiThread { result.error("live2d_failed", error.cause?.message ?: error.message, null) }
                         }
                     }
+                    "editLive2D" -> ioExecutor.execute {
+                        try {
+                            val draft = live2DStore.edit(
+                                call.argument<String>("draftId") ?: error("분리 ID가 없습니다."),
+                                File(call.argument<String>("backgroundPath") ?: error("배경 이미지가 없습니다.")),
+                                File(call.argument<String>("foregroundPath") ?: error("전경 이미지가 없습니다.")),
+                            )
+                            runOnUiThread { result.success(draft) }
+                        } catch (error: Exception) {
+                            runOnUiThread { result.error("live2d_failed", error.message, null) }
+                        }
+                    }
                     "discardLive2D" -> ioExecutor.execute {
                         try {
                             live2DStore.discard(call.argument<String>("draftId") ?: error("분리 ID가 없습니다."))

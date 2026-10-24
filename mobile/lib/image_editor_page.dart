@@ -49,12 +49,17 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
   Future<void> _openLive2D() async {
     final geometry = _geometry;
     if (geometry == null || _saving) return;
+    if (_live2D != null) {
+      setState(() => _cropTab = false);
+      return;
+    }
     final draft = await Navigator.of(context).push<Live2DDraft>(
         MaterialPageRoute(
             builder: (_) => Live2DPage(
                 sourcePath: widget.filePath,
                 crop: geometry.normalizedCrop,
-                filter: _filter)));
+                filter: _filter,
+                keepSourceLayers: true)));
     if (!mounted) {
       await Live2DService.discard(draft);
       return;
@@ -63,6 +68,7 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
       setState(() {
         _clearLive2D();
         _live2D = draft;
+        _cropTab = false;
       });
     }
   }
@@ -115,11 +121,16 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
     if (geometry == null || _saving) return;
     setState(() => _saving = true);
     EditedImageFile? edited;
+    Live2DDraft? prepared;
     try {
       edited = await ImageEditorService.export(
           sourcePath: widget.filePath,
           crop: geometry.normalizedCrop,
           filter: _filter);
+      if (_live2D case final draft?) {
+        prepared = await Live2DService.export(draft,
+            crop: geometry.normalizedCrop, filter: _filter);
+      }
       if (!mounted) {
         await edited?.dispose();
         return;
@@ -127,8 +138,9 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
       setState(() => _saving = false);
       await WidgetsBinding.instance.endOfFrame;
       if (mounted && ModalRoute.of(context)?.isCurrent == true) {
-        final live2D = _live2D;
+        final original = _live2D;
         _live2D = null;
+        if (original?.id != prepared?.id) Live2DService.discard(original);
         Navigator.pop(
             context,
             ImageEditorResult(
@@ -137,16 +149,21 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                     ? _ratio.copyWith(
                         freeAspectRatio: geometry.sourceRect.size.aspectRatio)
                     : _ratio,
-                live2D: live2D));
+                live2D: prepared));
+        prepared = null;
       } else {
         await edited?.dispose();
       }
     } catch (_) {
+      await edited?.dispose();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('이미지를 저장하지 못했습니다. 다시 시도해 주세요.')));
       }
     } finally {
+      if (prepared != null && prepared.id != _live2D?.id) {
+        await Live2DService.discard(prepared);
+      }
       if (mounted) setState(() => _saving = false);
     }
   }
@@ -186,7 +203,6 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
       _startGestureScale = details.scale;
     }
     setState(() {
-      _clearLive2D();
       if (_corner case final corner?) {
         geometry.resizeCorner(corner, details.localFocalPoint);
       } else {
@@ -264,10 +280,16 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                                             onPressed: _load,
                                             child: Text('다시 시도')),
                                       ]))
-                        : _live2D != null
-                            ? Live2DPreview(
-                                backgroundPath: _live2D!.backgroundPath,
-                                foregroundPath: _live2D!.foregroundPath)
+                        : _live2D != null && !_cropTab
+                            ? Center(
+                                child: AspectRatio(
+                                    aspectRatio:
+                                        _geometry!.sourceRect.size.aspectRatio,
+                                    child: Live2DPreview(
+                                        backgroundPath: _live2D!.backgroundPath,
+                                        foregroundPath: _live2D!.foregroundPath,
+                                        crop: _geometry!.normalizedCrop,
+                                        filter: _filter)))
                             : LayoutBuilder(builder: (context, constraints) {
                                 final geometry = _geometry!;
                                 geometry.layout(
@@ -323,7 +345,6 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                         onChanged: source == null || _saving
                             ? null
                             : (ratio) => setState(() {
-                                  _clearLive2D();
                                   _ratio = ratio;
                                 })),
                     const SizedBox(height: 8),
@@ -413,7 +434,6 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
               onTap: _saving
                   ? null
                   : () => setState(() {
-                        _clearLive2D();
                         _filter = filter;
                       }),
               borderRadius: BorderRadius.circular(12),

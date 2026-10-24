@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../models/image_editor.dart';
 import '../services/live_2d_service.dart';
 
 /// Matches the wallpaper's normalized tilt, 8% overscan, and bounded movement.
@@ -9,10 +10,14 @@ class Live2DPreview extends StatefulWidget {
       {super.key,
       required this.backgroundPath,
       required this.foregroundPath,
-      this.layer = 'composite'});
+      this.layer = 'composite',
+      this.crop = const Rect.fromLTWH(0, 0, 1, 1),
+      this.filter = PhotoFilter.original});
   final String backgroundPath;
   final String foregroundPath;
   final String layer;
+  final Rect crop;
+  final PhotoFilter filter;
   @override
   State<Live2DPreview> createState() => _Live2DPreviewState();
 }
@@ -57,8 +62,7 @@ class _Live2DPreviewState extends State<Live2DPreview> {
               Transform.scale(
                   key: const ValueKey('live2d-fixed-background'),
                   scale: 1.08,
-                  child: Image.file(File(widget.backgroundPath),
-                      fit: BoxFit.cover)),
+                  child: _image(widget.backgroundPath)),
             if (widget.layer != 'background')
               Transform.translate(
                   key: const ValueKey('live2d-moving-foreground'),
@@ -67,8 +71,30 @@ class _Live2DPreviewState extends State<Live2DPreview> {
                           _tilt.dy * bounds.maxHeight * .035)
                       : Offset.zero,
                   child: Transform.scale(
-                      scale: 1.08,
-                      child: Image.file(File(widget.foregroundPath),
-                          fit: BoxFit.cover))),
+                      scale: 1.08, child: _image(widget.foregroundPath))),
           ])));
+
+  Widget _image(String path) {
+    if (widget.crop == const Rect.fromLTWH(0, 0, 1, 1)) {
+      return ColorFiltered(
+          colorFilter: ColorFilter.matrix(widget.filter.matrix),
+          child: Image.file(File(path), fit: BoxFit.cover));
+    }
+    return LayoutBuilder(builder: (_, bounds) {
+      final crop = widget.crop;
+      final width = bounds.maxWidth / crop.width;
+      final height = bounds.maxHeight / crop.height;
+      return ClipRect(
+          child: Stack(children: [
+        Positioned(
+            left: -crop.left * width,
+            top: -crop.top * height,
+            width: width,
+            height: height,
+            child: ColorFiltered(
+                colorFilter: ColorFilter.matrix(widget.filter.matrix),
+                child: Image.file(File(path), fit: BoxFit.fill)))
+      ]));
+    });
+  }
 }

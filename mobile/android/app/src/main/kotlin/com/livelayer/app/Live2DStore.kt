@@ -131,6 +131,35 @@ internal class Live2DStore(private val context: Context) {
         output.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
     }
 
+    /** Import both edited PNGs atomically; leave the raw separation reversible. */
+    fun edit(draftId: String, background: File, foreground: File): Map<String, Any> {
+        val original = File(drafts, safeId(draftId))
+        val manifest = JSONObject(File(original, "manifest.json").readText())
+        val sizes = listOf(background, foreground).map { file ->
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            require(bounds.outMimeType == "image/png" && bounds.outWidth in 1..1600 && bounds.outHeight in 1..1600) {
+                "편집한 Live 2D 이미지가 올바르지 않습니다."
+            }
+            bounds.outWidth to bounds.outHeight
+        }
+        require(sizes[0] == sizes[1]) { "Live 2D 레이어 크기가 다릅니다." }
+        val id = UUID.randomUUID().toString()
+        val destination = File(drafts, id)
+        try {
+            check(destination.mkdirs())
+            background.copyTo(File(destination, "background.png"))
+            foreground.copyTo(File(destination, "foreground.png"))
+            File(destination, "manifest.json").writeText(manifest.put("projectId", id).toString())
+            return mapOf("draftId" to id, "backgroundPath" to File(destination, "background.png").absolutePath,
+                "foregroundPath" to File(destination, "foreground.png").absolutePath,
+                "width" to sizes[0].first, "height" to sizes[0].second)
+        } catch (error: Exception) {
+            destination.deleteRecursively()
+            throw error
+        }
+    }
+
     fun discard(id: String) { File(drafts, safeId(id)).deleteRecursively() }
 
     fun attach(owner: String, imageId: String, draftId: String) {
