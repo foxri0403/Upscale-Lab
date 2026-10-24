@@ -67,13 +67,11 @@ class _Live2DPageState extends State<Live2DPage> {
     if (original == null || _processing) return;
     setState(() => _processing = true);
     Live2DDraft? output;
-    Live2DDraft? applied;
     try {
-      applied = await Live2DService.export(original,
-          crop: widget.crop, filter: widget.filter);
-      final confirmed = await Live2DService.activate(applied);
-      if (!confirmed) return;
-      output = widget.keepSourceLayers ? original : applied;
+      output = widget.keepSourceLayers
+          ? original
+          : await Live2DService.export(original,
+              crop: widget.crop, filter: widget.filter);
       if (!mounted) return;
       setState(() => _processing = false);
       await WidgetsBinding.instance.endOfFrame;
@@ -81,19 +79,15 @@ class _Live2DPageState extends State<Live2DPage> {
       _draft = null;
       if (output.id != original.id) Live2DService.discard(original);
       Navigator.pop(context, output);
-      if (applied.id == output.id) applied = null;
       output = null; // Ownership transfers to the caller.
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Live 2D를 활성화하지 못했습니다. 다시 시도해 주세요.')));
+            const SnackBar(content: Text('Live 2D를 적용하지 못했습니다. 다시 시도해 주세요.')));
       }
     } finally {
       if (output != null && output.id != _draft?.id) {
         await Live2DService.discard(output);
-      }
-      if (applied != null && applied.id != _draft?.id) {
-        await Live2DService.discard(applied);
       }
       if (mounted) setState(() => _processing = false);
     }
@@ -201,11 +195,13 @@ class _Live2DPageState extends State<Live2DPage> {
                                                           CircularProgressIndicator(
                                                               strokeWidth: 2)),
                                                   SizedBox(width: 8),
-                                                  Text('활성화 확인 중…')
+                                                  Flexible(
+                                                      child:
+                                                          Text('Live 2D 적용 중…'))
                                                 ])
-                                          : const Text('배경화면에서 Live 2D 활성화')),
+                                          : const Text('Live 2D 적용')),
                                   const Text(
-                                      '현재 이미지를 배경화면에 적용하고 편집에 사용합니다. 이미 활성화되어 있으면 바로 적용하며, 최초 활성화에는 Android 확인이 필요합니다.',
+                                      '편집에 Live 2D 효과를 선택합니다. 실제 배경화면은 편집기의 배경화면 등록에서 적용하세요.',
                                       textAlign: TextAlign.center),
                                 ] else
                                   const Text(

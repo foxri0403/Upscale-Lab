@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'image_registration_page.dart';
-import 'live_2d_page.dart';
 import 'services/live_2d_service.dart';
 import 'widgets/live_2d_preview.dart';
 import 'gallery_preview_page.dart';
@@ -20,9 +19,9 @@ import 'services/local_image_store.dart';
 import 'services/wallpaper_service.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_components.dart';
-import 'widgets/device_display_builder.dart';
 import 'widgets/gallery_tag_picker.dart';
 import 'widgets/wallpaper_remove_dialog.dart';
+import 'widgets/wallpaper_apply_dialog.dart';
 import 'widgets/local_image_card.dart';
 
 export 'image_registration_page.dart';
@@ -223,8 +222,11 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
 
         if (target != null) {
           try {
-            await _localImageStore.applyWallpaper(saved.id, target: target);
-            _message('이미지를 저장하고 배경화면을 적용했습니다.');
+            final confirmed = await _localImageStore.registerWallpaper(saved.id,
+                target: target);
+            _message(confirmed
+                ? '이미지를 저장하고 배경화면을 적용했습니다.'
+                : '이미지는 저장했습니다. 배경화면 등록은 취소했습니다.');
           } catch (error) {
             _message('이미지는 저장했지만 배경화면을 적용하지 못했습니다.\n$error');
           }
@@ -275,7 +277,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
                 '$resultWidth x $resultHeight (예상: ${width * scale} x ${height * scale}).');
           }
 
-          await _localImageStore.import(
+          final saved = await _localImageStore.import(
             sourcePath: downloadedUpscalePath,
             fileName: 'upscaled_${scale}x.png',
             title: '${options.title}_AI_${scale}x',
@@ -287,6 +289,16 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
           );
           if (!mounted) return;
           _reload();
+          if (target != null) {
+            try {
+              final confirmed = await _localImageStore.registerWallpaper(saved.id, target: target);
+              _message(confirmed ? '업스케일 이미지를 저장하고 배경화면을 등록했습니다.'
+                  : '업스케일 이미지는 저장했습니다. 배경화면 등록은 취소했습니다.');
+            } catch (error) {
+              _message('업스케일 이미지는 저장했지만 배경화면을 등록하지 못했습니다.\n$error');
+            }
+            return;
+          }
           _message('AI $scale배 업스케일링 이미지가 저장됐습니다. '
               '($resultWidth x $resultHeight)');
         } catch (error) {
@@ -410,10 +422,15 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
     final store = _localImageStore;
     setState(() => _busyIds.add(image.id));
     try {
-      await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => ImageFeaturePage(
-          filePath: image.path, title: image.title, initialTags: image.tags, initialRatio: image.ratio,
-          loadLive2D: image.isLive2D ? () => store.editableLive2D(image.id) : null,
-          onSave: (options) => _saveImageEdit(image, options, store))));
+      await Navigator.of(context).push<void>(MaterialPageRoute(
+          builder: (_) => ImageFeaturePage(
+              filePath: image.path,
+              title: image.title,
+              initialTags: image.tags,
+              initialRatio: image.ratio,
+              loadLive2D:
+                  image.isLive2D ? () => store.editableLive2D(image.id) : null,
+              onSave: (options) => _saveImageEdit(image, options, store))));
     } catch (error) {
       _message('이미지를 수정하지 못했습니다.\n$error');
     } finally {
@@ -424,40 +441,65 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
     }
   }
 
-  Future<void> _saveImageEdit(LocalImageItem image, ImageRegistrationOptions options, LocalImageStore store) async {
+  Future<void> _saveImageEdit(LocalImageItem image,
+      ImageRegistrationOptions options, LocalImageStore store) async {
     var source = options.editedFile?.path ?? image.path;
     var width = options.editedFile?.width ?? image.width;
     var height = options.editedFile?.height ?? image.height;
     String? downloaded;
     try {
       if (options.upscaleFactor case final scale?) {
-        final project = await widget.apiClient.createProject(title: options.title,
-            filePath: source, width: width, height: height);
+        final project = await widget.apiClient.createProject(
+            title: options.title,
+            filePath: source,
+            width: width,
+            height: height);
         await widget.apiClient.startUpscaling(project.id, scale: scale);
         final status = await widget.apiClient.waitForUpscaling(project.id);
         final jobId = status['jobId']?.toString();
-        if (jobId == null || jobId.isEmpty) throw StateError('업스케일링 작업 ID가 없습니다.');
-        final url = await widget.apiClient.getUpscaledDownloadUrl(project.id, jobId);
-        downloaded = await store.downloadShared(url: url, fileName: 'upscaled_${scale}x.png');
-        final codec = await ui.instantiateImageCodec(await File(downloaded).readAsBytes());
+        if (jobId == null || jobId.isEmpty) {
+          throw StateError('업스케일링 작업 ID가 없습니다.');
+        }
+        final url =
+            await widget.apiClient.getUpscaledDownloadUrl(project.id, jobId);
+        downloaded = await store.downloadShared(
+            url: url, fileName: 'upscaled_${scale}x.png');
+        final codec = await ui
+            .instantiateImageCodec(await File(downloaded).readAsBytes());
         try {
           final frame = await codec.getNextFrame();
           try {
-            if (frame.image.width != width * scale || frame.image.height != height * scale) {
+            if (frame.image.width != width * scale ||
+                frame.image.height != height * scale) {
               throw StateError('AI 결과 해상도가 예상과 다릅니다.');
             }
             width = frame.image.width;
             height = frame.image.height;
-          } finally { frame.image.dispose(); }
-        } finally { codec.dispose(); }
+          } finally {
+            frame.image.dispose();
+          }
+        } finally {
+          codec.dispose();
+        }
         source = downloaded;
       }
-      final saved = await store.saveEdits(id: image.id, sourcePath: source,
-          title: options.title, tags: options.tags, width: width, height: height,
-          ratio: options.ratio, draftId: options.live2D?.id);
+      final saved = await store.saveEdits(
+          id: image.id,
+          sourcePath: source,
+          title: options.title,
+          tags: options.tags,
+          width: width,
+          height: height,
+          ratio: options.ratio,
+          draftId: options.live2D?.id);
       if (options.wallpaperTarget case final target?) {
         try {
-          await store.applyWallpaper(saved.id, target: target);
+          final confirmed =
+              await store.registerWallpaper(saved.id, target: target);
+          if (!confirmed) {
+            _message('수정은 저장했습니다. 배경화면 등록은 취소했습니다.');
+            return;
+          }
         } catch (error) {
           _message('수정은 저장했지만 배경화면을 적용하지 못했습니다.\n$error');
           return;
@@ -466,7 +508,9 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
       _message('이미지 수정을 저장했습니다.');
     } finally {
       if (downloaded != null) {
-        try { await File(downloaded).delete(); } catch (_) {}
+        try {
+          await File(downloaded).delete();
+        } catch (_) {}
       }
     }
   }
@@ -1261,271 +1305,124 @@ class HomeWallpaperPreviewPage extends StatefulWidget {
 
 class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
   bool _busy = false;
-  late bool _live2D = widget.image.isLive2D;
-  late Future<Map<Object?, Object?>>? _layers =
-      _live2D ? widget.store.live2DLayers(widget.image.id) : null;
-  WallpaperTarget _target = WallpaperTarget.home;
-  bool _targetTouched = false;
+  late final Future<Map<Object?, Object?>>? _layers =
+      widget.image.isLive2D ? widget.store.live2DLayers(widget.image.id) : null;
 
-  @override
-  void initState() {
-    super.initState();
-    if (_live2D) {
-      _syncLiveTarget();
-    }
-  }
-
-  Future<void> _syncLiveTarget() async {
-    final target = await Live2DService.activeTarget();
-    if (mounted && !_targetTouched && target != null) {
-      setState(() => _target = target);
-    }
-  }
-
-  Future<void> _convertLive2D() async {
-    if (widget.image.isShared) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('공유 중인 이미지는 수정할 수 없습니다. 먼저 공유를 취소해 주세요.')));
-      return;
-    }
-    final draft = await Navigator.of(context).push<Live2DDraft>(
-        MaterialPageRoute(
-            builder: (_) => Live2DPage(sourcePath: widget.image.path)));
-    if (draft == null) return;
-    try {
-      if (!mounted) return;
-      setState(() => _busy = true);
-      await widget.store.attachLive2D(widget.image.id, draft.id);
-      if (mounted) {
-        setState(() {
-          _live2D = true;
-          _layers = widget.store.live2DLayers(widget.image.id);
-        });
-        _syncLiveTarget();
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Live 2D를 저장하지 못했습니다.\n$error')));
-      }
-    } finally {
-      await Live2DService.discard(draft);
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _apply() async {
-    ScaffoldMessenger.of(context).clearSnackBars();
-    setState(() => _busy = true);
-    try {
-      await widget.store.applyWallpaper(widget.image.id, target: _target);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text('배경화면을 적용했습니다.')));
-    } on PlatformException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(
-                content: Text(e.message ?? '$e'),
-                action: _live2D && e.code == 'live2d_activation_required'
-                    ? SnackBarAction(label: 'Live 2D 활성화', onPressed: _activateLive2D)
-                    : null));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('적용하지 못했습니다: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _activateLive2D() async {
+  Future<void> _wallpaperSettings() async {
     if (_busy) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
+    final target = await showDialog<WallpaperTarget>(
+        context: context, builder: (_) => const WallpaperApplyDialog());
+    if (target == null || !mounted) return;
     setState(() => _busy = true);
     try {
-      final confirmed = await widget.store.activateLive2D(widget.image.id, target: _target);
-      if (mounted && confirmed) {
-        _targetTouched = false;
-        await _syncLiveTarget();
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Live 2D를 활성화했습니다. 이후 같은 화면에는 미리보기 없이 적용됩니다.')));
-      }
+      final confirmed =
+          await widget.store.registerWallpaper(widget.image.id, target: target);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(
+            content: Text(confirmed ? '배경화면을 등록했습니다.' : '배경화면 등록을 취소했습니다.')));
     } on PlatformException catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.message ?? 'Live 2D를 활성화하지 못했습니다.')));
+            SnackBar(content: Text(error.message ?? '배경화면을 등록하지 못했습니다.')));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('배경화면을 등록하지 못했습니다: $error')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
+  Widget _original() => Image.file(File(widget.image.path),
+      key: const ValueKey('wallpaper-preview-image'),
+      width: double.infinity, height: double.infinity, fit: BoxFit.contain);
+
+  Widget _preview() => widget.image.isLive2D
+      ? FutureBuilder<Map<Object?, Object?>>(
+          future: _layers,
+          builder: (_, snapshot) {
+            final layers = snapshot.data;
+            if (layers == null) {
+              return snapshot.hasError
+                  ? _original()
+                  : const Center(child: CircularProgressIndicator());
+            }
+            return Center(
+                child: AspectRatio(
+                    aspectRatio: widget.image.width / widget.image.height,
+                    child: Live2DPreview(
+                        backgroundPath: layers['backgroundPath']! as String,
+                        foregroundPath: layers['foregroundPath']! as String)));
+          })
+      : _original();
+
   @override
-  Widget build(BuildContext context) => DeviceDisplayBuilder(
-        builder: (context, display) => AnnotatedRegion<SystemUiOverlayStyle>(
+  Widget build(BuildContext context) => PopScope(
+      canPop: !_busy,
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
           value: AppTheme.overlayFor(Brightness.dark),
           child: Scaffold(
-            extendBody: false,
-            backgroundColor: Colors.black,
-            bottomNavigationBar: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xDD20232B),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<WallpaperTarget>(
-                            dropdownColor: const Color(0xFF20232B),
-                            value: _target,
-                            style: TextStyle(color: Colors.white),
-                            isExpanded: true,
-                            items: const [
-                              DropdownMenuItem(
-                                value: WallpaperTarget.home,
-                                child: Text('홈 화면'),
-                              ),
-                              DropdownMenuItem(
-                                value: WallpaperTarget.lock,
-                                child: Text('잠금 화면'),
-                              ),
-                              DropdownMenuItem(
-                                value: WallpaperTarget.both,
-                                child: Text('홈 화면 및 잠금 화면'),
-                              ),
-                            ],
-                            onChanged: _busy
-                                ? null
-                                : (value) {
-                                    if (value != null) {
-                                      setState(() => _target = value);
-                                      _targetTouched = true;
-                                    }
-                                  },
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 10),
-                    if (!_live2D && !widget.image.isShared)
-                      TextButton.icon(
-                          onPressed: _busy ? null : _convertLive2D,
-                          icon: const Icon(Icons.view_in_ar_outlined),
-                          label: const Text('Live 2D')),
-                    if (_live2D)
-                      TextButton.icon(
-                          key: const ValueKey('activate-saved-live2d'),
-                          onPressed: _busy ? null : _activateLive2D,
-                          icon: const Icon(Icons.view_in_ar_outlined),
-                          label: const Text('배경화면에서 Live 2D 활성화')),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: _busy ? null : _apply,
-                        icon: _busy
-                            ? const SizedBox.square(
-                                dimension: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : Icon(Icons.wallpaper),
-                        label: const Text('배경화면 설정'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            body: SafeArea(
-              bottom: false,
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: _live2D
-                        ? FutureBuilder<Map<Object?, Object?>>(
-                            future: _layers,
-                            builder: (_, snapshot) {
-                              final layers = snapshot.data;
-                              if (layers != null) {
-                                return Live2DPreview(
-                                    backgroundPath:
-                                        layers['backgroundPath']! as String,
-                                    foregroundPath:
-                                        layers['foregroundPath']! as String);
-                              }
-                              if (snapshot.hasError) {
-                                return Center(
-                                    child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                      const Text(
-                                          'Live 2D 레이어를 불러오지 못했습니다.\n원본 사진에서 다시 분리해 주세요.',
-                                          textAlign: TextAlign.center,
-                                          style:
-                                              TextStyle(color: Colors.white)),
-                                      TextButton(
-                                          onPressed:
-                                              _busy ? null : _convertLive2D,
-                                          child: const Text('다시 분리')),
-                                    ]));
-                              }
-                              return const Center(
-                                  child: CircularProgressIndicator());
-                            })
-                        : Image.file(
-                            File(widget.image.path),
-                            key: const ValueKey('wallpaper-preview-image'),
-                            fit: BoxFit.contain,
-                          ),
-                  ),
-                  Positioned(
+              backgroundColor: Colors.black,
+              body: SafeArea(
+                  child: Stack(children: [
+                Positioned.fill(
+                    child: InteractiveViewer(
+                        key: const ValueKey('library-preview-viewer'),
+                        maxScale: 8,
+                        child: Center(child: _preview()))),
+                Positioned(
                     top: 8,
                     left: 8,
                     child: IconButton.filledTonal(
-                      onPressed: () => Navigator.pop(context),
-                      icon: Icon(Icons.arrow_back),
-                    ),
-                  ),
-                  Positioned(
+                        tooltip: '미리보기 닫기',
+                        onPressed: _busy ? null : () => Navigator.pop(context),
+                        icon: const Icon(Icons.arrow_back))),
+                Positioned(
                     top: 8,
                     right: 8,
-                    child: PopupMenuButton<String>(
-                      icon: Icon(Icons.more_vert, color: Colors.white),
-                      onSelected: (action) {
-                        Navigator.pop(context);
-                        switch (action) {
-                          case 'edit':
-                            widget.onEdit();
-                          case 'share':
-                            widget.onShare();
-                          case 'delete':
-                            widget.onDelete();
-                        }
-                      },
-                      itemBuilder: (_) => [
-                        if (!widget.image.isShared)
-                          const PopupMenuItem(value: 'edit', child: Text('수정')),
-                        PopupMenuItem(
-                          value: 'share',
-                          child: Text(widget.image.isShared ? '공유 취소' : '공유'),
-                        ),
-                        const PopupMenuItem(value: 'delete', child: Text('삭제')),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      IconButton.filledTonal(
+                          key: const ValueKey('preview-wallpaper-settings'),
+                          tooltip: '배경화면 설정',
+                          onPressed: _busy ? null : _wallpaperSettings,
+                          icon: _busy
+                              ? const SizedBox.square(
+                                  dimension: 20,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.wallpaper)),
+                      PopupMenuButton<String>(
+                          enabled: !_busy,
+                          tooltip: '이미지 메뉴',
+                          icon:
+                              const Icon(Icons.more_vert, color: Colors.white),
+                          onSelected: (action) {
+                            Navigator.pop(context);
+                            switch (action) {
+                              case 'edit':
+                                widget.onEdit();
+                              case 'share':
+                                widget.onShare();
+                              case 'delete':
+                                widget.onDelete();
+                            }
+                          },
+                          itemBuilder: (_) => [
+                                if (!widget.image.isShared)
+                                  const PopupMenuItem(
+                                      value: 'edit', child: Text('수정')),
+                                PopupMenuItem(
+                                    value: 'share',
+                                    child: Text(widget.image.isShared
+                                        ? '공유 취소'
+                                        : '공유')),
+                                const PopupMenuItem(
+                                    value: 'delete', child: Text('삭제')),
+                              ]),
+                    ])),
+              ])))));
 }

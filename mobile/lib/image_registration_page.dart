@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter/rendering.dart' show OverflowBoxFit;
-import 'live_2d_page.dart';
 import 'services/live_2d_service.dart';
 import 'widgets/live_2d_preview.dart';
 
 import 'models/gallery_tags.dart';
 import 'models/image_editor.dart';
 import 'models/image_ratio.dart';
-import 'models/wallpaper_save_selection.dart';
 import 'services/image_editor_service.dart';
 import 'services/wallpaper_service.dart';
 import 'widgets/app_components.dart';
@@ -16,7 +14,7 @@ import 'widgets/device_display_builder.dart';
 import 'widgets/gallery_tag_picker.dart';
 import 'widgets/image_ratio_selector.dart';
 import 'widgets/registration_image_canvas.dart';
-import 'widgets/wallpaper_save_dialog.dart';
+import 'widgets/wallpaper_apply_dialog.dart';
 
 class ImageRegistrationOptions {
   const ImageRegistrationOptions({
@@ -89,51 +87,65 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   Rect _crop = const Rect.fromLTWH(0, 0, 1, 1);
   int _canvasRevision = 0;
   Live2DDraft? _live2D;
-  bool _openingLive2D = false;
+  Live2DDraft? _candidate;
+  bool _splitting = false;
+  String? _splitError;
+  String _liveLayer = 'composite';
+  int _splitGeneration = 0;
 
   void _clearLive2D() {
+    _splitGeneration++;
     final draft = _live2D;
+    final candidate = _candidate;
     _live2D = null;
+    _candidate = null;
+    _splitting = false;
+    _splitError = null;
     Live2DService.discard(draft);
+    if (candidate?.id != draft?.id) Live2DService.discard(candidate);
   }
 
-  Future<void> _openLive2D() async {
-    if (_source == null || _saving || _openingLive2D) return;
-    _openingLive2D = true;
-    Live2DDraft? initial;
+  Future<void> _openLive2D({bool retry = false}) async {
+    if (_source == null || _saving || _splitting) return;
+    setState(() => _tool = _RegistrationTool.parallax);
+    if (!retry && (_live2D != null || _candidate != null)) return;
+    final generation = ++_splitGeneration;
+    setState(() {
+      _splitting = true;
+      _splitError = null;
+    });
     try {
-      if (_live2D case final draft?) initial = await Live2DService.clone(draft);
-      if (!mounted) {
-        await Live2DService.discard(initial);
+      final draft = await Live2DService.split(widget.filePath);
+      if (!mounted || generation != _splitGeneration) {
+        await Live2DService.discard(draft);
         return;
       }
-      final result = await Navigator.of(context).push<Live2DDraft>(
-          MaterialPageRoute(
-              builder: (_) => Live2DPage(
-                  sourcePath: widget.filePath,
-                  crop: _crop,
-                  filter: _filter,
-                  initialDraft: initial,
-                  keepSourceLayers: true)));
-      if (result == null) return;
-      if (!mounted) {
-        await Live2DService.discard(result);
-        return;
-      }
-      _clearLive2D();
-      setState(() {
-        _live2D = result;
-        _tool = _RegistrationTool.parallax;
-      });
-    } catch (_) {
-      await Live2DService.discard(initial);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Live 2D를 불러오지 못했습니다. 다시 시도해 주세요.')));
+      final previous = _candidate;
+      setState(() => _candidate = draft);
+      await Live2DService.discard(previous);
+    } catch (error) {
+      if (mounted && generation == _splitGeneration) {
+        setState(() => _splitError = error is PlatformException
+            ? error.message ?? '이미지를 분리하지 못했습니다.'
+            : '이미지를 분리하지 못했습니다. 다시 시도해 주세요.');
       }
     } finally {
-      _openingLive2D = false;
+      if (mounted && generation == _splitGeneration) {
+        setState(() => _splitting = false);
+      }
     }
+  }
+
+  void _applyLive2D() {
+    final draft = _candidate ?? _live2D;
+    if (draft == null || _saving || _splitting) return;
+    final previous = _live2D;
+    setState(() {
+      _live2D = draft;
+      _candidate = null;
+      _liveLayer = 'composite';
+    });
+    if (previous?.id != draft.id) Live2DService.discard(previous);
   }
 
   @override
@@ -218,7 +230,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     );
   }
 
-  Future<void> _save() async {
+  Future<void> _save({bool wallpaper = false}) async {
     if (_source == null || _saving || _exporting) return;
     final title = _titleController.text.trim();
     if (title.isEmpty) {
@@ -232,11 +244,11 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     EditedImageFile? edited;
     Live2DDraft? prepared;
     try {
-      final selection = _live2D != null
-          ? const WallpaperSaveSelection()
-          : await showDialog<WallpaperSaveSelection>(
-              context: context, builder: (_) => const WallpaperSaveDialog());
-      if (selection == null || !mounted) return;
+      final target = wallpaper
+          ? await showDialog<WallpaperTarget>(
+              context: context, builder: (_) => const WallpaperApplyDialog())
+          : null;
+      if ((wallpaper && target == null) || !mounted) return;
       setState(() => _exporting = true);
       edited = await ImageEditorService.export(
           sourcePath: widget.filePath, crop: _crop, filter: _filter);
@@ -256,7 +268,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                       _source!.size.width /
                       (_crop.height * _source!.size.height))
               : _ratio,
-          wallpaperTarget: selection.target,
+          wallpaperTarget: target,
           live2D: prepared);
       await widget.onSave?.call(options);
       if (!mounted) {
@@ -392,9 +404,8 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                                           ),
                                         ],
                                       ),
-                                    _RegistrationTool.parallax => const Text(
-                                        'Live 2D · 배경 고정 / 인물·사물 자이로 이동',
-                                        textAlign: TextAlign.center),
+                                    _RegistrationTool.parallax =>
+                                      _live2DControls(),
                                   },
                                 )),
                               ),
@@ -409,14 +420,14 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                 Expanded(child: _tools(colors)),
                 Padding(
                     padding: const EdgeInsets.only(right: 16),
-                    child: SizedBox(width: 108, child: _saveButton())),
+                    child: SizedBox(width: 224, child: _saveActions())),
               ]),
             )
           else ...[
             if (showTools) _tools(colors),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: SizedBox(width: double.infinity, child: _saveButton()),
+              child: _saveActions(),
             ),
           ],
         ])),
@@ -438,7 +449,9 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                             onPressed: _load, child: const Text('다시 시도')),
                       ]));
           }
-          final draft = _live2D;
+          final draft = _tool == _RegistrationTool.parallax
+              ? _candidate ?? _live2D
+              : _live2D;
           return Center(
               child: Semantics(
             button: true,
@@ -457,6 +470,9 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                     : Live2DPreview(
                         backgroundPath: draft.backgroundPath,
                         foregroundPath: draft.foregroundPath,
+                        layer: _tool == _RegistrationTool.parallax
+                            ? _liveLayer
+                            : 'composite',
                         crop: _crop,
                         filter: _filter),
                 cropping: _tool == _RegistrationTool.crop,
@@ -506,14 +522,88 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
         ]),
       );
 
-  Widget _saveButton() => FilledButton(
-        key: const ValueKey('save-registration'),
-        onPressed: _source == null || _saving ? null : _save,
-        child: _exporting
-            ? const SizedBox.square(
-                dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
-            : const Text('저장'),
-      );
+  Widget _saveActions() => Row(children: [
+        Expanded(
+            child: OutlinedButton(
+          key: const ValueKey('save-registration'),
+          onPressed: _source == null || _saving ? null : () => _save(),
+          child: _exporting
+              ? const SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('저장'),
+        )),
+        const SizedBox(width: 8),
+        Expanded(
+            child: FilledButton(
+                key: const ValueKey('register-wallpaper'),
+                onPressed: _source == null || _saving
+                    ? null
+                    : () => _save(wallpaper: true),
+                child: const Text('배경화면 등록', textAlign: TextAlign.center))),
+      ]);
+
+  Widget _live2DControls() {
+    final draft = _candidate ?? _live2D;
+    final wide = MediaQuery.sizeOf(context).aspectRatio > 1;
+    final layers = SegmentedButton<String>(
+        segments: const [
+          ButtonSegment(value: 'composite', label: Text('미리보기')),
+          ButtonSegment(value: 'background', label: Text('배경')),
+          ButtonSegment(value: 'foreground', label: Text('인물·사물'))
+        ],
+        selected: {
+          _liveLayer
+        },
+        onSelectionChanged: (values) =>
+            setState(() => _liveLayer = values.single));
+    final apply = FilledButton(
+        key: const ValueKey('activate-live2d'),
+        onPressed: _saving ? null : _applyLive2D,
+        child: const Text('Live 2D 적용', textAlign: TextAlign.center));
+    final retry = TextButton(
+        onPressed: _saving ? null : () => _openLive2D(retry: true),
+        child: const Text('다시 분리'));
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      if (_splitting)
+        const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          SizedBox.square(
+              dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+          SizedBox(width: 10),
+          Flexible(child: Text('배경과 인물·사물을 분리하고 있습니다…')),
+        ]),
+      if (_splitError != null) Text(_splitError!, textAlign: TextAlign.center),
+      if (!_splitting && draft != null) ...[
+        if (wide)
+          SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                layers,
+                const SizedBox(width: 12),
+                apply,
+                const SizedBox(width: 8),
+                retry,
+              ]))
+        else ...[
+          SingleChildScrollView(
+              scrollDirection: Axis.horizontal, child: layers),
+          const SizedBox(height: 8),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Flexible(child: apply),
+            const SizedBox(width: 8),
+            Flexible(child: retry),
+          ]),
+        ],
+        Text(_live2D != null && _candidate == null
+            ? 'Live 2D 적용됨 · 다른 편집을 계속할 수 있습니다.'
+            : '확인 후 Live 2D 적용을 눌러 선택하세요.'),
+      ],
+      if (!_splitting && draft == null)
+        TextButton(
+            onPressed: _saving ? null : () => _openLive2D(retry: true),
+            child: const Text('다시 시도')),
+    ]);
+  }
 
   Widget _information() => LayoutBuilder(builder: (_, bounds) {
         final name = TextFormField(

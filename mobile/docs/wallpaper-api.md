@@ -76,12 +76,16 @@ The wire target is exactly `home`, `lock`, or `both`. An omitted/null target def
 to `home` for existing callers. Invalid values fail with `invalid_target`.
 `clearHomeWallpaper` remains a home-only compatibility alias. Settings use one
 **배경화면 제거** action with independent home/lock checkboxes, disabled deletion
-when neither is selected, and **취소 / 삭제** actions. The single Live 2D activation
-button reuses an active service directly and returns `true` without opening a picker.
-Initial activation or a changed target still requires Android confirmation;
-cancelling returns `false`. Successful activation also returns the selected layers
-to the editor. Shared images cannot be modified, including through metadata-only
-edit methods, and edit saves preserve the existing image ID.
+when neither is selected, and **취소 / 삭제** actions. The editor's **Live 2D 적용**
+selects layers inline and never invokes a wallpaper API. **저장** persists only to
+the private library. **배경화면 등록** and the library preview's upper-right settings
+open independent home/lock checkboxes; neither selected disables confirmation.
+`LocalImageStore.registerWallpaper` applies to an already active service directly.
+On `live2d_activation_required` it requests Android confirmation for initial
+activation or a changed target; cancelling returns `false` and preserves the saved
+image. Editor save/registration completion returns to the library. Shared images
+cannot be modified, including through metadata-only edit methods, and edit saves
+preserve the existing image ID.
 
 All account-scoped storage operations now carry both the legacy server/account
 `scope` and the stable authenticated `ownerId`. Android resolves registered images

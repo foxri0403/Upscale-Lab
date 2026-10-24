@@ -89,6 +89,19 @@ class LocalImageStore {
         'target': target.name,
       });
 
+  /// Called only after the user explicitly confirms wallpaper registration.
+  /// A first Live 2D service connection still requires Android confirmation.
+  Future<bool> registerWallpaper(String id,
+      {required WallpaperTarget target}) async {
+    try {
+      await applyWallpaper(id, target: target);
+      return true;
+    } on PlatformException catch (error) {
+      if (error.code != 'live2d_activation_required') rethrow;
+      return activateLive2D(id, target: target);
+    }
+  }
+
   Future<List<LocalImageItem>> getAll() async {
     final values = await _channel.invokeListMethod<Object?>(
             'listLocalImages', {'scope': scope, 'ownerId': ownerId}) ??
