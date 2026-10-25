@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -30,6 +31,8 @@ void main() {
   bool failEdit = false;
   int activeFlags = 1;
   bool confirmActivation = true;
+  bool failActivation = false;
+  Completer<bool>? pendingActivation;
   late List<List<int>> exportedPlanes;
   Live2DDraft? selected;
 
@@ -54,6 +57,8 @@ void main() {
     failEdit = false;
     activeFlags = 1;
     confirmActivation = true;
+    failActivation = false;
+    pendingActivation = null;
     exportedPlanes = [];
     selected = null;
     messenger.setMockMethodCallHandler(tilt, (_) async => null);
@@ -63,7 +68,10 @@ void main() {
         case 'getActiveLive2DTarget':
           return activeFlags;
         case 'activateLive2DDraft':
-          return confirmActivation;
+          if (failActivation) throw PlatformException(code: 'live2d_failed', message: '연결 실패');
+          final confirmed = await (pendingActivation?.future ?? Future.value(confirmActivation));
+          if (confirmed && activeFlags == 0) activeFlags = 3;
+          return confirmed;
         case 'cloneLive2DDraft':
           return {
             'draftId': 'cloned-draft',
@@ -189,11 +197,8 @@ void main() {
     expect(find.byKey(const ValueKey('live2d-fixed-background')), findsNothing);
     await tester.tap(find.byKey(const ValueKey('activate-live2d')));
     await settleFiles(tester);
-    expect(
-        calls.any((c) =>
-            c.method == 'activateLive2DDraft' ||
-            c.method == 'applyLocalWallpaper'),
-        isFalse);
+    expect(calls.where((c) => c.method == 'activateLive2DDraft'), hasLength(1));
+    expect(calls.where((c) => c.method == 'applyLocalWallpaper'), isEmpty);
     expect(selected!.id, 'draft-1');
     expect(discarded, isNot(contains('draft-1')));
     await Live2DService.discard(selected);
@@ -464,7 +469,7 @@ void main() {
   });
 
   testWidgets(
-      'legacy Live 2D selection transfers layers without applying a wallpaper',
+      'legacy Live 2D completes activation and returns editable layers',
       (tester) async {
     tester.view.physicalSize = const Size(320, 640);
     tester.view.devicePixelRatio = 1;
@@ -486,7 +491,7 @@ void main() {
     await settleFiles(tester);
     expect(selected!.id, 'edited-draft');
     expect(discarded, ['draft-1']);
-    expect(calls.any((c) => c.method == 'activateLive2DDraft'), isFalse);
+    expect(calls.where((c) => c.method == 'activateLive2DDraft'), hasLength(1));
     await Live2DService.discard(selected);
     expect(tester.takeException(), isNull);
   });
@@ -517,7 +522,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ImageFeaturePage), findsOneWidget);
     expect(find.byType(Live2DPage), findsNothing);
-    expect(calls.where((c) => c.method == 'activateLive2DDraft'), isEmpty);
+    expect(calls.where((c) => c.method == 'activateLive2DDraft'), hasLength(1));
     expect(discarded, isNot(contains('owned-draft')));
     await tester.pageBack();
     await tester.pumpAndSettle();
@@ -546,6 +551,104 @@ void main() {
     await settleFiles(tester);
   }
 
+  testWidgets('Android confirmation waits in the editor and unlocks editing on return', (tester) async {
+    activeFlags = 0;
+    pendingActivation = Completer<bool>();
+    await open(tester, ImageFeaturePage(filePath: source, title: 'waiting'));
+    final live = find.byKey(const ValueKey('registration-tool-parallax'));
+    await tester.ensureVisible(live);
+    await tester.tap(live);
+    await settleFiles(tester);
+    await tester.tap(find.byKey(const ValueKey('activate-live2d')));
+    await tester.runAsync(() async {
+      for (var attempt = 0; attempt < 100; attempt++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await tester.pump();
+        if (calls.any((c) => c.method == 'activateLive2DDraft')) break;
+      }
+    });
+    expect(calls.where((c) => c.method == 'activateLive2DDraft'), hasLength(1));
+    expect(tester.widget<OutlinedButton>(find.byKey(const ValueKey('save-registration'))).onPressed, isNull);
+    expect(tester.widget<FilledButton>(find.byKey(const ValueKey('register-wallpaper'))).onPressed, isNull);
+    expect(tester.widget<TextButton>(find.byKey(const ValueKey('registration-tool-filter'))).onPressed, isNull);
+    expect(selected, isNull);
+    pendingActivation!.complete(true);
+    await settleFiles(tester);
+    expect(activeFlags, 3);
+    expect(find.byType(ImageFeaturePage), findsOneWidget);
+    expect(find.byType(Live2DPage), findsNothing);
+    final filter = find.byKey(const ValueKey('registration-tool-filter'));
+    await tester.ensureVisible(filter);
+    await tester.tap(filter);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey(PhotoFilter.monochrome)), findsOneWidget);
+    expect(discarded, isNot(contains('draft-1')));
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+
+  for (final failure in ['cancel', 'error']) {
+    testWidgets('Android $failure preserves separation and permits another Apply', (tester) async {
+      activeFlags = 0;
+      confirmActivation = failure != 'cancel';
+      failActivation = failure == 'error';
+      await open(tester, ImageFeaturePage(filePath: source, title: 'retry'));
+      final live = find.byKey(const ValueKey('registration-tool-parallax'));
+      await tester.ensureVisible(live);
+      await tester.tap(live);
+      await settleFiles(tester);
+      await tester.tap(find.byKey(const ValueKey('activate-live2d')));
+      await settleFiles(tester);
+      expect(find.byType(ImageFeaturePage), findsOneWidget);
+      expect(find.text('Live 2D 적용됨 · 다른 편집을 계속할 수 있습니다.'), findsNothing);
+      expect(discarded, isNot(contains('draft-1')));
+      expect(activeFlags, 0);
+      confirmActivation = true;
+      failActivation = false;
+      await tester.tap(find.byKey(const ValueKey('activate-live2d')));
+      await settleFiles(tester);
+      expect(find.text('Live 2D 적용됨 · 다른 편집을 계속할 수 있습니다.'), findsOneWidget);
+      expect(calls.where((c) => c.method == 'splitLive2D'), hasLength(1));
+      expect(calls.where((c) => c.method == 'activateLive2DDraft'), hasLength(2));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    });
+  }
+
+  for (final flags in [1, 2, 3]) {
+    testWidgets('saved Live 2D reuses Android target $flags after reopening the app', (tester) async {
+      activeFlags = flags;
+      for (var launch = 0; launch < 2; launch++) {
+        await savedPreview(tester);
+        await tester.tap(find.byKey(const ValueKey('preview-wallpaper-settings')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('wallpaper-home')), findsNothing);
+        expect(find.byType(AlertDialog), findsNothing);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpAndSettle();
+      }
+      final applies = calls.where((c) => c.method == 'applyLocalWallpaper');
+      expect(applies, hasLength(2));
+      expect(applies.map((c) => (c.arguments as Map)['target']),
+          everyElement(WallpaperTarget.values[flags - 1].name));
+      expect(calls.where((c) => c.method == 'activateLocalLive2D' || c.method == 'activateLive2DDraft'), isEmpty);
+    });
+  }
+
+  testWidgets('registration never opens Android when the live connection was removed', (tester) async {
+    activeFlags = 0;
+    await open(tester, ImageFeaturePage(filePath: source, title: 'disconnected',
+        loadLive2D: () async => Live2DDraft(id: 'saved', backgroundPath: source,
+            foregroundPath: source, width: 32, height: 48)));
+    await tester.tap(find.byKey(const ValueKey('register-wallpaper')));
+    await settleFiles(tester);
+    expect(find.text('Live 2D 적용에서 Android 배경화면 설정을 먼저 완료해 주세요.'), findsOneWidget);
+    expect(find.byType(ImageFeaturePage), findsOneWidget);
+    expect(calls.where((c) => c.method == 'activateLocalLive2D' || c.method == 'activateLive2DDraft'), isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+
   testWidgets(
       'saved preview shows only the image and registers both targets from the top right',
       (tester) async {
@@ -559,12 +662,7 @@ void main() {
     expect(tester.getCenter(settings).dy, lessThan(100));
     await tester.tap(settings);
     await tester.pumpAndSettle();
-    expect(calls.any((c) => c.method == 'applyLocalWallpaper'), isFalse);
-    await tester.tap(find.byKey(const ValueKey('wallpaper-home')));
-    await tester.tap(find.byKey(const ValueKey('wallpaper-lock')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('confirm-wallpaper-apply')));
-    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('confirm-wallpaper-apply')), findsNothing);
     expect(
         calls.singleWhere((c) => c.method == 'applyLocalWallpaper').arguments, {
       'scope': 'server\naccount-1',
@@ -583,7 +681,7 @@ void main() {
 
   for (final confirmed in [false, true]) {
     testWidgets(
-        'first Live 2D registration requests Android confirmation only after final registration ($confirmed)',
+        'a removed connection requires explicit Live 2D Apply before reopening Android ($confirmed)',
         (tester) async {
       activeFlags = 0;
       confirmActivation = confirmed;
@@ -593,9 +691,8 @@ void main() {
           .tap(find.byKey(const ValueKey('preview-wallpaper-settings')));
       await tester.pumpAndSettle();
       expect(calls.where((c) => c.method == 'activateLocalLive2D'), isEmpty);
-      await tester.tap(find.byKey(const ValueKey('wallpaper-home')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('confirm-wallpaper-apply')));
+      expect(find.byKey(const ValueKey('wallpaper-home')), findsNothing);
+      await tester.tap(find.widgetWithText(FilledButton, 'Live 2D 적용'));
       await tester.pumpAndSettle();
       expect(
           calls.singleWhere((c) => c.method == 'activateLocalLive2D').arguments,
@@ -603,7 +700,6 @@ void main() {
             'scope': 'server\naccount-1',
             'ownerId': 'account-1',
             'id': 'image-1',
-            'target': 'home'
           });
       expect(find.text(confirmed ? '배경화면을 등록했습니다.' : '배경화면 등록을 취소했습니다.'),
           findsOneWidget);

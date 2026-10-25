@@ -1305,18 +1305,45 @@ class HomeWallpaperPreviewPage extends StatefulWidget {
 
 class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
   bool _busy = false;
+  bool _choosingWallpaper = false;
   late final Future<Map<Object?, Object?>>? _layers =
       widget.image.isLive2D ? widget.store.live2DLayers(widget.image.id) : null;
 
   Future<void> _wallpaperSettings() async {
-    if (_busy) return;
-    final target = await showDialog<WallpaperTarget>(
-        context: context, builder: (_) => const WallpaperApplyDialog());
-    if (target == null || !mounted) return;
-    setState(() => _busy = true);
+    if (_busy || _choosingWallpaper) return;
+    _choosingWallpaper = true;
     try {
-      final confirmed =
-          await widget.store.registerWallpaper(widget.image.id, target: target);
+      final bool confirmed;
+      if (widget.image.isLive2D) {
+        final target = await Live2DService.activeTarget();
+        if (!mounted) return;
+        if (target == null) {
+          final reconnect = await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                      title: const Text('Live 2D 연결'),
+                      content: const Text(
+                          'Android에서 Live 2D 연결이 해제되어 있습니다. Live 2D 적용에서 화면을 선택하면 이후에는 바로 등록됩니다.'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(context, false),
+                            child: const Text('취소')),
+                        FilledButton(onPressed: () => Navigator.pop(context, true),
+                            child: const Text('Live 2D 적용')),
+                      ]));
+          if (reconnect != true || !mounted) return;
+          setState(() => _busy = true);
+          confirmed = await widget.store.activateLive2D(widget.image.id);
+        } else {
+          setState(() => _busy = true);
+          confirmed = await widget.store.registerWallpaper(widget.image.id, target: target);
+        }
+      } else {
+        final target = await showDialog<WallpaperTarget>(
+            context: context, builder: (_) => const WallpaperApplyDialog());
+        if (target == null || !mounted) return;
+        setState(() => _busy = true);
+        confirmed = await widget.store.registerWallpaper(widget.image.id, target: target);
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
@@ -1333,6 +1360,7 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
             .showSnackBar(SnackBar(content: Text('배경화면을 등록하지 못했습니다: $error')));
       }
     } finally {
+      _choosingWallpaper = false;
       if (mounted) setState(() => _busy = false);
     }
   }

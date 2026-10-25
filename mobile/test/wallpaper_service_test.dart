@@ -80,6 +80,18 @@ void main() {
     });
   }
 
+  test('a disconnected service fails registration without launching Android again', () async {
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(storageChannel, (call) async {
+      calls.add(call);
+      throw PlatformException(code: 'live2d_activation_required');
+    });
+    const store = LocalImageStore(scope: 'server\naccount-a', ownerId: 'account-a');
+    await expectLater(store.registerWallpaper('image-a', target: WallpaperTarget.both),
+        throwsA(isA<PlatformException>().having((error) => error.code, 'code', 'live2d_activation_required')));
+    expect(calls.map((call) => call.method), ['applyLocalWallpaper']);
+  });
+
   test('explicit manual ratio travels with the chosen local and remote targets',
       () async {
     final calls = <MethodCall>[];

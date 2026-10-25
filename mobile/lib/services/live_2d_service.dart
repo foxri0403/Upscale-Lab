@@ -56,6 +56,18 @@ abstract final class Live2DService {
     }
   }
 
+  /// Read Android's actual connection on every registration, including after
+  /// app restarts. A saved permission flag cannot establish a wallpaper service.
+  static Future<WallpaperTarget> requireActiveTarget() async {
+    final target = await activeTarget();
+    if (target == null) {
+      throw PlatformException(
+          code: 'live2d_activation_required',
+          message: 'Live 2D 적용에서 Android 배경화면 설정을 먼저 완료해 주세요.');
+    }
+    return target;
+  }
+
   /// Keep the separation untouched while editing. Bake the same crop/filter
   /// into both planes only when saving, preserving the foreground alpha.
   /// The caller owns the returned draft and the original until transfer.

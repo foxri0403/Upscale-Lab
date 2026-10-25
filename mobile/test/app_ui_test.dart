@@ -93,6 +93,8 @@ void main() {
   var failImageEdit = false;
   Map<Object?, Object?>? savedEdits;
   Map<Object?, Object?>? appliedLocalWallpaper;
+  int activeLiveFlags = 1;
+  int liveActivations = 0;
   const pickerChannel = MethodChannel('plugins.flutter.io/image_picker');
   const wallpaperChannel = MethodChannel('live_layer/wallpaper');
   const tiltChannel = MethodChannel('live_layer/tilt');
@@ -131,6 +133,8 @@ void main() {
     failImageEdit = false;
     savedEdits = null;
     appliedLocalWallpaper = null;
+    activeLiveFlags = 1;
+    liveActivations = 0;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(pickerChannel, (call) async {
       expect(call.method, 'pickImage');
@@ -158,7 +162,16 @@ void main() {
         clearedTarget = (call.arguments as Map)['target'] as String;
         return null;
       }
-      if (call.method == 'getActiveLive2DTarget') return 1;
+      if (call.method == 'getActiveLive2DTarget') return activeLiveFlags;
+      if (call.method == 'activateLive2DDraft') {
+        liveActivations++;
+        if (activeLiveFlags == 0) activeLiveFlags = 3;
+        return true;
+      }
+      if (call.method == 'splitLive2D') {
+        return {'draftId': 'split-layers', 'backgroundPath': imagePath,
+          'foregroundPath': imagePath, 'width': 40, 'height': 40};
+      }
       if (call.method == 'discardLive2D') return null;
       if (call.method == 'editLive2D' || call.method == 'cloneLive2DDraft') {
         return {'draftId': 'edited-layers', 'backgroundPath': imagePath,
@@ -186,6 +199,10 @@ void main() {
       expect((call.arguments as Map)['scope'], api.storageScope);
       expect((call.arguments as Map)['ownerId'], api.userId);
       if (call.method == 'listLocalImages') return images;
+      if (call.method == 'attachLocalLive2D') {
+        images.singleWhere((item) => item['id'] == (call.arguments as Map)['id'])['mode'] = 'live2d';
+        return null;
+      }
       if (call.method == 'migrateGalleryImages') {
         return {'imported': 2, 'removed': 2, 'remaining': 0, 'failed': 0};
       }
@@ -1258,14 +1275,15 @@ void main() {
     });
   }
 
-  testWidgets('Live 2D selection stays inline and defers wallpaper changes until registration', (tester) async {
+  testWidgets('Live 2D activation returns to editing and registers later edits directly', (tester) async {
+    activeLiveFlags = 3;
     images[0]['mode'] = 'live2d';
     await show(tester, home());
     await edit(tester, 0);
     await editTool(tester, 'parallax');
     await tester.tap(find.byKey(const ValueKey('activate-live2d')));
-    await tester.pumpAndSettle();
-    expect(find.text('Live 2D 적용됨 · 다른 편집을 계속할 수 있습니다.'), findsOneWidget);
+    await settleFileWork(tester, find.text('Live 2D 적용됨 · 다른 편집을 계속할 수 있습니다.'));
+    expect(liveActivations, 1);
     expect(find.byType(ImageFeaturePage), findsOneWidget);
     expect(appliedLocalWallpaper, isNull);
     expect(localWrites, 0);
@@ -1275,15 +1293,40 @@ void main() {
     await tester.tap(mono);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('register-wallpaper')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('wallpaper-home')));
-    await tester.tap(find.byKey(const ValueKey('wallpaper-lock')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('confirm-wallpaper-apply')));
     await settleFileWork(tester, find.text('이미지 수정을 저장했습니다.'));
+    expect(find.byKey(const ValueKey('confirm-wallpaper-apply')), findsNothing);
+    expect(liveActivations, 1);
     expect(savedEdits!['draftId'], 'edited-layers');
     expect(appliedLocalWallpaper!['target'], 'both');
     expect(find.byType(ImageFeaturePage), findsNothing);
+  });
+
+  testWidgets('new Live 2D activates once then saves and applies from a reopened library', (tester) async {
+    activeLiveFlags = 0;
+    await show(tester, home());
+    await tester.tap(find.byType(NewImageCard));
+    await settleFileWork(tester, find.byKey(const ValueKey('registration-original-image')));
+    await editTool(tester, 'parallax');
+    await tester.tap(find.byKey(const ValueKey('activate-live2d')));
+    await settleFileWork(tester, find.text('Live 2D 적용됨 · 다른 편집을 계속할 수 있습니다.'));
+    expect(liveActivations, 1);
+    expect(imports, 0);
+    expect(find.byType(ImageFeaturePage), findsOneWidget);
+    await saveEdit(tester, find.text('Live 2D 이미지를 저장했습니다.'));
+    expect(images.last['mode'], 'live2d');
+    expect(find.byType(ImageFeaturePage), findsNothing);
+    expect(appliedLocalWallpaper, isNull);
+    await show(tester, home());
+    final savedCard = find.byWidgetPredicate((widget) => widget is LocalImageCard && widget.image.id == 'saved-image');
+    await tester.ensureVisible(savedCard);
+    await tester.tap(savedCard);
+    await settleFileWork(tester, find.byKey(const ValueKey('library-preview-viewer')));
+    await tester.tap(find.byKey(const ValueKey('preview-wallpaper-settings')));
+    await tester.pumpAndSettle();
+    expect(appliedLocalWallpaper!['id'], 'saved-image');
+    expect(appliedLocalWallpaper!['target'], 'both');
+    expect(liveActivations, 1);
+    expect(find.byType(AlertDialog), findsNothing);
   });
 
   testWidgets('upscaled registration applies the processed image rather than the input', (tester) async {

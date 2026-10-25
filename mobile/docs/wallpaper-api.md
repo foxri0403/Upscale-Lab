@@ -77,13 +77,15 @@ to `home` for existing callers. Invalid values fail with `invalid_target`.
 `clearHomeWallpaper` remains a home-only compatibility alias. Settings use one
 **배경화면 제거** action with independent home/lock checkboxes, disabled deletion
 when neither is selected, and **취소 / 삭제** actions. The editor's **Live 2D 적용**
-selects layers inline and never invokes a wallpaper API. **저장** persists only to
-the private library. **배경화면 등록** and the library preview's upper-right settings
-open independent home/lock checkboxes; neither selected disables confirmation.
-`LocalImageStore.registerWallpaper` applies to an already active service directly.
-On `live2d_activation_required` it requests Android confirmation for initial
-activation or a changed target; cancelling returns `false` and preserves the saved
-image. Editor save/registration completion returns to the library. Shared images
+exports the current crop/filter into a wallpaper snapshot and invokes
+`activateLive2DDraft`. Initial Android confirmation returns to the same editor;
+cancellation or failure preserves editable layers. **저장** persists only to the
+private library. Static registration uses independent home/lock checkboxes.
+Live 2D registration reuses `getActiveLive2DTarget` without a target dialog, even
+after restarting the app. `LocalImageStore.registerWallpaper` never opens Android
+settings on failure; `live2d_activation_required` tells the user to connect with
+**Live 2D 적용**. Saved previews offer that explicit reconnect action only when
+Android reports no live connection. Editor save/registration returns to the library. Shared images
 cannot be modified, including through metadata-only edit methods, and edit saves
 preserve the existing image ID.
 

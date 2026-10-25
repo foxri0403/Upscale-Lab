@@ -756,7 +756,7 @@ class MainActivity : FlutterActivity() {
                 check(manager.isWallpaperSupported && manager.isSetWallpaperAllowed) { "이 기기에서 배경화면 변경이 허용되지 않습니다." }
                 if (!LiveWallpaperSelection.canUpdate(target.flags, activeLiveWallpaperFlags())) {
                     runOnUiThread { result.error("live2d_activation_required",
-                        "선택한 화면의 Live 2D 활성화가 필요합니다. Live 2D 활성화 · 대상 변경에서 Android 확인을 완료해 주세요.", null) }
+                        "Live 2D 적용에서 Android 배경화면 설정을 먼저 완료해 주세요.", null) }
                     return@execute
                 }
                 check(pendingLiveActivation == null) { "Live 2D 활성화 확인이 진행 중입니다." }

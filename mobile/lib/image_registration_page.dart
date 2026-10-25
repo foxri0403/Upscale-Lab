@@ -89,6 +89,8 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   Live2DDraft? _live2D;
   Live2DDraft? _candidate;
   bool _splitting = false;
+  bool _activatingLive2D = false;
+  bool _live2DActivated = false;
   String? _splitError;
   String _liveLayer = 'composite';
   int _splitGeneration = 0;
@@ -100,6 +102,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     _live2D = null;
     _candidate = null;
     _splitting = false;
+    _live2DActivated = false;
     _splitError = null;
     Live2DService.discard(draft);
     if (candidate?.id != draft?.id) Live2DService.discard(candidate);
@@ -136,16 +139,49 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     }
   }
 
-  void _applyLive2D() {
+  Future<void> _applyLive2D() async {
     final draft = _candidate ?? _live2D;
     if (draft == null || _saving || _splitting) return;
-    final previous = _live2D;
     setState(() {
-      _live2D = draft;
-      _candidate = null;
-      _liveLayer = 'composite';
+      _saving = true;
+      _activatingLive2D = true;
     });
-    if (previous?.id != draft.id) Live2DService.discard(previous);
+    Live2DDraft? applied;
+    try {
+      applied = await Live2DService.export(draft, crop: _crop, filter: _filter);
+      final confirmed = await Live2DService.activate(applied);
+      if (!mounted) return;
+      if (!confirmed) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Android 배경화면 설정을 취소했습니다. 편집 내용은 유지됩니다.')));
+        return;
+      }
+      final previous = _live2D;
+      setState(() {
+        _live2D = draft;
+        _candidate = null;
+        _liveLayer = 'composite';
+        _live2DActivated = true;
+      });
+      if (previous?.id != draft.id) Live2DService.discard(previous);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(error is PlatformException
+                ? error.message ?? 'Live 2D를 적용하지 못했습니다.'
+                : 'Live 2D를 적용하지 못했습니다. 다시 시도해 주세요.')));
+      }
+    } finally {
+      if (applied != null && applied.id != draft.id) {
+        await Live2DService.discard(applied);
+      }
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _activatingLive2D = false;
+        });
+      }
+    }
   }
 
   @override
@@ -161,6 +197,8 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     try {
       source = await ImageEditorService.loadPreview(widget.filePath);
       live = await widget.loadLive2D?.call();
+      final activated =
+          live != null && await Live2DService.activeTarget() != null;
       if (!mounted) {
         source.preview.dispose();
         await Live2DService.discard(live);
@@ -169,6 +207,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
       setState(() {
         _source = source;
         _live2D = live;
+        _live2DActivated = activated;
       });
     } catch (_) {
       source?.preview.dispose();
@@ -245,8 +284,11 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     Live2DDraft? prepared;
     try {
       final target = wallpaper
-          ? await showDialog<WallpaperTarget>(
-              context: context, builder: (_) => const WallpaperApplyDialog())
+          ? _live2D != null
+              ? await Live2DService.requireActiveTarget()
+              : await showDialog<WallpaperTarget>(
+                  context: context,
+                  builder: (_) => const WallpaperApplyDialog())
           : null;
       if ((wallpaper && target == null) || !mounted) return;
       setState(() => _exporting = true);
@@ -560,7 +602,15 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     final apply = FilledButton(
         key: const ValueKey('activate-live2d'),
         onPressed: _saving ? null : _applyLive2D,
-        child: const Text('Live 2D 적용', textAlign: TextAlign.center));
+        child: _activatingLive2D
+            ? const Row(mainAxisSize: MainAxisSize.min, children: [
+                SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2)),
+                SizedBox(width: 8),
+                Flexible(child: Text('Android 확인 중…')),
+              ])
+            : const Text('Live 2D 적용', textAlign: TextAlign.center));
     final retry = TextButton(
         onPressed: _saving ? null : () => _openLive2D(retry: true),
         child: const Text('다시 분리'));
@@ -594,9 +644,9 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
             Flexible(child: retry),
           ]),
         ],
-        Text(_live2D != null && _candidate == null
+        Text(_live2DActivated && _candidate == null
             ? 'Live 2D 적용됨 · 다른 편집을 계속할 수 있습니다.'
-            : '확인 후 Live 2D 적용을 눌러 선택하세요.'),
+            : 'Live 2D 적용에서 Android 설정을 완료한 뒤 계속 편집할 수 있습니다.'),
       ],
       if (!_splitting && draft == null)
         TextButton(

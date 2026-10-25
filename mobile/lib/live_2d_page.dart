@@ -67,11 +67,12 @@ class _Live2DPageState extends State<Live2DPage> {
     if (original == null || _processing) return;
     setState(() => _processing = true);
     Live2DDraft? output;
+    Live2DDraft? applied;
     try {
-      output = widget.keepSourceLayers
-          ? original
-          : await Live2DService.export(original,
-              crop: widget.crop, filter: widget.filter);
+      applied = await Live2DService.export(original,
+          crop: widget.crop, filter: widget.filter);
+      if (!await Live2DService.activate(applied)) return;
+      output = widget.keepSourceLayers ? original : applied;
       if (!mounted) return;
       setState(() => _processing = false);
       await WidgetsBinding.instance.endOfFrame;
@@ -79,6 +80,7 @@ class _Live2DPageState extends State<Live2DPage> {
       _draft = null;
       if (output.id != original.id) Live2DService.discard(original);
       Navigator.pop(context, output);
+      if (applied.id == output.id) applied = null;
       output = null; // Ownership transfers to the caller.
     } catch (_) {
       if (mounted) {
@@ -88,6 +90,9 @@ class _Live2DPageState extends State<Live2DPage> {
     } finally {
       if (output != null && output.id != _draft?.id) {
         await Live2DService.discard(output);
+      }
+      if (applied != null && applied.id != _draft?.id) {
+        await Live2DService.discard(applied);
       }
       if (mounted) setState(() => _processing = false);
     }
@@ -201,7 +206,7 @@ class _Live2DPageState extends State<Live2DPage> {
                                                 ])
                                           : const Text('Live 2D 적용')),
                                   const Text(
-                                      '편집에 Live 2D 효과를 선택합니다. 실제 배경화면은 편집기의 배경화면 등록에서 적용하세요.',
+                                      'Android 설정을 완료하면 편집 화면으로 돌아옵니다. 이후 배경화면 등록은 연결한 화면에 바로 적용합니다.',
                                       textAlign: TextAlign.center),
                                 ] else
                                   const Text(
