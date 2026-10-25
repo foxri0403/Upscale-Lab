@@ -65,8 +65,8 @@ screen when the OS supports it.
 | `live_layer/wallpaper` | `applyLocalStaticWallpaper` | `sourcePath`, `target`, optional `ratio` |
 | `live_layer/wallpaper` | `applyStaticWallpaper` | `url`, `target`, optional `ratio` |
 | `live_layer/wallpaper` | `clearWallpaper` | `target` |
-| `live_layer/storage` | `activateLocalLive2D` | `scope`, `ownerId`, `id`, optional `target` |
-| `live_layer/wallpaper` | `activateLive2DDraft` | `draftId` |
+| `live_layer/storage` | `activateLocalLive2D` | `scope`, `ownerId`, `id`, optional `target`, `showSettings` |
+| `live_layer/wallpaper` | `activateLive2DDraft` | `draftId`, `showSettings` |
 | `live_layer/wallpaper` | `getActiveLive2DTarget` | none (returns Android flags, or `0`) |
 | `live_layer/wallpaper` | `cloneLive2DDraft` | `draftId` |
 | `live_layer/storage` | `getLocalLive2DDraft` | `scope`, `ownerId`, `id` (unshared owned image) |
@@ -78,14 +78,17 @@ to `home` for existing callers. Invalid values fail with `invalid_target`.
 **배경화면 제거** action with independent home/lock checkboxes, disabled deletion
 when neither is selected, and **취소 / 삭제** actions. The editor's **Live 2D 적용**
 exports the current crop/filter into a wallpaper snapshot and invokes
-`activateLive2DDraft`. Initial Android confirmation returns to the same editor;
+`activateLive2DDraft` with `showSettings=true`. Explicit Apply always opens Android
+target settings, including an already active home-only service. Confirmation returns to the same editor;
 cancellation or failure preserves editable layers. **저장** persists only to the
 private library. Static registration uses independent home/lock checkboxes.
 Live 2D registration reuses `getActiveLive2DTarget` without a target dialog, even
 after restarting the app. `LocalImageStore.registerWallpaper` never opens Android
 settings on failure; `live2d_activation_required` tells the user to connect with
 **Live 2D 적용**. Saved previews offer that explicit reconnect action only when
-Android reports no live connection. Editor save/registration returns to the library. Shared images
+Android reports no live connection. Saved previews also expose **Live 2D 적용 화면 변경**
+through the image menu using `activateLocalLive2D` with `showSettings=true`.
+These explicit settings calls cannot take the direct-update shortcut. Editor save/registration returns to the library. Shared images
 cannot be modified, including through metadata-only edit methods, and edit saves
 preserve the existing image ID.
 

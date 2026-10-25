@@ -33,9 +33,12 @@ abstract final class Live2DService {
       Live2DDraft.fromMap((await _channel.invokeMapMethod<Object?, Object?>(
           'splitLive2D', {'sourcePath': path}))!);
 
+  /// Explicit Apply can change Android destinations even when already active.
   static Future<bool> activate(Live2DDraft draft) async =>
-      await _channel
-          .invokeMethod<bool>('activateLive2DDraft', {'draftId': draft.id}) ??
+      await _channel.invokeMethod<bool>('activateLive2DDraft', {
+        'draftId': draft.id,
+        'showSettings': true,
+      }) ??
       false;
 
   static Future<Live2DDraft> clone(Live2DDraft draft) async =>

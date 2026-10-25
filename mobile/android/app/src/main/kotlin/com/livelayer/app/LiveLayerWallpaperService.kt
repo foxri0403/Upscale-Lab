@@ -1,6 +1,7 @@
 package com.livelayer.app
 
 import android.content.SharedPreferences
+import android.app.ActivityManager
 import android.app.wallpaper.WallpaperDescription
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -21,6 +22,9 @@ import java.io.File
 import kotlin.math.max
 
 class LiveLayerWallpaperService : WallpaperService() {
+    private val maxDecodedSide by lazy {
+        if ((getSystemService(ACTIVITY_SERVICE) as ActivityManager).isLowRamDevice) 1024 else 1600
+    }
     override fun onCreateEngine(): Engine = LiveLayerEngine()
 
     @RequiresApi(36)
@@ -68,7 +72,6 @@ class LiveLayerWallpaperService : WallpaperService() {
 
         override fun onSharedPreferenceChanged(preferences: SharedPreferences?, key: String?) {
             if ((key == "manifest_path" || key == "direct_manifest_path") && !isPreview) {
-                loadedManifest = null
                 lifecycle.selectionChanged()
             }
         }
@@ -84,7 +87,6 @@ class LiveLayerWallpaperService : WallpaperService() {
 
         override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
             super.onSurfaceChanged(holder, format, width, height)
-            loadedManifest = null
             lifecycle.surfaceCreated()
             draw()
         }
@@ -126,66 +128,70 @@ class LiveLayerWallpaperService : WallpaperService() {
                 runCatching { JSONObject(File(it).readText()).optLong("selectionRevision", 0) }.getOrDefault(0)
             } ?: 0
             val path = LiveWallpaperSelection.choose(base, revision(base), direct, revision(direct)) ?: return
-            if (loadedManifest == path && layers.isNotEmpty()) return
+            if (loadedManifest == path) return
             recycle()
+            loadedManifest = path // Retry failed content only when a new snapshot is selected.
+            val loaded = mutableListOf<Layer>()
             try {
                 val file = File(path)
                 val directory = file.parentFile ?: return
                 val manifest = JSONObject(file.readText())
                 live2D = manifest.optString("renderer") == "live2d"
                 sensitivity = manifest.optDouble("sensitivity", 1.0).toFloat().coerceIn(0f, 2f)
-                fallback = decode(File(directory, manifest.optString("originalFileName", "original.img")), width, height)
+                fallback = decode(File(directory, manifest.optString("originalFileName", "original.img")))
                 val items = manifest.getJSONArray("layers")
-                val loaded = mutableListOf<Layer>()
-                try {
-                    for (index in 0 until items.length()) {
-                        val item = items.getJSONObject(index)
-                        val bitmap = decode(File(directory, item.getString("fileName")), width, height)
-                            ?: error("레이어 이미지를 읽지 못했습니다.")
-                        loaded.add(Layer(bitmap, item.optInt("layerOrder", index),
-                            item.optDouble("positionX", 0.0).toFloat(), item.optDouble("positionY", 0.0).toFloat(),
-                            item.optDouble("rotation", 0.0).toFloat(), item.optDouble("scale", 1.0).toFloat(),
-                            item.optDouble("movementX", 0.0).toFloat(), item.optDouble("movementY", 0.0).toFloat()))
-                    }
-                    layers = loaded.sortedBy { it.order }
-                    loadedManifest = path
-                } catch (error: Exception) { loaded.forEach { it.bitmap.recycle() }; throw error }
-            } catch (error: Exception) { Log.w("Live2D", "Cannot load wallpaper layers", error) }
+                for (index in 0 until items.length()) {
+                    val item = items.getJSONObject(index)
+                    val bitmap = decode(File(directory, item.getString("fileName")))
+                        ?: error("레이어 이미지를 읽지 못했습니다.")
+                    loaded.add(Layer(bitmap, item.optInt("layerOrder", index),
+                        item.optDouble("positionX", 0.0).toFloat(), item.optDouble("positionY", 0.0).toFloat(),
+                        item.optDouble("rotation", 0.0).toFloat(), item.optDouble("scale", 1.0).toFloat(),
+                        item.optDouble("movementX", 0.0).toFloat(), item.optDouble("movementY", 0.0).toFloat()))
+                }
+                layers = loaded.sortedBy { it.order }
+            } catch (error: OutOfMemoryError) {
+                loaded.forEach { it.bitmap.recycle() }
+                recycle()
+                Log.e("Live2D", "Wallpaper bitmap memory budget exhausted", error)
+            } catch (error: Exception) {
+                loaded.forEach { it.bitmap.recycle() }
+                Log.w("Live2D", "Cannot load wallpaper layers", error)
+            }
         }
 
-        private fun decode(file: File, width: Int, height: Int): Bitmap? {
+        private fun decode(file: File): Bitmap? {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(file.absolutePath, bounds)
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-            var sample = 1
-            while (bounds.outWidth / (sample * 2) >= max(1, width) &&
-                bounds.outHeight / (sample * 2) >= max(1, height)) sample *= 2
+            val sample = WallpaperBitmapBudget.sampleSize(bounds.outWidth, bounds.outHeight, maxDecodedSide)
             return BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
         }
 
         private fun scheduleDraw() {
-            if (lifecycle.visible && lifecycle.surfaceReady && !frameScheduled) { frameScheduled = true; handler.postDelayed(frame, 16) }
+            if (lifecycle.visible && lifecycle.surfaceReady && !frameScheduled) { frameScheduled = true; handler.postDelayed(frame, 33) }
         }
 
         private fun draw() {
             if (!lifecycle.surfaceReady || !surfaceHolder.surface.isValid) return
-            var canvas: Canvas? = null
-            try {
-                canvas = surfaceHolder.lockCanvas() ?: return
-                canvas.drawColor(Color.BLACK)
-                if (layers.isEmpty()) fallback?.let { drawBitmap(canvas, it, 0f, 0f, 0f, 1f) }
-                else for ((index, layer) in layers.withIndex()) {
-                    // Live 2D anchors the background. Only the second layer moves.
-                    val moving = !live2D || index > 0
-                    val amplitudeX = if (live2D) canvas.width * .035f else layer.movementX * 4f
-                    val amplitudeY = if (live2D) canvas.height * .035f else layer.movementY * 4f
-                    drawBitmap(canvas, layer.bitmap,
-                        layer.positionX + if (moving) -tiltX * amplitudeX * sensitivity else 0f,
-                        layer.positionY + if (moving) tiltY * amplitudeY * sensitivity else 0f,
-                        layer.rotation, layer.scale * if (live2D) 1.08f else 1f)
-                }
-            } catch (error: RuntimeException) { Log.w("Live2D", "Cannot draw wallpaper", error) }
-            finally { if (canvas != null) surfaceHolder.unlockCanvasAndPost(canvas) }
+            WallpaperFrameRenderer.render(
+                acquire = { surfaceHolder.lockCanvas() },
+                draw = { canvas ->
+                    canvas.drawColor(Color.BLACK)
+                    if (layers.isEmpty()) fallback?.let { drawBitmap(canvas, it, 0f, 0f, 0f, 1f) }
+                    else for ((index, layer) in layers.withIndex()) {
+                        // Live 2D anchors the background. Only the second layer moves.
+                        val moving = !live2D || index > 0
+                        val amplitudeX = if (live2D) canvas.width * .035f else layer.movementX * 4f
+                        val amplitudeY = if (live2D) canvas.height * .035f else layer.movementY * 4f
+                        drawBitmap(canvas, layer.bitmap,
+                            layer.positionX + if (moving) -tiltX * amplitudeX * sensitivity else 0f,
+                            layer.positionY + if (moving) tiltY * amplitudeY * sensitivity else 0f,
+                            layer.rotation, layer.scale * if (live2D) 1.08f else 1f)
+                    }
+                },
+                post = { surfaceHolder.unlockCanvasAndPost(it) },
+                failed = { Log.w("Live2D", "Wallpaper surface changed while drawing", it) })
         }
 
         private fun drawBitmap(canvas: Canvas, bitmap: Bitmap, x: Float, y: Float, rotation: Float, layerScale: Float) {

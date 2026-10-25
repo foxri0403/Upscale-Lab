@@ -32,6 +32,7 @@ class LocalImageStore {
         'scope': scope,
         'ownerId': ownerId,
         'id': id,
+        'showSettings': true,
         if (target != null) 'target': target.name
       }) ??
       false;

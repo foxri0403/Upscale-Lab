@@ -116,7 +116,8 @@ class MainActivity : FlutterActivity() {
                     "activateLive2DDraft" -> ioExecutor.execute {
                         try {
                             val manifest = live2DStore.activateDraft(call.argument<String>("draftId") ?: error("분리 ID가 없습니다."))
-                            runOnUiThread { launchLiveActivation(manifest, result) }
+                            runOnUiThread { launchLiveActivation(manifest, result,
+                                allowDirect = call.argument<Boolean>("showSettings") != true) }
                         } catch (error: Exception) {
                             runOnUiThread { result.error("live2d_failed", error.message, null) }
                         }
@@ -256,7 +257,8 @@ class MainActivity : FlutterActivity() {
                             } catch (error: Exception) { runOnUiThread { result.error("image_edit_failed", error.message, null) } }
                         }
                         "activateLocalLive2D" -> prepareOwnedLiveWallpaper(ownerId!!,
-                            call.argument<String>("id"), result, call.argument<Any>("target"))
+                            call.argument<String>("id"), result, call.argument<Any>("target"),
+                            forcePreview = call.argument<Boolean>("showSettings") == true)
                         "applyLocalLive2D" -> applyOwnedLiveWallpaper(ownerId!!,
                             call.argument<String>("id"), call.argument<Any>("target"), result)
                         "saveImageToGallery" -> enqueueLocalImageSave(
@@ -698,7 +700,7 @@ class MainActivity : FlutterActivity() {
         }
         try {
             val active = activeLiveWallpaperFlags()
-            if (allowDirect && LiveWallpaperSelection.canActivateDirect(active, requestedFlags)) {
+            if (LiveWallpaperSelection.canActivateDirect(active, requestedFlags, !allowDirect)) {
                 ioExecutor.execute {
                     try {
                         commitLiveSelection(manifest)

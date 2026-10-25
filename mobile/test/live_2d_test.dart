@@ -32,6 +32,7 @@ void main() {
   int activeFlags = 1;
   bool confirmActivation = true;
   bool failActivation = false;
+  int? pickedFlags;
   Completer<bool>? pendingActivation;
   late List<List<int>> exportedPlanes;
   Live2DDraft? selected;
@@ -58,6 +59,7 @@ void main() {
     activeFlags = 1;
     confirmActivation = true;
     failActivation = false;
+    pickedFlags = null;
     pendingActivation = null;
     exportedPlanes = [];
     selected = null;
@@ -68,9 +70,10 @@ void main() {
         case 'getActiveLive2DTarget':
           return activeFlags;
         case 'activateLive2DDraft':
+          expect((call.arguments as Map)['showSettings'], isTrue);
           if (failActivation) throw PlatformException(code: 'live2d_failed', message: '연결 실패');
           final confirmed = await (pendingActivation?.future ?? Future.value(confirmActivation));
-          if (confirmed && activeFlags == 0) activeFlags = 3;
+          if (confirmed) activeFlags = pickedFlags ?? (activeFlags == 0 ? 3 : activeFlags);
           return confirmed;
         case 'cloneLive2DDraft':
           return {
@@ -129,7 +132,8 @@ void main() {
         return {'backgroundPath': source, 'foregroundPath': source};
       }
       if (call.method == 'activateLocalLive2D') {
-        if (confirmActivation) activeFlags = 1;
+        expect((call.arguments as Map)['showSettings'], isTrue);
+        if (confirmActivation) activeFlags = pickedFlags ?? 1;
         return confirmActivation;
       }
       if (call.method == 'applyLocalWallpaper' && activeFlags == 0) {
@@ -529,7 +533,7 @@ void main() {
     expect(discarded, contains('owned-draft'));
   });
 
-  Future<void> savedPreview(WidgetTester tester) async {
+  Future<void> savedPreview(WidgetTester tester, {bool shared = false}) async {
     final image = LocalImageItem(
         id: 'image-1',
         title: 'test',
@@ -538,6 +542,8 @@ void main() {
         height: 48,
         mode: 'live2d',
         tag: 'test',
+        cloudProjectId: shared ? 'project' : null,
+        galleryPostId: shared ? 'post' : null,
         createdAt: DateTime.utc(2026));
     const store =
         LocalImageStore(scope: 'server\naccount-1', ownerId: 'account-1');
@@ -549,6 +555,66 @@ void main() {
             onShare: () {},
             onDelete: () {})));
     await settleFiles(tester);
+  }
+
+  for (final confirmed in [true, false]) {
+    testWidgets('existing home selection can reopen Android and change to both ($confirmed)', (tester) async {
+      activeFlags = 1;
+      pickedFlags = 3;
+      confirmActivation = confirmed;
+      ImageRegistrationOptions? saved;
+      const store = LocalImageStore(scope: 'server\naccount-1', ownerId: 'account-1');
+      await open(tester, ImageFeaturePage(filePath: source, title: 'change destination',
+          loadLive2D: () async => Live2DDraft(id: 'owned-draft', backgroundPath: source,
+              foregroundPath: source, width: 32, height: 48),
+          onSave: (options) async {
+            saved = options;
+            await store.registerWallpaper('image-1', target: options.wallpaperTarget!);
+          }));
+      final live = find.byKey(const ValueKey('registration-tool-parallax'));
+      await tester.ensureVisible(live);
+      await tester.tap(live);
+      await settleFiles(tester);
+      await tester.tap(find.byKey(const ValueKey('activate-live2d')));
+      await settleFiles(tester);
+      expect(find.byType(ImageFeaturePage), findsOneWidget);
+      final activation = calls.singleWhere((call) => call.method == 'activateLive2DDraft');
+      expect(activation.arguments, {'draftId': 'owned-draft', 'showSettings': true});
+      expect(activeFlags, confirmed ? 3 : 1);
+      // The cancellation snackbar temporarily covers the bottom action bar.
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('register-wallpaper')));
+      await settleFiles(tester);
+      expect(saved!.wallpaperTarget, confirmed ? WallpaperTarget.both : WallpaperTarget.home);
+      expect(calls.where((call) => call.method == 'activateLive2DDraft'), hasLength(1));
+      expect(calls.singleWhere((call) => call.method == 'applyLocalWallpaper').arguments,
+          {'scope': 'server\naccount-1', 'ownerId': 'account-1', 'id': 'image-1',
+            'target': confirmed ? 'both' : 'home'});
+    });
+  }
+
+  for (final shared in [false, true]) {
+    testWidgets('saved preview can reopen destination settings while shared=$shared', (tester) async {
+      activeFlags = 1;
+      pickedFlags = 3;
+      await savedPreview(tester, shared: shared);
+      await tester.tap(find.byTooltip('이미지 메뉴'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Live 2D 적용 화면 변경'));
+      await tester.pumpAndSettle();
+      expect(find.byType(HomeWallpaperPreviewPage), findsOneWidget);
+      expect(activeFlags, 3);
+      expect(calls.singleWhere((call) => call.method == 'activateLocalLive2D').arguments,
+          {'scope': 'server\naccount-1', 'ownerId': 'account-1', 'id': 'image-1', 'showSettings': true});
+      await tester.tap(find.byKey(const ValueKey('preview-wallpaper-settings')));
+      await tester.pumpAndSettle();
+      expect((calls.singleWhere((call) => call.method == 'applyLocalWallpaper').arguments as Map)['target'], 'both');
+      expect(calls.where((call) => call.method == 'activateLocalLive2D'), hasLength(1));
+      expect(calls.where((call) => call.method == 'saveLocalImageEdits'), isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    });
   }
 
   testWidgets('Android confirmation waits in the editor and unlocks editing on return', (tester) async {
@@ -700,6 +766,7 @@ void main() {
             'scope': 'server\naccount-1',
             'ownerId': 'account-1',
             'id': 'image-1',
+            'showSettings': true,
           });
       expect(find.text(confirmed ? '배경화면을 등록했습니다.' : '배경화면 등록을 취소했습니다.'),
           findsOneWidget);

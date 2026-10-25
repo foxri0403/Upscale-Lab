@@ -1369,6 +1369,28 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
       key: const ValueKey('wallpaper-preview-image'),
       width: double.infinity, height: double.infinity, fit: BoxFit.contain);
 
+  Future<void> _changeLiveTarget() async {
+    if (_busy || _choosingWallpaper) return;
+    setState(() => _busy = true);
+    try {
+      final confirmed = await widget.store.activateLive2D(widget.image.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(content: Text(confirmed
+            ? 'Android에서 선택한 화면에 Live 2D를 적용했습니다.'
+            : '적용 화면 변경을 취소했습니다.')));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+            error is PlatformException ? error.message ?? '적용 화면을 변경하지 못했습니다.'
+                : '적용 화면을 변경하지 못했습니다.')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Widget _preview() => widget.image.isLive2D
       ? FutureBuilder<Map<Object?, Object?>>(
           future: _layers,
@@ -1429,6 +1451,10 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
                           icon:
                               const Icon(Icons.more_vert, color: Colors.white),
                           onSelected: (action) {
+                            if (action == 'live-target') {
+                              _changeLiveTarget();
+                              return;
+                            }
                             Navigator.pop(context);
                             switch (action) {
                               case 'edit':
@@ -1440,6 +1466,9 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
                             }
                           },
                           itemBuilder: (_) => [
+                                if (widget.image.isLive2D)
+                                  const PopupMenuItem(value: 'live-target',
+                                      child: Text('Live 2D 적용 화면 변경')),
                                 if (!widget.image.isShared)
                                   const PopupMenuItem(
                                       value: 'edit', child: Text('수정')),
