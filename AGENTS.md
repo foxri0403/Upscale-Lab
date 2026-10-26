@@ -2,7 +2,7 @@
 
 ## Project overview
 
-This repository contains the backend for Upscale Lab: a .NET 8 ASP.NET Core API used by Windows (WPF) and Android (Flutter) clients. The main architecture and deployment notes live in [README.md](README.md), [docs/architecture.md](docs/architecture.md), and [docs/deployment.md](docs/deployment.md).
+This repository contains the backend for Upscale Lab: a .NET 8 ASP.NET Core API transitioning to a web-first product. Reuse C# and existing Flutter/Kotlin code; build the future web UI with TypeScript, HTML and CSS. Windows/Android companion agents apply wallpapers and report device state. See [docs/web-transition.md](docs/web-transition.md), [docs/agent-api.md](docs/agent-api.md), and [docs/cloud-processing.md](docs/cloud-processing.md).
 
 ## Repository layout
 
@@ -45,7 +45,8 @@ The app requires configuration values from a secure provider, not hardcoded valu
 - `ConnectionStrings:DefaultConnection`
 - `Jwt:Secret`
 - `AWS:S3BucketName`
-- `Replicate:ApiToken`
+
+Cloud provider credentials are optional until the teammate-owned `IProjectImageProcessor` integration is enabled; the legacy Replicate adapter uses `Replicate:ApiToken`. Never add a local GPU runner as a fallback. Agent APIs must require both device credentials and a valid matching account session.
 
 These are expected to come from local user secrets, environment variables, or a local `.env` file. The repository includes a sample configuration in [backend/.env.example](backend/.env.example) and the setup in [README.md](README.md).
 
@@ -64,7 +65,7 @@ These are expected to come from local user secrets, environment variables, or a 
 
 ## Mobile versioning
 
-- Current APK version: **0.13.3** (Android build **27**). Keep only this latest version entry; replace it after every generated APK and never append a version history here.
+- Current APK version: **0.14.0** (Android build **28**, synchronized with the merged release branch; this backend change generates no APK). Keep only this latest version entry; replace it after every generated APK and never append a version history here.
 - Use semantic version numbers in `major.minor.patch` form for every new APK release.
 - Increase the first number (`major`) by exactly 1 for a large feature or major product update.
 - Increase the second number (`minor`) by exactly 1 for a smaller feature update.

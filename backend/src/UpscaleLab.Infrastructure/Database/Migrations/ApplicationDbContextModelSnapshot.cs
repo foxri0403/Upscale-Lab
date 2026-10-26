@@ -104,10 +104,26 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AgentTokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("AgentVersion")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
                     b.Property<string>("AspectRatio")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
+
+                    b.Property<long>("CommandSequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("ControlVersion")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -117,10 +133,21 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)");
 
+                    b.Property<long>("InventoryRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Orientation")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<string>("OsVersion")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
 
                     b.Property<string>("Platform")
                         .IsRequired()
@@ -133,6 +160,12 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.Property<int>("ScreenWidth")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("SupportsLive2D")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("SupportsLockScreen")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -141,9 +174,130 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AgentTokenHash")
+                        .IsUnique();
+
                     b.HasIndex("UserId");
 
                     b.ToTable("devices", (string)null);
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.DeviceCommand", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DeviceDisplayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Sequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("WallpaperAssetId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeviceDisplayId");
+
+                    b.HasIndex("WallpaperAssetId");
+
+                    b.HasIndex("DeviceId", "RequestId")
+                        .IsUnique();
+
+                    b.HasIndex("DeviceId", "Sequence")
+                        .IsUnique();
+
+                    b.HasIndex("DeviceId", "Status", "ExpiresAt");
+
+                    b.ToTable("device_commands", (string)null);
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.DeviceDisplay", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Height")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsConnected")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPrimary")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("NativeId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("OffsetX")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("OffsetY")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Rotation")
+                        .HasColumnType("integer");
+
+                    b.Property<double>("Scale")
+                        .HasColumnType("double precision");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Width")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeviceId", "NativeId")
+                        .IsUnique();
+
+                    b.ToTable("device_displays", (string)null);
                 });
 
             modelBuilder.Entity("UpscaleLab.Domain.Entities.GalleryLike", b =>
@@ -460,11 +614,28 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasDefaultValue("Layers");
+
                     b.Property<int>("Progress")
                         .HasColumnType("integer");
 
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uuid");
+
+                    b.Property<int>("ResultHeight")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ResultObjectKey")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<int>("ResultWidth")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("StartedAt")
                         .HasColumnType("timestamp with time zone");
@@ -477,7 +648,16 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("UpscaleFactor")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(2);
+
                     b.HasKey("Id");
+
+                    b.HasIndex("ProjectId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" IN ('Queued', 'Processing')");
 
                     b.HasIndex("ProjectId", "CreatedAt");
 
@@ -571,6 +751,104 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.ToTable("user_settings", (string)null);
                 });
 
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.WallpaperAsset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPublic")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ManifestJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid?>("SourceProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceProjectId");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.HasIndex("IsPublic", "IsArchived", "CreatedAt");
+
+                    b.ToTable("wallpaper_assets", (string)null);
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.WallpaperAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DesiredAssetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DeviceDisplayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("LastReportedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Observation")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid?>("ReportedAssetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Sequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DesiredAssetId");
+
+                    b.HasIndex("ReportedAssetId");
+
+                    b.HasIndex("DeviceDisplayId", "Target")
+                        .IsUnique();
+
+                    b.ToTable("wallpaper_assignments", (string)null);
+                });
+
             modelBuilder.Entity("UpscaleLab.Domain.Entities.AuthSession", b =>
                 {
                     b.HasOne("UpscaleLab.Domain.Entities.User", "User")
@@ -610,6 +888,44 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.DeviceCommand", b =>
+                {
+                    b.HasOne("UpscaleLab.Domain.Entities.DeviceDisplay", "DeviceDisplay")
+                        .WithMany()
+                        .HasForeignKey("DeviceDisplayId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UpscaleLab.Domain.Entities.Device", "Device")
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UpscaleLab.Domain.Entities.WallpaperAsset", "WallpaperAsset")
+                        .WithMany()
+                        .HasForeignKey("WallpaperAssetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Device");
+
+                    b.Navigation("DeviceDisplay");
+
+                    b.Navigation("WallpaperAsset");
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.DeviceDisplay", b =>
+                {
+                    b.HasOne("UpscaleLab.Domain.Entities.Device", "Device")
+                        .WithMany("Displays")
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Device");
                 });
 
             modelBuilder.Entity("UpscaleLab.Domain.Entities.GalleryLike", b =>
@@ -739,8 +1055,49 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.WallpaperAsset", b =>
+                {
+                    b.HasOne("UpscaleLab.Domain.Entities.LiveLayerProject", "SourceProject")
+                        .WithMany()
+                        .HasForeignKey("SourceProjectId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("UpscaleLab.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("SourceProject");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.WallpaperAssignment", b =>
+                {
+                    b.HasOne("UpscaleLab.Domain.Entities.WallpaperAsset", null)
+                        .WithMany()
+                        .HasForeignKey("DesiredAssetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UpscaleLab.Domain.Entities.DeviceDisplay", "DeviceDisplay")
+                        .WithMany()
+                        .HasForeignKey("DeviceDisplayId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UpscaleLab.Domain.Entities.WallpaperAsset", null)
+                        .WithMany()
+                        .HasForeignKey("ReportedAssetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("DeviceDisplay");
+                });
+
             modelBuilder.Entity("UpscaleLab.Domain.Entities.Device", b =>
                 {
+                    b.Navigation("Displays");
+
                     b.Navigation("OptimizedImages");
                 });
 

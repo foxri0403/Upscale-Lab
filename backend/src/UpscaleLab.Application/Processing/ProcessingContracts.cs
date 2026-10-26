@@ -5,6 +5,18 @@ namespace UpscaleLab.Application.Processing;
 
 public sealed record LayerProcessingRequest(string InputPath, string OutputDirectory);
 
+public sealed record ProcessProjectRequest(ProcessingOperation Operation = ProcessingOperation.Layers, int UpscaleFactor = 2);
+public sealed record ProjectProcessingRequest(string InputPath, string OutputDirectory, ProcessingOperation Operation,
+    int UpscaleFactor, Guid JobId = default);
+public sealed record ProjectProcessingResult(IReadOnlyList<ProcessedLayer> Layers, string? ImagePath, int Width, int Height);
+
+// The cloud integration owner implements this boundary; no provider credentials reach clients.
+public interface IProjectImageProcessor
+{
+    bool Supports(ProcessingOperation operation);
+    Task<ProjectProcessingResult> ProcessAsync(ProjectProcessingRequest request, CancellationToken cancellationToken);
+}
+
 public sealed record ProcessedLayer(
     string FilePath,
     LayerType LayerType,
@@ -31,6 +43,8 @@ public interface IProcessingJobQueue
 public interface IProjectProcessingService
 {
     Task<ProcessingStatusResponse> StartAsync(Guid userId, Guid projectId, CancellationToken cancellationToken);
+    Task<ProcessingStatusResponse> StartAsync(Guid userId, Guid projectId, ProcessProjectRequest request, CancellationToken cancellationToken);
+    Task<UpscaleLab.Application.Images.DownloadUrlResponse> GetResultUrlAsync(Guid userId, Guid projectId, Guid jobId, CancellationToken cancellationToken);
     Task<ProcessingStatusResponse> GetStatusAsync(Guid userId, Guid projectId, CancellationToken cancellationToken);
     Task RecoverPendingAsync(CancellationToken cancellationToken);
     Task ExecuteAsync(Guid jobId, CancellationToken cancellationToken);

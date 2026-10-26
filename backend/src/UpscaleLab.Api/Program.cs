@@ -4,11 +4,9 @@ using Amazon;
 using Amazon.CognitoIdentityProvider;
 using Amazon.Runtime;
 using Amazon.S3;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using UpscaleLab.Api.Authentication;
 using UpscaleLab.Api.Background;
@@ -24,6 +22,7 @@ using UpscaleLab.Application.Projects;
 using UpscaleLab.Application.Settings;
 using UpscaleLab.Application.Storage;
 using UpscaleLab.Application.Upscaling;
+using UpscaleLab.Application.Wallpapers;
 using UpscaleLab.Infrastructure.Auth;
 using UpscaleLab.Infrastructure.Database;
 using UpscaleLab.Infrastructure.Devices;
@@ -34,6 +33,7 @@ using UpscaleLab.Infrastructure.Projects;
 using UpscaleLab.Infrastructure.Settings;
 using UpscaleLab.Infrastructure.Storage;
 using UpscaleLab.Infrastructure.Upscaling;
+using UpscaleLab.Infrastructure.Wallpapers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -89,6 +89,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddSingleton<IAmazonS3>(_ =>
     new AmazonS3Client(RegionEndpoint.GetBySystemName(s3Options.Region)));
 builder.Services.AddScoped<IStorageService, S3StorageService>();
+builder.Services.AddScoped<IObjectCopyService, S3StorageService>();
 builder.Services.AddHttpClient<IUpscaleService, ReplicateUpscaleService>(client =>
 {
     client.BaseAddress = new Uri(replicateOptions.ApiBaseUrl);
@@ -104,9 +105,13 @@ builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IEmailVerificationProvider, CognitoEmailVerificationProvider>();
 builder.Services.AddScoped<IPasswordRecoveryProvider, CognitoEmailVerificationProvider>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IActiveSessionValidator, ActiveSessionValidator>();
 builder.Services.AddScoped<IUnverifiedAccountCleaner, CognitoAccountCleaner>();
 builder.Services.AddHostedService<ExpiredAccountWorker>();
 builder.Services.AddScoped<IDeviceService, DeviceService>();
+builder.Services.AddScoped<IDeviceControlService, DeviceControlService>();
+builder.Services.AddScoped<IDeviceEvents, DeviceEvents>();
+builder.Services.AddScoped<IWallpaperService, WallpaperService>();
 builder.Services.AddScoped<IUserSettingService, UserSettingService>();
 builder.Services.AddScoped<IImageService, ImageService>();
 builder.Services.AddScoped<IGalleryService, GalleryService>();
@@ -116,24 +121,10 @@ builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IProjectProcessingService, ProjectProcessingService>();
 builder.Services.AddSingleton<IProcessingJobQueue, ProcessingJobQueue>();
 builder.Services.AddSingleton<IImageLayerProcessor, SeeThroughImageLayerProcessor>();
+builder.Services.AddSingleton<IProjectImageProcessor, ExistingLayerProjectProcessor>();
 builder.Services.AddHostedService<LiveLayerProcessingWorker>();
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = jwtOptions.Issuer,
-            ValidateAudience = true,
-            ValidAudience = jwtOptions.Audience,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Secret)),
-            ClockSkew = TimeSpan.FromSeconds(30)
-        };
-    });
-builder.Services.AddAuthorization();
+builder.Services.AddClientAuthentication(jwtOptions);
 
 builder.Services.AddControllers().AddJsonOptions(options =>
     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
@@ -196,7 +187,7 @@ app.UseAuthorization();
 
 app.MapHealthChecks("/health");
 app.MapControllers();
-app.MapHub<NotificationHub>("/hubs/notifications");
+app.MapHub<NotificationHub>("/hubs/notifications", options => options.CloseOnAuthenticationExpiration = true);
 
 app.Run();
 

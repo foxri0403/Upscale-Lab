@@ -31,6 +31,7 @@ public sealed class ExceptionHandlingMiddleware(
             ConfigurationException => (StatusCodes.Status503ServiceUnavailable, "Service Unavailable", exception.Message),
             ServiceUnavailableException => (StatusCodes.Status503ServiceUnavailable, "Service Unavailable", exception.Message),
             ValidationException => (StatusCodes.Status400BadRequest, "Validation Failed", exception.Message),
+            DbUpdateConcurrencyException => (StatusCodes.Status409Conflict, "Conflict", "상태가 변경되었습니다. 최신 상태를 조회하고 다시 요청하세요."),
             DbUpdateException => (StatusCodes.Status409Conflict, "Conflict", "데이터 제약 조건을 확인해 주세요."),
             _ => (StatusCodes.Status500InternalServerError, "Internal Server Error", "요청을 처리하는 중 오류가 발생했습니다.")
         };

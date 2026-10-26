@@ -10,7 +10,12 @@ public interface IPasswordHasher
 
 public interface IJwtTokenService
 {
-    (string Token, DateTime ExpiresAt) Create(User user);
+    (string Token, DateTime ExpiresAt) Create(User user, Guid? sessionId = null);
+}
+
+public interface IActiveSessionValidator
+{
+    Task<bool> IsActiveAsync(Guid userId, Guid sessionId, CancellationToken ct);
 }
 
 public interface IEmailVerificationProvider

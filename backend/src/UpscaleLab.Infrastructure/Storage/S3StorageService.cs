@@ -5,8 +5,16 @@ using UpscaleLab.Application.Storage;
 
 namespace UpscaleLab.Infrastructure.Storage;
 
-public sealed class S3StorageService(IAmazonS3 s3Client, S3StorageOptions options) : IStorageService
+public sealed class S3StorageService(IAmazonS3 s3Client, S3StorageOptions options) : IStorageService, IObjectCopyService
 {
+    public async Task CopyAsync(string sourceKey, string destinationKey, CancellationToken ct)
+    {
+        EnsureConfigured();
+        await s3Client.CopyObjectAsync(new CopyObjectRequest {
+            SourceBucket = options.S3BucketName, SourceKey = sourceKey,
+            DestinationBucket = options.S3BucketName, DestinationKey = destinationKey
+        }, ct);
+    }
     public async Task<StoredObject> UploadAsync(
         Stream content,
         string objectKey,

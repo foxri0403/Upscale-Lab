@@ -6,13 +6,18 @@
 - 원본 및 최적화 이미지 바이너리는 S3에 저장하고 PostgreSQL에는 메타데이터와 S3 object key만 저장합니다.
 - 모든 사용자 소유 리소스 쿼리는 인증된 `UserId`를 조건에 포함합니다.
 - 수정 가능한 데이터는 UTC `UpdatedAt`을 사용하여 향후 최신 수정 우선 동기화 정책을 적용할 수 있습니다.
-- SignalR의 `/hubs/notifications` 기반만 제공하며 도메인 이벤트 연결은 후속 작업입니다.
+- SignalR `/hubs/notifications`는 활성 로그인 세션 그룹에 `DeviceChanged`를 알립니다. 명령 자체는 DB에 저장하고 클라이언트가 재조회합니다.
 
 ## Entity 관계
 
 ```mermaid
 erDiagram
     USER ||--o{ DEVICE : owns
+    DEVICE ||--o{ DEVICE_DISPLAY : reports
+    DEVICE_DISPLAY ||--o{ WALLPAPER_ASSIGNMENT : targets
+    DEVICE ||--o{ DEVICE_COMMAND : receives
+    USER ||--o{ WALLPAPER_ASSET : owns
+    WALLPAPER_ASSET ||--o{ DEVICE_COMMAND : applies
     USER ||--o{ IMAGE : owns
     USER ||--|| USER_SETTING : has
     IMAGE ||--o{ OPTIMIZED_IMAGE : produces
@@ -42,11 +47,10 @@ erDiagram
 
 1. 인증된 클라이언트가 `POST /api/images`로 이미지와 크기 메타데이터를 전송합니다.
 2. API가 S3에 원본을 저장하고 PostgreSQL에 `Image`를 기록합니다.
-3. 향후 업스케일 작업자가 S3 입력 URL로 Replicate Real-ESRGAN prediction을 생성합니다.
-4. 완료 결과를 S3로 복사하고 `OptimizedImage`에 대상 Device/방향/크기를 기록합니다.
-5. 클라이언트는 짧은 수명의 pre-signed download URL을 API로 발급받습니다.
+3. 클라이언트는 짧은 수명의 pre-signed download URL을 API로 발급받습니다.
+4. 웹의 처리/배포 경로는 `/api/projects`와 `ProcessingJob`을 사용하고, `/api/wallpapers`에서 독립 결과물로 고정합니다. 기존 `OptimizedImage` 테이블은 레거시 호환을 위해 유지합니다.
 
-현재 1~2단계와 다운로드 URL 발급은 구현되어 있습니다. Replicate 호출 서비스는 구현되어 있으나 prediction polling, 결과 S3 복사, `OptimizedImage` 기록을 하나의 내구성 있는 background job으로 묶는 작업은 아직 남아 있습니다.
+새 웹 경로에서는 `ProcessingJob`이 Layers/Upscale/UpscaleAndLayers 종류와 배율, 결과 S3 object key/크기를 기록합니다. 검증·저장·다운로드는 `ProjectProcessingService`, 공급자 연결은 팀원의 `IProjectImageProcessor` 구현이 담당합니다. 기본 구현은 기존 Layers만 지원하며 클라우드 업스케일은 미연결 상태입니다. 선택적인 Replicate 클라이언트가 자동으로 이 작업 흐름에 연결되지는 않습니다. [클라우드 계약](cloud-processing.md)을 참고하세요.
 
 ## API
 
@@ -74,7 +78,7 @@ erDiagram
 | DELETE | `/api/comments/{id}` | 필요 | 댓글 작성자/게시글 작성자 삭제 |
 | POST/DELETE | `/api/gallery/{id}/likes` | 필요 | 좋아요/취소 |
 | POST | `/api/gallery/{id}/download-url` | 없음 | 다운로드 URL 발급 및 카운트 증가 |
-| SignalR | `/hubs/notifications` | 필요 | 향후 실시간 알림 기반 |
+| SignalR | `/hubs/notifications` | 활성 세션 | 기기 상태 변경 알림 |
 | GET/POST | `/api/projects` | 필요 | 내 LiveLayer 목록/원본 업로드 |
 | GET/DELETE | `/api/projects/{id}` | 필요 | 프로젝트 상세/삭제 |
 | POST | `/api/projects/{id}/process` | 필요 | 비동기 See-through 처리 시작 |

@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\UpscaleLab.Infrastructure\UpscaleLab.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\UpscaleLab.Api\UpscaleLab.Api.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using UpscaleLab.Api.Authentication;
 using UpscaleLab.Api.Models;
 using UpscaleLab.Application.Images;
@@ -68,11 +69,16 @@ public sealed class ProjectsController(
     [HttpPost("{projectId:guid}/process")]
     public async Task<ActionResult<ProcessingStatusResponse>> Process(
         Guid projectId,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] ProcessProjectRequest? request,
         CancellationToken cancellationToken)
     {
-        var response = await processingService.StartAsync(User.GetRequiredUserId(), projectId, cancellationToken);
+        var response = await processingService.StartAsync(User.GetRequiredUserId(), projectId, request ?? new(), cancellationToken);
         return Accepted(response);
     }
+
+    [HttpPost("{projectId:guid}/jobs/{jobId:guid}/download-url")]
+    public async Task<ActionResult<DownloadUrlResponse>> ResultUrl(Guid projectId, Guid jobId, CancellationToken ct) =>
+        Ok(await processingService.GetResultUrlAsync(User.GetRequiredUserId(), projectId, jobId, ct));
 
     [HttpGet("{projectId:guid}/processing-status")]
     public async Task<ActionResult<ProcessingStatusResponse>> GetProcessingStatus(

@@ -67,4 +67,9 @@ public sealed record ProcessingStatusResponse(
     string? ErrorMessage,
     DateTime? StartedAt,
     DateTime? CompletedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    ProcessingOperation Operation = ProcessingOperation.Layers,
+    int UpscaleFactor = 2,
+    bool HasImageResult = false,
+    int ResultWidth = 0,
+    int ResultHeight = 0);

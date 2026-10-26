@@ -1,5 +1,27 @@
 # EC2 / AWS 배포 가이드
 
+## 웹 기기 관리 변경의 수동 적용
+
+2026-10-26 변경은 기존 .NET 8 API에 기기/화면/적용 명령/결과물 API를 추가합니다. 웹 UI와 새 EXE/APK는 포함하지 않습니다. 공급자 연결과 운영 DB 적용도 자동으로 수행하지 않습니다.
+
+1. `AddPersistentAuthSessions`까지 기존 migration 적용 상태와 백업을 확인합니다.
+2. `processing_jobs`에서 `Status IN ('Queued', 'Processing')`인 작업이 프로젝트별 2개 이상인지 확인합니다. 있으면 작업 상태를 검토해 중복을 정리한 뒤 새 unique index를 적용합니다.
+3. `AddWebDeviceControl` migration과 idempotent SQL을 리뷰합니다. 신규 테이블 4개 및 device/job 필드 추가입니다. rollback은 신규 결과물/명령 데이터를 삭제하므로 운영 데이터가 생긴 뒤 무조건 Down을 실행하지 않습니다.
+4. 정비 시간에 migration을 수동 적용하고 API를 배포합니다. 기존 키가 없는 기기는 새 연동을 시작하기 전 키 발급과 로그인 절차가 필요합니다. 새 기능 사용자는 sid가 포함된 JWT를 위해 재로그인합니다.
+5. 실제 PostgreSQL 제약/동시 요청, S3 사본·서명 URL·웹 origin CORS, 로그인/로그아웃 및 실제 에이전트 연동을 검증합니다.
+
+백엔드 폴더에서 SQL 생성만 수행하는 예시입니다. 실제 DB 적용은 별도로 검토합니다.
+
+```powershell
+dotnet ef migrations script 20261013105100_AddPersistentAuthSessions 20261026110359_AddWebDeviceControl --idempotent --project src/UpscaleLab.Infrastructure --startup-project src/UpscaleLab.Api --output ../tmp/AddWebDeviceControl.sql
+```
+
+API CORS에는 실제 웹 origin을 명시합니다. 브라우저가 S3 이미지를 Canvas/WebGL로 읽어 내보낼 경우 S3 CORS에도 해당 origin의 GET을 허용합니다. bucket public access block은 유지합니다. 사본 생성은 기존 prefix 범위의 GetObject/PutObject 권한을 이용합니다.
+
+클라우드 공급자 연결 전 Upscale/UpscaleAndLayers는 503입니다. 기존 See-through 경로는 설정한 경우 Layers만 처리합니다. 현재 처리 큐는 **API/worker 한 인스턴스** 기준이며 여러 인스턴스를 띄우려면 lease/공유 큐를 먼저 구현해야 합니다. 공급자 계약은 [cloud-processing.md](cloud-processing.md), 기기 프로토콜은 [agent-api.md](agent-api.md)를 따릅니다.
+
+이 절차는 아래의 2026-09-28 서버 점검 기록을 갱신한 실제 운영 상태 보고가 아닙니다. 이번 개발 중 운영 서버/DB/AWS 설정은 변경하지 않았습니다.
+
 ## 2026-09-28 점검 결과
 
 - EC2: Ubuntu 26.04.1 LTS, `/home/ubuntu/UpscaleLab`에 `main` 저장소 존재

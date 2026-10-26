@@ -1,0 +1,25 @@
+using System.ComponentModel.DataAnnotations;
+using UpscaleLab.Domain.Enums;
+
+namespace UpscaleLab.Application.Wallpapers;
+
+public sealed record CreateWallpaperRequest(Guid ProjectId,
+    [param: Required, MaxLength(160)] string Title, WallpaperMode Mode, Guid? ProcessingJobId = null);
+public sealed record ShareWallpaperRequest(bool IsPublic);
+public sealed record WallpaperSummary(Guid Id, string Title, WallpaperMode Mode, bool IsPublic, DateTime CreatedAt);
+// Stored manifests use object keys; network manifests replace keys with fresh URLs.
+public sealed record WallpaperFile(string Source, string ContentType, int Order, string Role,
+    double Depth = 0, double X = 0, double Y = 0, double Rotation = 0, double Scale = 1,
+    double MovementX = 0, double MovementY = 0);
+public sealed record WallpaperManifest(int SchemaVersion, Guid AssetId, WallpaperMode Mode, int Width, int Height,
+    IReadOnlyList<WallpaperFile> Files, DateTime? UrlsExpireAt = null);
+
+public interface IWallpaperService
+{
+    Task<WallpaperSummary> CreateAsync(Guid userId, CreateWallpaperRequest request, CancellationToken ct);
+    Task<WallpaperSummary> ImportAsync(Guid userId, Guid assetId, CancellationToken ct);
+    Task<IReadOnlyList<WallpaperSummary>> ListAsync(Guid? userId, bool shared, CancellationToken ct);
+    Task<WallpaperManifest> GetManifestAsync(Guid? userId, Guid assetId, bool agentAccess, CancellationToken ct);
+    Task SetSharingAsync(Guid userId, Guid assetId, bool isPublic, CancellationToken ct);
+    Task ArchiveAsync(Guid userId, Guid assetId, CancellationToken ct);
+}

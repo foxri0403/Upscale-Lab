@@ -237,15 +237,16 @@ public sealed class AuthService(
     {
         var refreshToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         var refreshExpiry = Now.AddDays(90);
-        dbContext.AuthSessions.Add(new AuthSession
+        var session = new AuthSession
         {
             UserId = user.Id,
             TokenHash = Hash(refreshToken),
             PasswordFingerprint = Hash(user.PasswordHash),
             ExpiresAt = refreshExpiry
-        });
+        };
+        dbContext.AuthSessions.Add(session);
         await dbContext.SaveChangesAsync(cancellationToken);
-        var (token, expiresAt) = jwtTokenService.Create(user);
+        var (token, expiresAt) = jwtTokenService.Create(user, session.Id);
         return new AuthResponse(token, expiresAt, MapUser(user), refreshToken, refreshExpiry);
     }
 
@@ -267,7 +268,7 @@ public sealed class AuthService(
         try { await dbContext.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException)
         { throw new UnauthorizedException("로그아웃된 로그인 정보입니다."); }
-        var (token, expiresAt) = jwtTokenService.Create(session.User);
+        var (token, expiresAt) = jwtTokenService.Create(session.User, session.Id);
         return new AuthResponse(token, expiresAt, MapUser(session.User), request.RefreshToken, session.ExpiresAt);
     }
 

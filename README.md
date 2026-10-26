@@ -1,10 +1,12 @@
 # Upscale Lab
 
-기존 Upscale Lab의 ASP.NET Core 8 백엔드, PostgreSQL 스키마, 인증, S3 이미지 저장소와 갤러리를 보존하면서 이미지 분리 기반 Live 2D 라이브 배경화면 서비스로 확장한 저장소입니다. 클라우드 이미지 바이너리는 S3에, 사용자·프로젝트·레이어 메타데이터는 PostgreSQL(RDS)에 저장합니다.
+Upscale Lab은 기존 C# ASP.NET Core 8 백엔드, PostgreSQL, 인증, S3와 Flutter/Kotlin 코드를 재사용하며 웹 중심의 이미지 제작·기기 배경화면 관리 서비스로 전환하고 있습니다. 웹 화면은 TypeScript·HTML·CSS로 개발하고, EXE/APK는 계정 로그인과 기기 자격을 함께 검증해 배경화면을 적용하는 구조입니다. 이미지 바이너리는 S3에, 사용자·프로젝트·레이어·화면·명령 메타데이터는 PostgreSQL(RDS)에 저장합니다.
+
+현재 변경은 **백엔드·DB·연동 규격**을 제공합니다. 웹 UI와 새 EXE/APK는 아직 구현/배포하지 않았습니다. [전환 계획](docs/web-transition.md), [기기·웹 API](docs/agent-api.md), [클라우드 AI 담당자 계약](docs/cloud-processing.md)을 참고하세요. 클라우드 업스케일 공급자 연결은 담당 팀원이 `IProjectImageProcessor`를 구현해 연결하며, 연결 전 업스케일 요청은 503으로 거부합니다.
 
 Android의 **Live 2D** 버튼은 일반 사진을 기기에서 **고정 배경 + 투명 인물·사물** 두 장으로 분리합니다. 미리보기에서 결과를 확인한 뒤 보관함에 저장하거나 Android 라이브 배경화면 설정으로 적용할 수 있습니다. 자이로 기울기에 따라 전경만 움직이며, 적용한 레이어는 앱 종료·기기 재시작 후에도 유지됩니다. 분리에는 Google Play 서비스 모델의 최초 다운로드가 필요합니다. 상세 동작과 검증 방법은 [Live 2D 가이드](docs/live-2d.md)를 참고하세요.
 
-기존 저장소가 FastAPI가 아닌 .NET 계층형 구조로 이미 구현되어 있어 API를 전면 교체하지 않았습니다. See-through AI만 공식 Python CLI를 별도 프로세스로 호출하며, 모바일 클라이언트는 Flutter/Android Kotlin으로 구성합니다.
+기존 .NET 계층형 API를 유지합니다. 서버의 See-through Python CLI 어댑터는 기존 레이어 분리를 위한 선택적인 호환 경로로 남겼으며, 현재 Android의 ML Kit 분리와도 별개입니다. 기존 모바일 클라이언트의 편집/적용 흐름은 후속 에이전트 전환 전까지 유지합니다.
 
 ## 저장소 구조
 

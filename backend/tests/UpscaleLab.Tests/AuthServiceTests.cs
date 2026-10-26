@@ -446,7 +446,7 @@ public sealed class AuthServiceTests
 
     private sealed class FakeJwtTokenService : IJwtTokenService
     {
-        public (string Token, DateTime ExpiresAt) Create(User user) =>
+        public (string Token, DateTime ExpiresAt) Create(User user, Guid? sessionId = null) =>
             ("test-token", DateTime.UtcNow.AddHours(1));
     }
 

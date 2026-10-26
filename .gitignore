@@ -67,7 +67,7 @@ key.properties
 *.jks
 *.keystore
 
-# GPU Worker local files
+# Legacy GPU scratch data remains ignored after removing the local runner
 gpu-worker/input/
 gpu-worker/output/
 gpu-worker/models/

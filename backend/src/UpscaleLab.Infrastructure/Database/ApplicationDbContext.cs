@@ -17,6 +17,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<LiveLayerProject> LiveLayerProjects => Set<LiveLayerProject>();
     public DbSet<ImageLayer> ImageLayers => Set<ImageLayer>();
     public DbSet<ProcessingJob> ProcessingJobs => Set<ProcessingJob>();
+    public DbSet<DeviceDisplay> DeviceDisplays => Set<DeviceDisplay>();
+    public DbSet<WallpaperAsset> WallpaperAssets => Set<WallpaperAsset>();
+    public DbSet<WallpaperAssignment> WallpaperAssignments => Set<WallpaperAssignment>();
+    public DbSet<DeviceCommand> DeviceCommands => Set<DeviceCommand>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -37,6 +41,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         ConfigureUserSetting(modelBuilder);
         ConfigureGallery(modelBuilder);
         ConfigureLiveLayer(modelBuilder);
+        ConfigureWallpaperControl(modelBuilder);
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -74,6 +79,11 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         entity.Property(x => x.DeviceName).HasMaxLength(120).IsRequired();
         entity.Property(x => x.AspectRatio).HasMaxLength(32).IsRequired();
         entity.HasIndex(x => x.UserId);
+        entity.Property(x => x.AgentTokenHash).HasMaxLength(64);
+        entity.HasIndex(x => x.AgentTokenHash).IsUnique();
+        entity.Property(x => x.OsVersion).HasMaxLength(120);
+        entity.Property(x => x.AgentVersion).HasMaxLength(40);
+        entity.Property(x => x.ControlVersion).IsConcurrencyToken();
         entity.HasOne(x => x.User).WithMany(x => x.Devices).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
     }
 
@@ -164,8 +174,53 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         job.ToTable("processing_jobs");
         job.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
         job.Property(x => x.ErrorMessage).HasMaxLength(2000);
+        job.Property(x => x.Operation).HasConversion<string>().HasMaxLength(30).HasDefaultValue(UpscaleLab.Domain.Enums.ProcessingOperation.Layers);
+        job.Property(x => x.UpscaleFactor).HasDefaultValue(2);
+        job.Property(x => x.ResultObjectKey).HasMaxLength(1024);
         job.HasIndex(x => new { x.ProjectId, x.CreatedAt });
+        job.HasIndex(x => x.ProjectId).IsUnique().HasFilter("\"Status\" IN ('Queued', 'Processing')");
         job.HasOne(x => x.Project).WithMany(x => x.ProcessingJobs).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+    }
+
+    private static void ConfigureWallpaperControl(ModelBuilder builder)
+    {
+        var display = builder.Entity<DeviceDisplay>();
+        display.ToTable("device_displays");
+        display.Property(x => x.NativeId).HasMaxLength(200).IsRequired();
+        display.Property(x => x.Name).HasMaxLength(120).IsRequired();
+        display.HasIndex(x => new { x.DeviceId, x.NativeId }).IsUnique();
+        display.HasOne(x => x.Device).WithMany(x => x.Displays).HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Cascade);
+
+        var asset = builder.Entity<WallpaperAsset>();
+        asset.ToTable("wallpaper_assets");
+        asset.Property(x => x.Title).HasMaxLength(160).IsRequired();
+        asset.Property(x => x.Mode).HasConversion<string>().HasMaxLength(20);
+        asset.Property(x => x.ManifestJson).HasColumnType("jsonb").IsRequired();
+        asset.HasIndex(x => new { x.UserId, x.CreatedAt });
+        asset.HasIndex(x => new { x.IsPublic, x.IsArchived, x.CreatedAt });
+        asset.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        asset.HasOne(x => x.SourceProject).WithMany().HasForeignKey(x => x.SourceProjectId).OnDelete(DeleteBehavior.SetNull);
+
+        var assignment = builder.Entity<WallpaperAssignment>();
+        assignment.ToTable("wallpaper_assignments");
+        assignment.Property(x => x.Target).HasConversion<string>().HasMaxLength(20);
+        assignment.Property(x => x.Observation).HasConversion<string>().HasMaxLength(20);
+        assignment.HasIndex(x => new { x.DeviceDisplayId, x.Target }).IsUnique();
+        assignment.HasOne(x => x.DeviceDisplay).WithMany().HasForeignKey(x => x.DeviceDisplayId).OnDelete(DeleteBehavior.Cascade);
+        assignment.HasOne<WallpaperAsset>().WithMany().HasForeignKey(x => x.DesiredAssetId).OnDelete(DeleteBehavior.Restrict);
+        assignment.HasOne<WallpaperAsset>().WithMany().HasForeignKey(x => x.ReportedAssetId).OnDelete(DeleteBehavior.Restrict);
+
+        var command = builder.Entity<DeviceCommand>();
+        command.ToTable("device_commands");
+        command.Property(x => x.Target).HasConversion<string>().HasMaxLength(20);
+        command.Property(x => x.Status).HasConversion<string>().HasMaxLength(30);
+        command.Property(x => x.Error).HasMaxLength(1000);
+        command.HasIndex(x => new { x.DeviceId, x.RequestId }).IsUnique();
+        command.HasIndex(x => new { x.DeviceId, x.Sequence }).IsUnique();
+        command.HasIndex(x => new { x.DeviceId, x.Status, x.ExpiresAt });
+        command.HasOne(x => x.Device).WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Cascade);
+        command.HasOne(x => x.DeviceDisplay).WithMany().HasForeignKey(x => x.DeviceDisplayId).OnDelete(DeleteBehavior.Cascade);
+        command.HasOne(x => x.WallpaperAsset).WithMany().HasForeignKey(x => x.WallpaperAssetId).OnDelete(DeleteBehavior.Restrict);
     }
 
     private void ApplyUtcTimestamps()

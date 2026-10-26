@@ -128,6 +128,7 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
     {
         var project = await FindOwnedAsync(userId, projectId, true, cancellationToken);
         var objectKeys = project.Layers.Select(x => x.ObjectKey)
+            .Concat(project.ProcessingJobs.Where(x => x.ResultObjectKey != null).Select(x => x.ResultObjectKey!))
             .Concat(project.OriginalImage.OptimizedImages.Select(x => x.ObjectKey))
             .Append(project.OriginalImage.OriginalObjectKey)
             .Append(project.OriginalImage.OriginalObjectKey + ".gallery-480.jpg")
