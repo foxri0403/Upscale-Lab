@@ -57,6 +57,9 @@ if (Encoding.UTF8.GetByteCount(jwtOptions.Secret) < 32)
 
 var s3Options = builder.Configuration.GetSection("AWS").Get<S3StorageOptions>() ?? new S3StorageOptions();
 var replicateOptions = builder.Configuration.GetSection("Replicate").Get<ReplicateOptions>() ?? new ReplicateOptions();
+var runPodOptions = builder.Configuration
+    .GetSection("RunPod")
+    .Get<RunPodOptions>() ?? new RunPodOptions();
 var seeThroughOptions = builder.Configuration.GetSection("SeeThrough").Get<SeeThroughOptions>() ?? new SeeThroughOptions();
 var cognitoOptions = builder.Configuration
     .GetSection(CognitoOptions.SectionName)
@@ -79,6 +82,11 @@ if (string.IsNullOrWhiteSpace(cognitoOptions.Region) || cognitoOptions.ResendCoo
 builder.Services.AddSingleton(jwtOptions);
 builder.Services.AddSingleton(s3Options);
 builder.Services.AddSingleton(replicateOptions);
+builder.Services.AddSingleton(runPodOptions);
+builder.Services.AddHttpClient<RunPodUpscaleService>(client =>
+{
+    client.Timeout = Timeout.InfiniteTimeSpan;
+});
 builder.Services.AddSingleton(seeThroughOptions);
 builder.Services.AddSingleton(cognitoOptions);
 builder.Services.AddSingleton(TimeProvider.System);
@@ -121,7 +129,8 @@ builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IProjectProcessingService, ProjectProcessingService>();
 builder.Services.AddSingleton<IProcessingJobQueue, ProcessingJobQueue>();
 builder.Services.AddSingleton<IImageLayerProcessor, SeeThroughImageLayerProcessor>();
-builder.Services.AddSingleton<IProjectImageProcessor, ExistingLayerProjectProcessor>();
+builder.Services.AddSingleton<ExistingLayerProjectProcessor>();
+builder.Services.AddSingleton<IProjectImageProcessor, RunPodProjectImageProcessor>();
 builder.Services.AddHostedService<LiveLayerProcessingWorker>();
 
 builder.Services.AddClientAuthentication(jwtOptions);
