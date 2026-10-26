@@ -41,6 +41,7 @@ import {
   community,
   uploadImage,
   uuid,
+  genres,
   type Library,
   type Picture,
   type Device,
@@ -65,7 +66,9 @@ import {
   assetPicture,
   createAsset,
   preferencesKey,
+  importGalleryPicture,
 } from "./cloud-store";
+import { matchesGenre } from "./explore-feed";
 
 type SharedPicture = Picture & { ownerId: string };
 type DemoContext = {
@@ -175,9 +178,7 @@ export function Workspace({
       setShared(
         result.publicImages.map((p) => ({
           ...p,
-          ownerId: result.library.assets?.some((a) => a.assetId === p.assetId)
-            ? session.id
-            : "",
+          ownerId: p.ownerId || "",
         })),
       );
       setLoadError("");
@@ -233,6 +234,17 @@ export function Workspace({
   async function publish(picture: Picture, enabled: boolean) {
     try {
       if (cloud) {
+        if (picture.galleryPostId) {
+          if (enabled) throw new Error("기존 게시물은 이미 공개되어 있습니다.");
+          await request(`/api/gallery/${picture.galleryPostId}`, {
+            method: "DELETE",
+          });
+          await refresh();
+          toast(
+            "공유 게시물을 삭제했습니다. 보관함의 원본 이미지는 유지됩니다.",
+          );
+          return;
+        }
         const asset = picture.assetId
           ? { id: picture.assetId }
           : await saveCloud(picture);
@@ -522,6 +534,8 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const [editing, setEditing] = useState<Picture | null>(null);
   const [name, setName] = useState("");
   const [deleting, setDeleting] = useState<Picture | null>(null);
+  const [unsharing, setUnsharing] = useState<Picture | null>(null);
+  const [importing, setImporting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const all = explore
@@ -549,7 +563,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     .filter(
       (p) =>
         p.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()) &&
-        (genre === "전체" || p.genre === genre),
+        matchesGenre(p, genre),
     )
     .sort((a, b) =>
       sort === "name"
@@ -578,8 +592,18 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     }
   }
   async function importPicture(p: Picture, open: boolean) {
+    if (importing) return;
     if (cloud) {
+      setImporting(true);
       try {
+        if (p.galleryPostId) {
+          const saved = await importGalleryPicture(p);
+          await refresh();
+          setPreview(null);
+          toast("내 이미지에 원본을 가져왔습니다.");
+          if (open) navigate(`/app/studio?id=${saved.id}`);
+          return;
+        }
         const imported = await post<Asset>(
           `/api/wallpapers/${p.assetId}/import`,
           {},
@@ -591,6 +615,8 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
         if (open) navigate(`/app/studio?id=${saved.id}`);
       } catch (e) {
         toast((e as Error).message);
+      } finally {
+        setImporting(false);
       }
       return;
     }
@@ -694,7 +720,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
             onChange={(e) => setGenre(e.target.value)}
           >
             <option value="전체">장르 전체</option>
-            {["풍경", "동물", "도시", "인물", "우주"].map((g) => (
+            {genres.map((g) => (
               <option key={g}>{g}</option>
             ))}
           </select>
@@ -935,18 +961,21 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           <div className="detail-meta">
             <span>by {preview.creator}</span>
             <span>
-              {preview.genre} {preview.kind && `· ${preview.kind}`}
+              {preview.tags?.join(" · ") || preview.genre}{" "}
+              {preview.kind && `· ${preview.kind}`}
             </span>
           </div>
           <div className="modal-actions">
             <button
               className="button secondary"
+              disabled={importing}
               onClick={() => importPicture(preview, false)}
             >
               <Plus size={17} /> 내 이미지에 저장
             </button>
             <button
               className="button primary"
+              disabled={importing}
               onClick={() => importPicture(preview, true)}
             >
               <SquarePen size={17} /> 작업실에서 열기
@@ -956,10 +985,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
             <button
               className="text-button danger-text unpublish"
               onClick={() => {
-                const ownId = cloud
-                  ? preview.id
-                  : preview.id.replace(`shared-${session.id}-`, "");
-                void publish({ ...preview, id: ownId }, false);
+                setUnsharing(preview);
                 setPreview(null);
               }}
             >
@@ -971,6 +997,46 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
               ? "공유된 버전을 내 보관함에 복사합니다."
               : "로컬 샘플 갤러리입니다. 공개 범위는 현재 브라우저로 한정됩니다."}
           </Notice>
+          {cloud && preview.galleryPostId && (
+            <a
+              className="button secondary full"
+              href={preview.src}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              원본 이미지 열기
+            </a>
+          )}
+        </Modal>
+      )}
+      {unsharing && (
+        <Modal title="공유를 취소할까요?" close={() => setUnsharing(null)}>
+          <p>
+            {unsharing.galleryPostId
+              ? "기존 모바일 공유 게시물과 해당 게시물의 댓글·좋아요를 삭제합니다. 보관함의 원본 이미지는 유지됩니다."
+              : "탐색에서 이 배경화면을 숨깁니다. 보관함의 이미지는 유지됩니다."}
+          </p>
+          <div className="modal-actions">
+            <button
+              className="button secondary"
+              onClick={() => setUnsharing(null)}
+            >
+              취소
+            </button>
+            <button
+              className="button danger"
+              onClick={() => {
+                const p = unsharing;
+                const ownId = cloud
+                  ? p.id
+                  : p.id.replace(`shared-${session.id}-`, "");
+                void publish({ ...p, id: ownId }, false);
+                setUnsharing(null);
+              }}
+            >
+              공유 취소
+            </button>
+          </div>
         </Modal>
       )}
     </section>

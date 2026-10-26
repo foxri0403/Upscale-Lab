@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mergeExploreFeed } from "../src/explore-feed.ts";
 const base = process.env.WEB_TEST_URL;
 const run = (name, action) => test(name, { skip: !base }, action);
 const get = (path) =>
@@ -17,6 +18,7 @@ run(
     const bundle = await get(src);
     assert.equal(bundle.status, 200);
     assert.match(bundle.headers.get("content-type"), /javascript/);
+    assert.match(await bundle.text(), /\/api\/gallery/, "deployed UI must query the existing mobile gallery");
   },
 );
 run("runtime configuration enables same-origin cloud API", async () => {
@@ -60,6 +62,29 @@ run("shared wallpaper API returns JSON, never the SPA fallback", async () => {
   assert.equal(r.status, 200);
   assert.ok(Array.isArray(await r.json()));
 });
+run(
+  "the explore feed includes existing mobile posts alongside new wallpapers",
+  async () => {
+    const [galleryResponse, wallpaperResponse] = await Promise.all([
+      get("/api/gallery"),
+      get("/api/wallpapers/shared"),
+    ]);
+    assert.equal(galleryResponse.status, 200);
+    assert.equal(wallpaperResponse.status, 200);
+    const gallery = await galleryResponse.json();
+    const wallpapers = await wallpaperResponse.json();
+    assert.ok(Array.isArray(gallery));
+    const feed = mergeExploreFeed(
+      wallpapers.map((a) => ({ id: `asset:${a.id}`, assetId: a.id })),
+      gallery,
+    );
+    const visible = new Set(feed.map((p) => p.galleryPostId).filter(Boolean));
+    assert.deepEqual(
+      visible,
+      new Set(gallery.filter((p) => p.isPublic).map((p) => p.id)),
+    );
+  },
+);
 run(
   "invalid login is validated by the actual API without creating a session",
   async () => {

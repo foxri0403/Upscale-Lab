@@ -1,4 +1,23 @@
-export type Genre = "풍경" | "동물" | "도시" | "인물" | "우주";
+export const genres = [
+  "풍경",
+  "동물",
+  "도시",
+  "인물",
+  "우주",
+  "애니",
+  "게임",
+  "여자",
+  "남자",
+  "픽셀 아트",
+  "레트로",
+  "SF",
+  "스포츠",
+  "자동차",
+  "비행기",
+  "밀리터리",
+  "장르 설정되지 않음",
+] as const;
+export type Genre = (typeof genres)[number];
 export type Tool = "upscale" | "layers" | "live" | "crop" | "filter";
 export type Edit = {
   strength: number;
@@ -16,6 +35,9 @@ export type Picture = {
   created: string;
   edit?: Edit;
   sharedId?: string;
+  galleryPostId?: string;
+  ownerId?: string;
+  tags?: string[];
   creator?: string;
   downloads?: number;
   projectId?: string;
