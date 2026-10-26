@@ -20,7 +20,12 @@ import {
   type Device,
   type Command,
 } from "./model";
-import { mergeExploreFeed, type GalleryPost } from "./explore-feed";
+import {
+  galleryPicture,
+  mergeExploreFeed,
+  type GalleryPost,
+} from "./explore-feed";
+import { unspecifiedTag } from "./image-tags";
 
 const manifests = new Map<string, { picture: Picture; until: number }>();
 export const preferencesKey = (userId: string) =>
@@ -34,7 +39,10 @@ export function projectPicture(p: Project): Picture {
     projectId: p.id,
     name: p.title,
     src: p.originalImageUrl,
-    genre: "풍경",
+    genre: unspecifiedTag,
+    tags: [],
+    width: p.originalWidth,
+    height: p.originalHeight,
     created: p.createdAt,
     background,
     foregrounds: p.layers
@@ -59,7 +67,10 @@ export async function assetPicture(a: Asset, fresh = false): Promise<Picture> {
     assetId: a.id,
     name: a.title,
     src: files[0]?.source || "",
-    genre: "풍경",
+    genre: unspecifiedTag,
+    tags: [],
+    width: m.width,
+    height: m.height,
     created: a.createdAt,
     kind: a.mode === "Live2D" ? "Live 2D" : undefined,
     sharedId: a.isPublic ? a.id : undefined,
@@ -168,7 +179,25 @@ export async function fetchLibrary(
     ),
   );
   // Project previews and immutable saved wallpapers are distinct server resources.
-  const images = [...projects.map(projectPicture), ...ownPictures].map((p) => ({
+  const projectsWithMetadata = projects.map((project) => {
+    const picture = projectPicture(project);
+    const published = gallery.find(
+      (post) =>
+        post.userId === userId &&
+        post.projectId === project.id &&
+        post.isPublic,
+    );
+    if (!published) return picture;
+    const metadata = galleryPicture(published);
+    return {
+      ...picture,
+      genre: metadata.genre,
+      tags: metadata.tags,
+      galleryPostId: published.id,
+      sharedId: published.id,
+    };
+  });
+  const images = [...projectsWithMetadata, ...ownPictures].map((p) => ({
     ...p,
     ...preferences[p.id],
     src: p.src,
@@ -247,6 +276,8 @@ export async function detailPicture(p: Picture): Promise<Picture> {
   const result = {
     ...p,
     ...projectPicture(detail),
+    genre: p.genre,
+    tags: p.tags,
     detailsUntil: Date.now() + 5 * 60000,
   };
   if (
@@ -260,6 +291,8 @@ export async function detailPicture(p: Picture): Promise<Picture> {
     result.src = download.url;
     result.jobId = detail.latestJob.jobId;
     result.kind = "업스케일";
+    result.width = detail.latestJob.resultWidth;
+    result.height = detail.latestJob.resultHeight;
   }
   return result;
 }

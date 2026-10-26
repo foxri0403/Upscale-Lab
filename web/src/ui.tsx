@@ -127,7 +127,15 @@ export function Empty({
 export function Notice({ children }: { children: ReactNode }) {
   return <p className="notice">{children}</p>;
 }
-export function PictureView({ picture }: { picture: Picture }) {
+export function PictureView({
+  picture,
+  loaded,
+  failed,
+}: {
+  picture: Picture;
+  loaded?: (image: HTMLImageElement) => void;
+  failed?: () => void;
+}) {
   return (
     <span
       className="picture-view"
@@ -137,6 +145,8 @@ export function PictureView({ picture }: { picture: Picture }) {
         src={picture.background || picture.src}
         alt={picture.name}
         loading="lazy"
+        onLoad={(event) => loaded?.(event.currentTarget)}
+        onError={() => failed?.()}
       />
       {picture.background &&
         picture.edit?.foreground !== false &&

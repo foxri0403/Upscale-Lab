@@ -101,7 +101,10 @@ function App() {
     </>
   );
 }
-createRoot(document.getElementById("root")!).render(
+const reactRoot = (import.meta.hot?.data.reactRoot as ReturnType<typeof createRoot> | undefined)
+  ?? createRoot(document.getElementById("root")!);
+if (import.meta.hot) import.meta.hot.data.reactRoot = reactRoot;
+reactRoot.render(
   <React.StrictMode>
     <App />
   </React.StrictMode>,

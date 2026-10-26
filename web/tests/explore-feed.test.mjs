@@ -1,10 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  galleryPicture,
-  mergeExploreFeed,
-  matchesGenre,
-} from "../src/explore-feed.ts";
+import { galleryPicture, mergeExploreFeed } from "../src/explore-feed.ts";
+import { matchesSelectedTags, selectableTags } from "../src/image-tags.ts";
 
 const post = {
   id: "mobile-post",
@@ -60,10 +57,10 @@ test("legacy and new resources with the same UUID are distinct entries", () => {
 
 test("all of a mobile post's genres participate in filtering", () => {
   const picture = galleryPicture(post);
-  assert.equal(matchesGenre(picture, "애니"), true);
-  assert.equal(matchesGenre(picture, "동물"), true);
-  assert.equal(matchesGenre(picture, "풍경"), false);
-  assert.equal(matchesGenre(picture, "전체"), true);
+  assert.equal(matchesSelectedTags(picture, ["애니"]), true);
+  assert.equal(matchesSelectedTags(picture, ["동물"]), true);
+  assert.equal(matchesSelectedTags(picture, ["풍경"]), false);
+  assert.equal(matchesSelectedTags(picture, [...selectableTags]), true);
 });
 
 test("older single-tag posts keep their genre instead of becoming landscapes", () => {

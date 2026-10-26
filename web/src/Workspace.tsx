@@ -18,20 +18,11 @@ import {
   LogOut,
   UserRound,
   Plus,
-  Grid2X2,
-  List,
   ArrowDownUp,
-  Tag,
-  MoreVertical,
-  Trash2,
-  Pencil,
-  Layers3,
-  Expand,
   X,
   Check,
   Monitor,
   Smartphone,
-  Info,
 } from "lucide-react";
 import { type Session } from "./auth";
 import {
@@ -41,7 +32,6 @@ import {
   community,
   uploadImage,
   uuid,
-  genres,
   type Library,
   type Picture,
   type Device,
@@ -68,7 +58,14 @@ import {
   preferencesKey,
   importGalleryPicture,
 } from "./cloud-store";
-import { matchesGenre } from "./explore-feed";
+import {
+  allTagsSelected,
+  imageTags,
+  matchesSelectedTags,
+  selectableTags,
+} from "./image-tags";
+import { TagSelector } from "./TagSelector";
+import { ImageCard } from "./ImageCard";
 
 type SharedPicture = Picture & { ownerId: string };
 type DemoContext = {
@@ -527,9 +524,10 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const { library, session, update, toast, shared, publish, refresh } =
     useDemo();
   const [query, setQuery] = useState("");
-  const [genre, setGenre] = useState("전체");
+  const [selectedTags, setSelectedTags] = useState<string[]>(() => [
+    ...selectableTags,
+  ]);
   const [sort, setSort] = useState("recent");
-  const [list, setList] = useState(false);
   const [preview, setPreview] = useState<Picture | null>(null);
   const [editing, setEditing] = useState<Picture | null>(null);
   const [name, setName] = useState("");
@@ -550,6 +548,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       const p = all.find(
         (p) =>
           p.sharedId === requested ||
+          p.galleryPostId === requested ||
           p.id === requested ||
           p.assetId === requested,
       );
@@ -563,7 +562,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     .filter(
       (p) =>
         p.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()) &&
-        matchesGenre(p, genre),
+        matchesSelectedTags(p, selectedTags),
     )
     .sort((a, b) =>
       sort === "name"
@@ -712,19 +711,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
             </button>
           )}
         </label>
-        <label className="select-field">
-          <Tag size={18} />
-          <select
-            aria-label="장르"
-            value={genre}
-            onChange={(e) => setGenre(e.target.value)}
-          >
-            <option value="전체">장르 전체</option>
-            {genres.map((g) => (
-              <option key={g}>{g}</option>
-            ))}
-          </select>
-        </label>
+        <TagSelector selected={selectedTags} change={setSelectedTags} />
         <label className="select-field">
           <ArrowDownUp size={18} />
           <select
@@ -739,158 +726,51 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
             {explore && <option value="popular">인기순</option>}
           </select>
         </label>
-        {!explore && (
-          <div className="view-toggle">
-            <button
-              aria-label="격자 보기"
-              aria-pressed={!list}
-              onClick={() => setList(false)}
-              className={!list ? "active" : ""}
-            >
-              <Grid2X2 size={20} />
-            </button>
-            <button
-              aria-label="목록 보기"
-              aria-pressed={list}
-              onClick={() => setList(true)}
-              className={list ? "active" : ""}
-            >
-              <List size={21} />
-            </button>
-          </div>
-        )}
-      </div>
-      <div className="genre-chips" aria-label="장르 필터">
-        {[
-          "전체",
-          "풍경",
-          "동물",
-          "도시",
-          "인물",
-          ...(explore ? ["우주"] : []),
-        ].map((g) => (
-          <button
-            key={g}
-            aria-pressed={genre === g}
-            className={genre === g ? "active" : ""}
-            onClick={() => setGenre(g)}
-          >
-            {g}
-          </button>
-        ))}
       </div>
       {!images.length ? (
         <Empty
           text={
-            query || genre !== "전체"
+            query || !allTagsSelected(selectedTags)
               ? "검색 결과가 없어요"
               : "첫 이미지를 추가해 보세요"
           }
         >
           <p className="muted">
-            {query || genre !== "전체"
+            {query || !allTagsSelected(selectedTags)
               ? "다른 이름이나 장르로 검색해 보세요."
               : "JPG, PNG, WebP 이미지를 추가할 수 있어요."}
           </p>
           <button
             className="button secondary"
             onClick={() => {
-              if (query || genre !== "전체") {
+              if (query || !allTagsSelected(selectedTags)) {
                 setQuery("");
-                setGenre("전체");
+                setSelectedTags([...selectableTags]);
               } else input.current?.click();
             }}
           >
-            {query || genre !== "전체" ? "필터 초기화" : "이미지 추가"}
+            {query || !allTagsSelected(selectedTags)
+              ? "필터 초기화"
+              : "이미지 추가"}
           </button>
         </Empty>
       ) : (
-        <div className={`image-grid ${list ? "list-view" : ""}`}>
+        <div className="image-grid">
           {images.map((p) => (
-            <article className="image-card" key={p.id}>
-              <button
-                className="image-card-cover"
-                aria-label={`${p.name} ${explore ? "상세 보기" : "편집하기"}`}
-                onClick={() =>
-                  explore ? setPreview(p) : navigate(`/app/studio?id=${p.id}`)
-                }
-              >
-                <PictureView picture={p} />
-                {p.sharedId && (
-                  <span className="shared-mark" title="공유 중">
-                    <Check size={15} />
-                  </span>
-                )}
-                {explore && (
-                  <span className="download-count">
-                    <Download size={12} />
-                    {p.downloads || 0}
-                  </span>
-                )}
-              </button>
-              <div className="image-card-body">
-                <button
-                  className="image-title"
-                  onClick={() =>
-                    explore ? setPreview(p) : navigate(`/app/studio?id=${p.id}`)
-                  }
-                >
-                  {p.name}
-                </button>
-                {explore && <span className="creator">{p.creator}</span>}
-                <div className="card-meta">
-                  {p.kind && (
-                    <span
-                      className={`type-badge ${p.kind === "Live 2D" ? "live" : ""}`}
-                    >
-                      {p.kind === "Live 2D" ? (
-                        <Layers3 size={14} />
-                      ) : (
-                        <Expand size={14} />
-                      )}{" "}
-                      {p.kind}
-                    </span>
-                  )}
-                </div>
-                {!explore && (
-                  <details className="card-menu">
-                    <summary aria-label={`${p.name} 메뉴`}>
-                      <MoreVertical size={20} />
-                    </summary>
-                    <div>
-                      <button
-                        disabled={cloud}
-                        title={
-                          cloud
-                            ? "프로젝트 이름 변경 API는 아직 제공되지 않습니다."
-                            : undefined
-                        }
-                        onClick={(e) => {
-                          e.currentTarget
-                            .closest("details")
-                            ?.removeAttribute("open");
-                          setEditing(p);
-                          setName(p.name);
-                        }}
-                      >
-                        <Pencil size={15} /> 이름 변경
-                      </button>
-                      <button
-                        className="danger-text"
-                        onClick={(e) => {
-                          e.currentTarget
-                            .closest("details")
-                            ?.removeAttribute("open");
-                          setDeleting(p);
-                        }}
-                      >
-                        <Trash2 size={15} /> 보관함에서 삭제
-                      </button>
-                    </div>
-                  </details>
-                )}
-              </div>
-            </article>
+            <ImageCard
+              key={p.id}
+              picture={p}
+              explore={explore}
+              cloud={cloud}
+              open={() =>
+                explore ? setPreview(p) : navigate(`/app/studio?id=${p.id}`)
+              }
+              rename={() => {
+                setEditing(p);
+                setName(p.name);
+              }}
+              remove={() => setDeleting(p)}
+            />
           ))}
         </div>
       )}
@@ -961,7 +841,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           <div className="detail-meta">
             <span>by {preview.creator}</span>
             <span>
-              {preview.tags?.join(" · ") || preview.genre}{" "}
+              {imageTags(preview).join(" · ") || "장르 없음"}{" "}
               {preview.kind && `· ${preview.kind}`}
             </span>
           </div>

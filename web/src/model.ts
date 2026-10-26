@@ -1,23 +1,5 @@
-export const genres = [
-  "풍경",
-  "동물",
-  "도시",
-  "인물",
-  "우주",
-  "애니",
-  "게임",
-  "여자",
-  "남자",
-  "픽셀 아트",
-  "레트로",
-  "SF",
-  "스포츠",
-  "자동차",
-  "비행기",
-  "밀리터리",
-  "장르 설정되지 않음",
-] as const;
-export type Genre = (typeof genres)[number];
+import { selectableTags, unspecifiedTag } from "./image-tags";
+export type Genre = (typeof selectableTags)[number] | typeof unspecifiedTag;
 export type Tool = "upscale" | "layers" | "live" | "crop" | "filter";
 export type Edit = {
   strength: number;
@@ -46,6 +28,8 @@ export type Picture = {
   foregrounds?: string[];
   jobId?: string;
   detailsUntil?: number;
+  width?: number;
+  height?: number;
 };
 export type Display = {
   id: string;
@@ -100,8 +84,8 @@ export const imageSrc = (key: string) =>
 const samples: [string, string, Genre, Picture["kind"]][] = [
   ["fox", "숲속의 여우", "동물", "Live 2D"],
   ["lake", "푸른 호수", "풍경", "업스케일"],
-  ["city", "도시의 밤", "도시", "Live 2D"],
-  ["stars", "별빛", "우주", "업스케일"],
+  ["city", "도시의 밤", "풍경", "Live 2D"],
+  ["stars", "별빛", "SF", "업스케일"],
   ["ocean", "잔잔한 바다", "풍경", undefined],
   ["forest", "아침의 숲", "풍경", "Live 2D"],
   ["mountain", "설산", "풍경", undefined],
@@ -249,7 +233,10 @@ export async function uploadImage(file: File): Promise<Picture> {
       id: crypto.randomUUID(),
       name: file.name.replace(/\.[^.]+$/, ""),
       src: canvas.toDataURL("image/jpeg", 0.84),
-      genre: "풍경",
+      genre: unspecifiedTag,
+      tags: [],
+      width: canvas.width,
+      height: canvas.height,
       created: new Date().toISOString(),
     };
   } finally {

@@ -217,6 +217,8 @@ export type Project = {
   layers?: ApiLayer[];
   layerCount?: number;
   latestJob?: Job;
+  originalWidth?: number;
+  originalHeight?: number;
 };
 export type Job = {
   jobId: string;
@@ -225,6 +227,8 @@ export type Job = {
   errorMessage?: string;
   operation: string;
   hasImageResult: boolean;
+  resultWidth?: number;
+  resultHeight?: number;
 };
 export type Asset = {
   id: string;
@@ -236,6 +240,8 @@ export type Asset = {
 export type Manifest = {
   assetId: string;
   mode: string;
+  width: number;
+  height: number;
   files: { source: string; role: string; order: number }[];
 };
 export type CloudDevice = {

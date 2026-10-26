@@ -45,11 +45,3 @@ export function mergeExploreFeed(
   ];
   return [...new Map(pictures.map((p) => [p.id, p])).values()];
 }
-
-export function matchesGenre(picture: Picture, genre: string): boolean {
-  return (
-    genre === "전체" ||
-    picture.genre === genre ||
-    !!picture.tags?.includes(genre)
-  );
-}

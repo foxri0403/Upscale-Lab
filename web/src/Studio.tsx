@@ -289,10 +289,14 @@ export function Studio({ route }: { route: string }) {
       </Empty>
     );
   const sharedId = cloud
-    ? cloudAsset || picture.assetId || ""
+    ? picture.galleryPostId || cloudAsset || picture.assetId || ""
     : `shared-${session.id}-${picture.id}`;
   const published = shared.some((p) =>
-    cloud ? p.assetId === sharedId : p.id === sharedId,
+    cloud
+      ? picture.galleryPostId
+        ? p.galleryPostId === sharedId
+        : p.assetId === sharedId
+      : p.id === sharedId,
   );
   const cropRatio =
     edit.crop === "wide"
@@ -689,12 +693,27 @@ export function Studio({ route }: { route: string }) {
                 setBusy(true);
                 try {
                   if (cloud) {
+                    if (published && picture.galleryPostId) {
+                      if (
+                        !window.confirm(
+                          "기존 모바일 공유 게시물과 댓글·좋아요를 삭제할까요? 보관함의 원본은 유지됩니다.",
+                        )
+                      )
+                        return;
+                      await publish(picture, false);
+                      return;
+                    }
                     const asset = published
                       ? { id: sharedId }
                       : await saveCloud({ ...picture, edit });
                     setCloudAsset(asset.id);
                     await publish(
-                      { ...picture, edit, assetId: asset.id },
+                      {
+                        ...picture,
+                        edit,
+                        galleryPostId: undefined,
+                        assetId: asset.id,
+                      },
                       !published,
                     );
                   } else await publish({ ...picture, edit }, !published);
