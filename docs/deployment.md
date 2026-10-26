@@ -1,5 +1,9 @@
 # EC2 / AWS 배포 가이드
 
+## PC 웹 프런트엔드 수동 배포
+
+웹 UI는 `web/`에 추가했습니다. [웹 README](../web/README.md)의 `pnpm build:cloud`와 [프런트엔드 설치 스크립트](../deploy/install-web.sh)를 사용하면 기존 API 서비스와 DB를 유지하면서 Nginx의 같은 origin에 UI를 제공할 수 있습니다. 클라우드 smoke test는 `WEB_TEST_URL`을 지정해 실행합니다. 이 배포는 수동이며 `main` 푸시가 자동 배포를 실행하지 않습니다. 아래의 과거 백엔드/서버 기록은 해당 시점의 기록입니다.
+
 ## 웹 기기 관리 변경의 수동 적용
 
 2026-10-26 변경은 기존 .NET 8 API에 기기/화면/적용 명령/결과물 API를 추가합니다. 웹 UI와 새 EXE/APK는 포함하지 않습니다. 공급자 연결과 운영 DB 적용도 자동으로 수행하지 않습니다.

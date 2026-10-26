@@ -1,0 +1,26 @@
+{
+  "name": "upscale-lab-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host localhost --port 5173 --strictPort",
+    "build": "tsc -b && vite build",
+    "build:cloud": "node scripts/build-cloud.mjs",
+    "preview": "vite preview --host localhost --port 5173 --strictPort",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "lucide-react": "^0.468.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.0"
+  },
+  "packageManager": "pnpm@11.25.0"
+}

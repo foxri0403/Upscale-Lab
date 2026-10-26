@@ -1,0 +1,4 @@
+# Explicitly allow only Vite's native bundler setup script.
+# https://pnpm.io/settings#allowbuilds
+allowBuilds:
+  esbuild: true

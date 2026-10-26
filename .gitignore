@@ -72,3 +72,8 @@ gpu-worker/input/
 gpu-worker/output/
 gpu-worker/models/
 gpu-worker/main_backup.py
+
+# Web frontend dependencies and build output
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo

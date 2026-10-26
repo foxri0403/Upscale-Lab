@@ -1,0 +1,72 @@
+# Upscale Lab Web
+
+승인된 PC 웹 시안을 React·TypeScript·HTML·CSS로 구현한 프런트엔드입니다. C# API는 기존 서버를 그대로 사용합니다. 클라우드에서는 Nginx가 웹 파일을 제공하고 `/api`, `/hubs`, `/health`를 기존 API로 전달합니다.
+
+## 화면과 동작
+
+- `/`: 소개 페이지, 화면 단위로 스크롤하는 기능 소개, 업스케일 전후 비교와 레이어 움직임 예시
+- `/login`, `/signup`: 로그인, 가입·이메일 인증, 비밀번호 재설정. 로그인 성공 후 항상 `/app/images`로 이동
+- `/app/images`: 내 프로젝트와 저장된 배경화면 버전, 검색·정렬·필터·레이아웃 변경·이미지 업로드
+- `/app/explore`: 공유 배경화면, 상세 보기, 내 계정으로 가져오기, 본인 게시물 공유 취소
+- `/app/studio`: 업스케일·레이어 분리 요청과 상태 확인, Live 2D 미리보기, 중앙 자르기·색감, 결과 버전 저장, 공유·PNG 다운로드·기기 적용 요청
+- `/app/devices`: 계정별 기기 등록·연결 키 발급, 모니터·홈·잠금 화면의 현재/대기 배경화면과 명령 상태
+
+왼쪽 메뉴는 완전히 숨길 수 있고 상태를 모든 앱 화면에서 공유합니다. 전역 헤더에 결과 공유·다운로드 버튼을 두지 않고 작업실 오른쪽에 배치했습니다. 좁은 브라우저에서도 내용이 겹치지 않게 최소한의 반응형 처리를 했으며 별도 모바일 UI/PWA 설치 기능은 이번 범위에 포함하지 않습니다.
+
+## 개발 및 빌드
+
+Node.js 22.12 이상 또는 24, pnpm 11을 사용합니다. 의존성은 `pnpm-lock.yaml`에 고정했습니다.
+
+```powershell
+cd web
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+기본 개발 주소는 `http://localhost:5173`입니다. 기본 `public/config.js`는 **브라우저 로컬 데모**를 선택합니다. 로그인 화면의 ‘데모 계정 입력’으로 화면 동작을 확인할 수 있습니다. 이 계정은 서버 인증 정보가 아니며 클라우드 데이터에 접근하지 못합니다. 업로드는 브라우저 저장 공간에 맞게 축소하고, AI 처리·실제 기기 적용은 실행하지 않습니다.
+
+```powershell
+# TypeScript 검사 + 일반 빌드
+pnpm build
+# TypeScript 검사 + 같은 origin의 실제 API를 사용하는 클라우드 빌드
+pnpm build:cloud
+```
+
+`build:cloud`는 산출물 `dist/config.js`를 `{ mode: "cloud", apiBaseUrl: "" }`로 설정합니다. 서버 주소·비밀값을 번들에 하드코딩하지 않습니다. 다른 API origin을 사용할 때만 배포된 `config.js`의 `apiBaseUrl`을 설정하고 API/S3 CORS를 맞추세요. Vite의 `VITE_` 변수와 `config.js`는 공개 설정이므로 비밀번호·JWT secret·공급자 키를 넣으면 안 됩니다.
+
+## 실제 API 연결
+
+클라우드 모드는 데이터 조회에 실패했을 때 데모 데이터로 대체하지 않고 연결 오류를 표시합니다. 사용자 소유권 검증은 API가 수행합니다. 기본 토큰 저장은 `sessionStorage`이며 ‘로그인 상태 유지’를 선택한 경우에만 `localStorage`를 사용합니다. 만료 시 refresh 요청을 한 번으로 묶어 재시도하고, 세션 종료 시 로그인 화면으로 돌아갑니다. 자동 갱신은 현재 화면을 바꾸지 않습니다.
+
+이미지는 multipart `/api/projects`로 업로드하고 서버의 S3 서명 URL을 사용합니다. 처리 작업은 `/process` 요청 후 상태를 조회합니다. Live 2D는 서버가 반환한 배경과 전경 레이어를 합성합니다. 필터·자르기는 브라우저 Canvas로 렌더링해 PNG로 다운로드하고, 그 상태로 공유/적용할 때는 새 프로젝트를 업로드해 고정된 결과물을 만듭니다. Live 2D 움직임은 PNG에 포함되지 않습니다. PNG 내보내기 최대 긴 변은 4,096px이며 고해상도 AI 원본 파일 전달은 후속 다운로드 UX에서 확장할 수 있습니다.
+
+기기 연결 키는 명시적 발급/재발급 시 메모리와 대화상자에만 보관합니다. 연결 앱은 같은 계정의 유효한 로그인과 기기 자격을 함께 사용해야 합니다. 웹은 적용 요청을 전송하며 **기기 보고 전에는 완료로 표시하지 않습니다**. 기기 화면은 30초 간격과 수동 새로고침으로 갱신됩니다.
+
+## 수동 클라우드 배포
+
+자동 배포나 CI는 추가하지 않았습니다. [Nginx 예시](../deploy/nginx-web.conf.example)와 [수동 설치 스크립트](../deploy/install-web.sh)를 사용합니다. 빌드 결과를 압축해 기존 Ubuntu 서버로 전달한 뒤 다음처럼 실행합니다. 실제 경로·호스트는 환경에 맞게 지정하세요.
+
+```powershell
+pnpm build:cloud
+tar -czf ../tmp/upscale-web.tar.gz -C dist .
+# scp -i "개인키_경로" ... ubuntu@SERVER:/home/ubuntu/UPLOAD_DIRECTORY/
+```
+
+```bash
+bash install-web.sh /absolute/upscale-web.tar.gz /absolute/nginx-web.conf.example web-YYYYMMDD-HHMMSS
+```
+
+설치 스크립트는 `/var/www/upscale-lab/releases/`에 새 버전을 풀고 `current` 링크를 교체합니다. 기존 Nginx 설정을 `$HOME/deploy-backups/web/<release>/`에 백업하고 `nginx -t` 후 재적재합니다. API 소스·실행 파일·서비스·DB·클라우드 AI 설정을 수정하지 않습니다. 기존 서버에 필요한 다른 Nginx 규칙이 있다면 예시를 먼저 조정해야 합니다. 현재 예시는 기존 HTTP 점검 서버의 프록시 동작을 보존하며, 정식 운영 전에 실제 TLS 종료 구성으로 전환해야 합니다.
+
+## 검증 및 남은 범위
+
+```powershell
+$env:WEB_TEST_URL='https://YOUR_TEST_WEB_ORIGIN'
+pnpm test
+```
+
+실서버 smoke test 8개는 페이지/번들·cloud 설정·직접 진입·health·미인증 차단·공유 JSON·로그인 입력 검증·404 라우팅을 검사합니다. 계정 생성, 데이터 삭제, 유료 AI 작업은 실행하지 않습니다. `WEB_TEST_URL`이 없으면 실서버 테스트를 건너뜁니다. 로그인한 실서버 계정의 업로드→AI 결과→공유→실제 연결 앱 적용은 전용 테스트 계정과 기기로 추가 검증해야 합니다.
+
+문의는 현재 브라우저에 임시 저장하며 메일은 발송하지 않습니다. 연결 앱 설치 파일은 배포 준비 중으로 표시합니다. 원본 프로젝트 이름 변경 API가 없어 클라우드에서 해당 메뉴는 비활성화했습니다. 실제 명령 API가 생성 시간을 반환하지 않아 적용 내역의 요청 시간은 `—`로 표시하며 완료/실패/기기 확인 필요 상태는 서버 응답을 따릅니다.
+
+샘플 이미지 출처와 생성 프롬프트는 [ASSETS.md](ASSETS.md)를 참고하세요.
