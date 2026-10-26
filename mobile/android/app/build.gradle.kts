@@ -76,7 +76,7 @@ android {
 
     defaultConfig {
         applicationId = "com.livelayer.app"
-        minSdk = flutter.minSdkVersion
+        minSdk = maxOf(24, flutter.minSdkVersion)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -86,6 +86,7 @@ android {
 flutter { source = "../.." }
 
 dependencies {
+    implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
     implementation("androidx.exifinterface:exifinterface:1.4.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

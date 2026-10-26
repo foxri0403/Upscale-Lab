@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../models/local_image.dart';
 import '../models/library_order.dart';
 import 'wallpaper_service.dart';
+import 'live_2d_service.dart';
 import '../models/image_ratio.dart';
 
 class LocalImageStore {
@@ -12,6 +13,57 @@ class LocalImageStore {
   final String ownerId;
 
   static const _channel = MethodChannel('live_layer/storage');
+
+  Future<Map<Object?, Object?>> migrateGalleryImages() async =>
+      (await _channel.invokeMapMethod<Object?, Object?>(
+          'migrateGalleryImages', {'scope': scope, 'ownerId': ownerId}))!;
+
+  Future<void> attachLive2D(String id, String draftId) =>
+      _channel.invokeMethod<void>('attachLocalLive2D',
+          {'scope': scope, 'ownerId': ownerId, 'id': id, 'draftId': draftId});
+
+  Future<Map<Object?, Object?>> live2DLayers(String id) async =>
+      (await _channel.invokeMapMethod<Object?, Object?>(
+          'getLocalLive2D', {'scope': scope, 'ownerId': ownerId, 'id': id}))!;
+
+  /// Android's required activation belongs to the Live 2D controls, not Apply.
+  Future<bool> activateLive2D(String id, {WallpaperTarget? target}) async =>
+      await _channel.invokeMethod<bool>('activateLocalLive2D', {
+        'scope': scope,
+        'ownerId': ownerId,
+        'id': id,
+        'showSettings': true,
+        if (target != null) 'target': target.name
+      }) ??
+      false;
+
+  Future<Live2DDraft> editableLive2D(String id) async =>
+      Live2DDraft.fromMap((await _channel.invokeMapMethod<Object?, Object?>(
+          'getLocalLive2DDraft',
+          {'scope': scope, 'ownerId': ownerId, 'id': id}))!);
+
+  Future<LocalImageItem> saveEdits(
+          {required String id,
+          required String sourcePath,
+          required String title,
+          required List<String> tags,
+          required int width,
+          required int height,
+          required ImageRatioSettings ratio,
+          String? draftId}) async =>
+      LocalImageItem.fromPlatformMap((await _channel
+          .invokeMapMethod<Object?, Object?>('saveLocalImageEdits', {
+        'scope': scope,
+        'ownerId': ownerId,
+        'id': id,
+        'sourcePath': sourcePath,
+        'title': title,
+        'tags': tags,
+        'width': width,
+        'height': height,
+        'ratio': ratio.toMap(),
+        if (draftId != null) 'draftId': draftId
+      }))!);
 
   Future<LibraryOrder> getOrder() async =>
       LibraryOrder.fromMap(await _channel.invokeMapMethod<Object?, Object?>(
@@ -37,6 +89,14 @@ class LocalImageStore {
         'id': id,
         'target': target.name,
       });
+
+  /// Registration never launches Android settings. Live 2D connects through
+  /// its explicit Apply action, then reuses Android's current destinations.
+  Future<bool> registerWallpaper(String id,
+      {required WallpaperTarget target}) async {
+    await applyWallpaper(id, target: target);
+    return true;
+  }
 
   Future<List<LocalImageItem>> getAll() async {
     final values = await _channel.invokeListMethod<Object?>(

@@ -58,8 +58,8 @@ class _GalleryApi extends ApiClient {
 
 void main() {
   Future<void> revealTag(WidgetTester tester, String tag) async {
-    final scrollable = find.descendant(of: find.byType(ListView),
-        matching: find.byType(Scrollable));
+    final scrollable = find.descendant(
+        of: find.byType(ListView), matching: find.byType(Scrollable));
     tester.state<ScrollableState>(scrollable).position.jumpTo(0);
     await tester.pump();
     final tile = find.widgetWithText(CheckboxListTile, tag);
@@ -67,6 +67,7 @@ void main() {
     await tester.ensureVisible(tile);
     await tester.pumpAndSettle();
   }
+
   testWidgets('search keeps multiple tags and title across tab changes',
       (tester) async {
     const channel = MethodChannel('live_layer/storage');
@@ -143,7 +144,7 @@ void main() {
 
   for (final originalTag in [unspecifiedGalleryTag, '동물']) {
     testWidgets(
-        'shared $originalTag waits for cloud confirmation before saving locally',
+        'shared $originalTag cannot open an editor or update local/cloud metadata',
         (tester) async {
       const channel = MethodChannel('live_layer/storage');
       final image = <String, Object?>{
@@ -163,15 +164,10 @@ void main() {
           (call) async {
         if (call.method == 'listLocalImages') return [image];
         if (call.method == 'getLibraryOrder') return {};
-        if (call.method == 'updateLocalImageDetails') {
-          final arguments = call.arguments as Map;
-          expect(arguments['id'], 'local-id');
-          image['title'] = arguments['title'];
-          image['tag'] = (arguments['tags'] as List).first;
-          image['tags'] = arguments['tags'];
-          expect(arguments['scope'], apiScope);
+        if (call.method == 'updateLocalImageDetails' ||
+            call.method == 'saveLocalImageEdits') {
           localWrites++;
-          return null;
+          throw StateError('Shared images cannot be edited');
         }
         throw StateError('Unexpected storage call: ${call.method}');
       });
@@ -183,25 +179,12 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('이미지 메뉴'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('수정'));
-      await tester.pumpAndSettle();
-      if (originalTag != '동물') {
-        await tester.tap(find.widgetWithText(FilterChip, '동물'));
-      }
-      await tester.enterText(find.byType(TextFormField), '새 고양이 이름');
-      await tester.tap(find.text('저장'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-
-      expect(api.requestedTags, ['동물']);
+      expect(find.text('수정'), findsNothing);
+      expect(find.byType(ImageFeaturePage), findsNothing);
+      expect(api.requestedTags, isEmpty);
       expect(localWrites, 0);
-      api.tagResult.complete(['동물']);
-      await tester.pumpAndSettle();
-
-      expect(localWrites, 1);
-      expect(image['tag'], '동물');
-      expect(image['title'], '새 고양이 이름');
-      expect(find.text('동물'), findsOneWidget);
+      expect(image['tag'], originalTag);
+      expect(image['title'], '고양이 이미지');
       expect(tester.takeException(), isNull);
     });
   }

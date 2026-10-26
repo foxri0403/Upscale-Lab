@@ -86,7 +86,7 @@ class LocalImageCard extends StatelessWidget {
         itemBuilder: (_) => [
           _action(context,
               'share', image.isShared ? '공유 취소' : '공유', Icons.share_outlined),
-          _action(context, 'edit', '수정', Icons.edit_outlined),
+          if (!image.isShared) _action(context, 'edit', '수정', Icons.edit_outlined),
           _action(context, 'delete', '삭제', Icons.delete_outline, destructive: true),
         ],
       );

@@ -165,6 +165,32 @@ void main() {
         PhotoFilter.values.length);
   });
 
+  test('layer crop and every filter preserve transparent and soft alpha pixels',
+      () async {
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    canvas.drawRect(const ui.Rect.fromLTWH(0, 0, 4, 4),
+        ui.Paint()..color = const ui.Color(0x80336699));
+    final picture = recorder.endRecording();
+    final source = await picture.toImage(8, 4);
+    picture.dispose();
+    addTearDown(source.dispose);
+    for (final filter in PhotoFilter.values) {
+      final png = await ImageEditorService.renderPng(
+          source, const ui.Rect.fromLTWH(.25, 0, .5, 1), filter);
+      final codec = await ui.instantiateImageCodec(png);
+      final image = (await codec.getNextFrame()).image;
+      expect(image.width, 4);
+      expect(image.height, 4);
+      final pixels = (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!
+          .buffer.asUint8List();
+      expect(pixels[(4 * 2) * 4 + 3], 128, reason: filter.name);
+      expect(pixels[(4 * 2 + 3) * 4 + 3], 0, reason: filter.name);
+      image.dispose();
+      codec.dispose();
+    }
+  });
+
   test('untouched registration keeps original bytes; edited copy is disposable',
       () async {
     final directory =

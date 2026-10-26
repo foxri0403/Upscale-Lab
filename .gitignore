@@ -45,9 +45,30 @@ Thumbs.db
 .flutter-plugins-dependencies
 mobile/build/
 mobile/android/.gradle/
+mobile/android/.kotlin/
 mobile/android/local.properties
 mobile/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
 
 # Local test deliverables
 artifacts/
 mobile/test_assets/
+
+# Local Python environments
+.venv/
+__pycache__/
+*.pyc
+
+# Local APK and backup files
+*.apk
+*.bak
+
+# Android signing secrets
+key.properties
+*.jks
+*.keystore
+
+# GPU Worker local files
+gpu-worker/input/
+gpu-worker/output/
+gpu-worker/models/
+gpu-worker/main_backup.py

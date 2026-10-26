@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'image_registration_page.dart';
+import 'services/live_2d_service.dart';
+import 'widgets/live_2d_preview.dart';
 import 'gallery_preview_page.dart';
 import 'models/gallery.dart';
 import 'models/local_image.dart';
@@ -17,15 +19,13 @@ import 'services/local_image_store.dart';
 import 'services/wallpaper_service.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_components.dart';
-import 'widgets/device_display_builder.dart';
 import 'widgets/gallery_tag_picker.dart';
-import 'widgets/image_edit_dialog.dart';
+import 'widgets/wallpaper_remove_dialog.dart';
+import 'widgets/wallpaper_apply_dialog.dart';
 import 'widgets/local_image_card.dart';
 
 export 'image_registration_page.dart';
 export 'gallery_preview_page.dart';
-
-const _wallpaperChannel = MethodChannel('live_layer/wallpaper');
 
 class GallerySearchSelection {
   String search = '';
@@ -47,9 +47,8 @@ class UnifiedHomePage extends StatefulWidget {
 }
 
 class _UnifiedHomePageState extends State<UnifiedHomePage> {
-  late final _localImageStore =
-      LocalImageStore(scope: widget.apiClient.storageScope,
-          ownerId: widget.apiClient.userId);
+  late final _localImageStore = LocalImageStore(
+      scope: widget.apiClient.storageScope, ownerId: widget.apiClient.userId);
   late Future<List<LocalImageItem>> _images = _loadLibrary();
   LibraryOrder _order = const LibraryOrder();
   bool _orderLoaded = false;
@@ -113,6 +112,26 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
   bool _creating = false;
   bool _isGrid = true;
   bool _removingWallpaper = false;
+  bool _migratingImages = false;
+
+  Future<void> _migrateGalleryImages() async {
+    setState(() => _migratingImages = true);
+    try {
+      final result = await _localImageStore.migrateGalleryImages();
+      if (!mounted) return;
+      _reload();
+      final remaining = (result['remaining'] as num?)?.toInt() ?? 0;
+      final failed = (result['failed'] as num?)?.toInt() ?? 0;
+      _message(remaining == 0 && failed == 0
+          ? '기존 이미지를 앱 저장소로 이전했습니다. 앱에서 만든 갤러리 복사본은 제거했습니다.'
+          : '앱 저장소로 복사했습니다. 갤러리에 남은 복사본 ${remaining + failed}개는 권한 확인 후 다시 이전해 주세요.');
+    } on PlatformException catch (error) {
+      _message(error.message ?? '기존 이미지를 이전하지 못했습니다.');
+    } finally {
+      if (mounted) setState(() => _migratingImages = false);
+    }
+  }
+
   int _selectedIndex = 0;
   int _galleryRevision = 0;
   final _gallerySelection = GallerySearchSelection();
@@ -131,6 +150,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
         onDelete: () => _delete(image),
       ),
     ));
+    if (mounted) _reload();
   }
 
   void _message(String message) {
@@ -145,6 +165,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
 
     setState(() => _creating = true);
     ImageRegistrationOptions? options;
+    String? downloadedUpscalePath;
     try {
       options = await Navigator.of(context).push<ImageRegistrationOptions>(
         MaterialPageRoute(
@@ -171,35 +192,133 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
         codec.dispose();
       }
       if (!mounted) return;
-      final saved = await _localImageStore.import(
-        sourcePath: sourcePath,
-        fileName: edited == null ? picked.name : 'edited.png',
-        title: options.title,
-        tags: options.tags,
-        width: width,
-        height: height,
-        mode: 'original',
-        ratio: options.ratio,
-      );
-      if (!mounted) return;
-      _reload();
+
+      // Save the original only when upscaling is not requested.
+      final scale = options.upscaleFactor;
       final target = options.wallpaperTarget;
-      if (target != null) {
-        try {
-          await _localImageStore.applyWallpaper(saved.id, target: target);
-          _message('이미지를 저장하고 배경화면을 적용했습니다.');
-        } catch (error) {
-          _message('이미지는 저장했지만 배경화면을 적용하지 못했습니다. 홈에서 다시 적용해 주세요.\n$error');
+      if (scale == null) {
+        final saved = await _localImageStore.import(
+          sourcePath: sourcePath,
+          fileName: edited == null ? picked.name : 'edited.png',
+          title: options.title,
+          tags: options.tags,
+          width: width,
+          height: height,
+          mode: 'original',
+          ratio: options.ratio,
+        );
+        if (!mounted) return;
+        if (options.live2D != null) {
+          try {
+            await _localImageStore.attachLive2D(saved.id, options.live2D!.id);
+          } catch (error) {
+            if (mounted) _reload();
+            _message('원본은 저장했지만 Live 2D 레이어를 저장하지 못했습니다.\n$error');
+            return;
+          }
         }
-      } else {
-        _message('이미지를 저장했습니다. 배경화면은 변경하지 않았습니다.');
+        if (!mounted) return;
+        _reload();
+
+        if (target != null) {
+          try {
+            final confirmed = await _localImageStore.registerWallpaper(saved.id,
+                target: target);
+            _message(confirmed
+                ? '이미지를 저장하고 배경화면을 적용했습니다.'
+                : '이미지는 저장했습니다. 배경화면 등록은 취소했습니다.');
+          } catch (error) {
+            _message('이미지는 저장했지만 배경화면을 적용하지 못했습니다.\n$error');
+          }
+        } else {
+          _message(options.live2D != null
+              ? 'Live 2D 이미지를 저장했습니다.'
+              : '이미지를 저장했습니다. 배경화면은 변경하지 않았습니다.');
+        }
+      }
+
+      if (scale != null) {
+        try {
+          _message('AI $scale배 업스케일링을 처리하고 있습니다...');
+          final project = await widget.apiClient.createProject(
+            title: options.title,
+            filePath: sourcePath,
+            width: width,
+            height: height,
+          );
+          await widget.apiClient.startUpscaling(project.id, scale: scale);
+          final status = await widget.apiClient.waitForUpscaling(project.id);
+          final jobId = status['jobId']?.toString();
+          if (jobId == null || jobId.isEmpty) {
+            throw StateError('완료된 업스케일링 작업의 jobId가 없습니다.');
+          }
+          final url =
+              await widget.apiClient.getUpscaledDownloadUrl(project.id, jobId);
+          downloadedUpscalePath = await _localImageStore.downloadShared(
+            url: url,
+            fileName: 'upscaled_${scale}x.png',
+          );
+
+          // Read actual output dimensions, rather than assuming the scale.
+          final resultCodec = await ui.instantiateImageCodec(
+              await File(downloadedUpscalePath).readAsBytes());
+          late int resultWidth;
+          late int resultHeight;
+          try {
+            final frame = await resultCodec.getNextFrame();
+            resultWidth = frame.image.width;
+            resultHeight = frame.image.height;
+            frame.image.dispose();
+          } finally {
+            resultCodec.dispose();
+          }
+          if (resultWidth != width * scale || resultHeight != height * scale) {
+            throw StateError('AI 결과 해상도가 예상과 다릅니다: '
+                '$resultWidth x $resultHeight (예상: ${width * scale} x ${height * scale}).');
+          }
+
+          final saved = await _localImageStore.import(
+            sourcePath: downloadedUpscalePath,
+            fileName: 'upscaled_${scale}x.png',
+            title: '${options.title}_AI_${scale}x',
+            tags: options.tags,
+            width: resultWidth,
+            height: resultHeight,
+            mode: 'original',
+            ratio: options.ratio,
+          );
+          if (!mounted) return;
+          _reload();
+          if (target != null) {
+            try {
+              final confirmed = await _localImageStore.registerWallpaper(saved.id, target: target);
+              _message(confirmed ? '업스케일 이미지를 저장하고 배경화면을 등록했습니다.'
+                  : '업스케일 이미지는 저장했습니다. 배경화면 등록은 취소했습니다.');
+            } catch (error) {
+              _message('업스케일 이미지는 저장했지만 배경화면을 등록하지 못했습니다.\n$error');
+            }
+            return;
+          }
+          _message('AI $scale배 업스케일링 이미지가 저장됐습니다. '
+              '($resultWidth x $resultHeight)');
+        } catch (error) {
+          _message('AI 업스케일링에 실패했습니다. 원본 이미지는 추가 저장하지 않았습니다.\n$error');
+        }
       }
     } on PlatformException catch (error) {
       _message(error.message ?? '$error');
     } catch (error) {
       _message('이미지를 등록하지 못했습니다.\n$error');
     } finally {
+      if (downloadedUpscalePath != null) {
+        try {
+          await File(downloadedUpscalePath).delete();
+        } catch (_) {
+          // Temporary download may already have been cleared by Android.
+        }
+      }
       await options?.editedFile?.dispose();
+      await Live2DService.discard(options?.live2D);
       if (mounted) setState(() => _creating = false);
     }
   }
@@ -296,65 +415,118 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
 
   Future<void> _editImage(LocalImageItem image) async {
     if (_busyIds.contains(image.id)) return;
-    final edited = await showDialog<ImageEditResult>(
-      context: context,
-      builder: (_) => ImageEditDialog(
-          title: image.title, tags: image.tags, ratio: image.ratio),
-    );
-    if (edited == null || !mounted) return;
-
+    if (image.isShared) {
+      _message('공유 중인 이미지는 수정할 수 없습니다. 먼저 공유를 취소해 주세요.');
+      return;
+    }
+    final store = _localImageStore;
     setState(() => _busyIds.add(image.id));
     try {
-      var confirmedTags = edited.tags;
-      if (image.isShared) {
-        confirmedTags = await widget.apiClient.updateGalleryPost(
-          postId: image.galleryPostId!,
-          title: edited.title,
-          tags: edited.tags,
-        );
-      }
-      await _localImageStore.updateDetails(
-          id: image.id,
-          title: edited.title,
-          tags: confirmedTags,
-          ratio: edited.ratio);
-      if (!mounted) return;
-      setState(() => _galleryRevision++);
-      _reload();
-      _message('이미지 이름과 태그를 수정했습니다.');
+      await Navigator.of(context).push<void>(MaterialPageRoute(
+          builder: (_) => ImageFeaturePage(
+              filePath: image.path,
+              title: image.title,
+              initialTags: image.tags,
+              initialRatio: image.ratio,
+              loadLive2D:
+                  image.isLive2D ? () => store.editableLive2D(image.id) : null,
+              onSave: (options) => _saveImageEdit(image, options, store))));
     } catch (error) {
       _message('이미지를 수정하지 못했습니다.\n$error');
     } finally {
-      if (mounted) setState(() => _busyIds.remove(image.id));
+      if (mounted) {
+        setState(() => _busyIds.remove(image.id));
+        _reload();
+      }
+    }
+  }
+
+  Future<void> _saveImageEdit(LocalImageItem image,
+      ImageRegistrationOptions options, LocalImageStore store) async {
+    var source = options.editedFile?.path ?? image.path;
+    var width = options.editedFile?.width ?? image.width;
+    var height = options.editedFile?.height ?? image.height;
+    String? downloaded;
+    try {
+      if (options.upscaleFactor case final scale?) {
+        final project = await widget.apiClient.createProject(
+            title: options.title,
+            filePath: source,
+            width: width,
+            height: height);
+        await widget.apiClient.startUpscaling(project.id, scale: scale);
+        final status = await widget.apiClient.waitForUpscaling(project.id);
+        final jobId = status['jobId']?.toString();
+        if (jobId == null || jobId.isEmpty) {
+          throw StateError('업스케일링 작업 ID가 없습니다.');
+        }
+        final url =
+            await widget.apiClient.getUpscaledDownloadUrl(project.id, jobId);
+        downloaded = await store.downloadShared(
+            url: url, fileName: 'upscaled_${scale}x.png');
+        final codec = await ui
+            .instantiateImageCodec(await File(downloaded).readAsBytes());
+        try {
+          final frame = await codec.getNextFrame();
+          try {
+            if (frame.image.width != width * scale ||
+                frame.image.height != height * scale) {
+              throw StateError('AI 결과 해상도가 예상과 다릅니다.');
+            }
+            width = frame.image.width;
+            height = frame.image.height;
+          } finally {
+            frame.image.dispose();
+          }
+        } finally {
+          codec.dispose();
+        }
+        source = downloaded;
+      }
+      final saved = await store.saveEdits(
+          id: image.id,
+          sourcePath: source,
+          title: options.title,
+          tags: options.tags,
+          width: width,
+          height: height,
+          ratio: options.ratio,
+          draftId: options.live2D?.id);
+      if (options.wallpaperTarget case final target?) {
+        try {
+          final confirmed =
+              await store.registerWallpaper(saved.id, target: target);
+          if (!confirmed) {
+            _message('수정은 저장했습니다. 배경화면 등록은 취소했습니다.');
+            return;
+          }
+        } catch (error) {
+          _message('수정은 저장했지만 배경화면을 적용하지 못했습니다.\n$error');
+          return;
+        }
+      }
+      _message('이미지 수정을 저장했습니다.');
+    } finally {
+      if (downloaded != null) {
+        try {
+          await File(downloaded).delete();
+        } catch (_) {}
+      }
     }
   }
 
   Future<void> _removeWallpaper() async {
     if (_removingWallpaper) return;
-    final confirmed = await showDialog<bool>(
+    final target = await showDialog<WallpaperTarget>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('홈 배경화면 제거'),
-        content:
-            Text('현재 Android 홈 배경화면만 기본 배경으로 되돌릴까요? 등록된 이미지는 삭제되지 않습니다.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text('배경화면 제거'),
-          ),
-        ],
-      ),
+      builder: (_) => const WallpaperRemoveDialog(),
     );
-    if (confirmed != true || !mounted) return;
+    if (target == null || !mounted) return;
 
     setState(() => _removingWallpaper = true);
     try {
-      await _wallpaperChannel.invokeMethod<void>('clearHomeWallpaper');
-      _message('홈 배경화면을 제거했습니다. 등록된 이미지는 유지됩니다.');
+      await const WallpaperService().clear(target: target);
+      _message('선택한 배경화면을 제거했습니다. 등록된 이미지는 유지됩니다.');
     } on PlatformException catch (error) {
       _message(error.message ?? '$error');
     } finally {
@@ -413,11 +585,13 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
               padding: const EdgeInsets.all(24),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Icon(Icons.image_not_supported_outlined,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant, size: 36),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    size: 36),
                 const SizedBox(height: 12),
                 Text(
                   snapshot.error is PlatformException &&
-                          (snapshot.error as PlatformException).code == 'gallery_permission_denied'
+                          (snapshot.error as PlatformException).code ==
+                              'gallery_permission_denied'
                       ? '자동 복원을 위해 사진 접근 권한을\n모든 사진 허용으로 변경해 주세요.'
                       : '이미지를 불러오지 못했습니다.',
                   textAlign: TextAlign.center,
@@ -459,7 +633,9 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
                 decoration: BoxDecoration(
                     border: candidates.isEmpty
                         ? null
-                        : Border.all(color: Theme.of(context).colorScheme.primary, width: 2)),
+                        : Border.all(
+                            color: Theme.of(context).colorScheme.primary,
+                            width: 2)),
                 child: LongPressDraggable<String>(
                   data: image.id,
                   maxSimultaneousDrags: _busyIds.contains(image.id) ? 0 : 1,
@@ -480,8 +656,15 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
           }
 
           return LayoutBuilder(builder: (context, constraints) {
-            final columns = constraints.maxWidth >= 1100 ? 5 : constraints.maxWidth >= 850 ? 4 : constraints.maxWidth >= 600 ? 3 : 2;
-          final cellWidth = (constraints.maxWidth - 40 - 12 * (columns - 1)) / columns;
+            final columns = constraints.maxWidth >= 1100
+                ? 5
+                : constraints.maxWidth >= 850
+                    ? 4
+                    : constraints.maxWidth >= 600
+                        ? 3
+                        : 2;
+            final cellWidth =
+                (constraints.maxWidth - 40 - 12 * (columns - 1)) / columns;
             final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
             return RefreshIndicator(
               onRefresh: () async {
@@ -518,7 +701,8 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             child: Text(_order.sort.label,
                                 style: TextStyle(
-                                    color: Theme.of(context).colorScheme.primary,
+                                    color:
+                                        Theme.of(context).colorScheme.primary,
                                     fontWeight: FontWeight.w600))),
                       ),
                     ]),
@@ -565,19 +749,23 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
       children: [
         const AppSectionTitle('설정'),
         const SizedBox(height: 18),
-        Text('화면 설정', style: TextStyle(color: colors.onSurfaceVariant, fontWeight: FontWeight.w600)),
+        Text('화면 설정',
+            style: TextStyle(
+                color: colors.onSurfaceVariant, fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
-        Card(child: Padding(
+        Card(
+            child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: ValueListenableBuilder<ThemeMode>(
             valueListenable: AppTheme.mode,
             builder: (context, mode, _) => Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const ListTile(contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.palette_outlined),
-                  title: Text('화면 테마'),
-                  subtitle: Text('시스템 설정 또는 밝고 어두운 화면을 선택하세요.')),
+                const ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.palette_outlined),
+                    title: Text('화면 테마'),
+                    subtitle: Text('시스템 설정 또는 밝고 어두운 화면을 선택하세요.')),
                 SegmentedButton<ThemeMode>(
                   showSelectedIcon: false,
                   segments: const [
@@ -586,7 +774,8 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
                     ButtonSegment(value: ThemeMode.dark, label: Text('다크')),
                   ],
                   selected: {mode},
-                  onSelectionChanged: (selected) => AppTheme.setMode(selected.first),
+                  onSelectionChanged: (selected) =>
+                      AppTheme.setMode(selected.first),
                 ),
                 const SizedBox(height: 10),
               ],
@@ -594,16 +783,34 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
           ),
         )),
         const SizedBox(height: 20),
-        Text('앱 및 계정', style: TextStyle(color: colors.onSurfaceVariant, fontWeight: FontWeight.w600)),
+        Text('앱 및 계정',
+            style: TextStyle(
+                color: colors.onSurfaceVariant, fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
-        Card(child: Column(children: [
+        Card(
+            child: Column(children: [
           ListTile(
             leading: Icon(Icons.wallpaper_outlined),
-            title: Text('홈 배경화면 제거'),
+            title: Text('배경화면 제거'),
             subtitle: Text('등록한 이미지는 보관됩니다.'),
             trailing: Icon(Icons.chevron_right),
             enabled: !_removingWallpaper,
             onTap: _removingWallpaper ? null : _removeWallpaper,
+          ),
+          const Divider(height: 1),
+          ListTile(
+            key: const ValueKey('migrate-gallery-images'),
+            leading: const Icon(Icons.folder_copy_outlined),
+            title: const Text('기존 갤러리 이미지 이전'),
+            subtitle:
+                const Text('앱에서 저장한 복사본을 앱 내부로 옮깁니다. 새 이미지는 갤러리에 저장하지 않습니다.'),
+            enabled: !_migratingImages,
+            trailing: _migratingImages
+                ? const SizedBox.square(
+                    dimension: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.chevron_right),
+            onTap: _migratingImages ? null : _migrateGalleryImages,
           ),
           const Divider(height: 1),
           ListTile(
@@ -663,7 +870,9 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
       ),
       bottomNavigationBar: DecoratedBox(
         decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
+          border: Border(
+              top: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant)),
         ),
         child: NavigationBar(
           selectedIndex: _selectedIndex,
@@ -689,10 +898,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
 
 class GallerySearchPage extends StatefulWidget {
   const GallerySearchPage(
-      {super.key,
-      required this.apiClient,
-      this.onImported,
-      this.selection});
+      {super.key, required this.apiClient, this.onImported, this.selection});
 
   final ApiClient apiClient;
   final VoidCallback? onImported;
@@ -712,7 +918,9 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
     widget.selection?.search = _searchController.text;
     return widget.apiClient.getGallery(
       search: _searchController.text,
-      tags: _selectedTags.length == selectableGalleryTags.length ? <String>[] : _selectedTags.toList(),
+      tags: _selectedTags.length == selectableGalleryTags.length
+          ? <String>[]
+          : _selectedTags.toList(),
     );
   }
 
@@ -732,10 +940,13 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
   }
 
   Future<void> _openTagPicker() async {
-    final result = await showGalleryTagPicker(context, selectedTags: _selectedTags);
+    final result =
+        await showGalleryTagPicker(context, selectedTags: _selectedTags);
     if (result == null || !mounted) return;
     setState(() {
-      _selectedTags..clear()..addAll(result);
+      _selectedTags
+        ..clear()
+        ..addAll(result);
       // All checked is the same as no filter, but checkboxes remain selected until reset.
       _posts = _load();
     });
@@ -743,77 +954,94 @@ class _GallerySearchPageState extends State<GallerySearchPage> {
 
   @override
   Widget build(BuildContext context) => RefreshIndicator(
-    onRefresh: _refresh,
-    child: CustomScrollView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      slivers: [
-        SliverToBoxAdapter(child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          child: Row(children: [
-            Expanded(child: TextField(
-              controller: _searchController,
-              textInputAction: TextInputAction.search,
-              onSubmitted: (_) => _search(),
-              decoration: InputDecoration(
-                hintText: '이미지 이름 검색',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: IconButton(tooltip: '검색', onPressed: _search,
-                    icon: const Icon(Icons.arrow_forward)),
-              ),
-            )),
-            const SizedBox(width: 8),
-            Badge(
-              isLabelVisible: _selectedTags.isNotEmpty,
-              label: Text('${_selectedTags.length}'),
-              child: IconButton.outlined(tooltip: '태그 선택',
-                  onPressed: _openTagPicker, icon: const Icon(Icons.tune)),
-            ),
-          ]),
-        )),
-        FutureBuilder<List<GalleryPostItem>>(
-          future: _posts,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const SliverToBoxAdapter(child: Padding(
-                padding: EdgeInsets.all(32),
-                child: Center(child: CircularProgressIndicator()),
-              ));
-            }
-            if (snapshot.hasError || (snapshot.data?.isEmpty ?? true)) {
-              return SliverToBoxAdapter(child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(children: [
-                  Icon(Icons.photo_library_outlined,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant, size: 36),
-                  const SizedBox(height: 12),
-                  Text(snapshot.hasError ? '공유 이미지를 불러오지 못했습니다.'
-                      : '조건에 맞는 공유 이미지가 없습니다.', textAlign: TextAlign.center),
-                  if (snapshot.hasError) TextButton(onPressed: _refresh,
-                      child: const Text('다시 불러오기')),
-                ]),
-              ));
-            }
-            final posts = snapshot.data!;
-            return SliverPadding(
-              padding: const EdgeInsets.fromLTRB(2, 0, 2, 24),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2, childAspectRatio: 1,
-                  crossAxisSpacing: 2, mainAxisSpacing: 2),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) => _GalleryPostCard(
-                    key: ValueKey(posts[index].id), post: posts[index],
-                    apiClient: widget.apiClient, onImported: widget.onImported),
-                  childCount: posts.length,
+        onRefresh: _refresh,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+                child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Row(children: [
+                Expanded(
+                    child: TextField(
+                  controller: _searchController,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (_) => _search(),
+                  decoration: InputDecoration(
+                    hintText: '이미지 이름 검색',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: IconButton(
+                        tooltip: '검색',
+                        onPressed: _search,
+                        icon: const Icon(Icons.arrow_forward)),
+                  ),
+                )),
+                const SizedBox(width: 8),
+                Badge(
+                  isLabelVisible: _selectedTags.isNotEmpty,
+                  label: Text('${_selectedTags.length}'),
+                  child: IconButton.outlined(
+                      tooltip: '태그 선택',
+                      onPressed: _openTagPicker,
+                      icon: const Icon(Icons.tune)),
                 ),
-              ),
-            );
-          },
+              ]),
+            )),
+            FutureBuilder<List<GalleryPostItem>>(
+              future: _posts,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const SliverToBoxAdapter(
+                      child: Padding(
+                    padding: EdgeInsets.all(32),
+                    child: Center(child: CircularProgressIndicator()),
+                  ));
+                }
+                if (snapshot.hasError || (snapshot.data?.isEmpty ?? true)) {
+                  return SliverToBoxAdapter(
+                      child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(children: [
+                      Icon(Icons.photo_library_outlined,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          size: 36),
+                      const SizedBox(height: 12),
+                      Text(
+                          snapshot.hasError
+                              ? '공유 이미지를 불러오지 못했습니다.'
+                              : '조건에 맞는 공유 이미지가 없습니다.',
+                          textAlign: TextAlign.center),
+                      if (snapshot.hasError)
+                        TextButton(
+                            onPressed: _refresh, child: const Text('다시 불러오기')),
+                    ]),
+                  ));
+                }
+                final posts = snapshot.data!;
+                return SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(2, 0, 2, 24),
+                  sliver: SliverGrid(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            childAspectRatio: 1,
+                            crossAxisSpacing: 2,
+                            mainAxisSpacing: 2),
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => _GalleryPostCard(
+                          key: ValueKey(posts[index].id),
+                          post: posts[index],
+                          apiClient: widget.apiClient,
+                          onImported: widget.onImported),
+                      childCount: posts.length,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
         ),
-      ],
-    ),
-  );
-
+      );
 }
 
 class _GalleryPostCard extends StatefulWidget {
@@ -875,7 +1103,8 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
     });
     String? path;
     try {
-      final store = LocalImageStore(scope: widget.apiClient.storageScope,
+      final store = LocalImageStore(
+          scope: widget.apiClient.storageScope,
           ownerId: widget.apiClient.userId);
       final url = await widget.apiClient.getGalleryDownloadUrl(widget.post.id);
       path = await store.downloadShared(
@@ -884,13 +1113,16 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
       final downloadCountUpdate = _recordDownload();
       if (!mounted) return;
       setState(() => _loadingPreview = false);
-      final ratio =
-          await Navigator.of(context).push<ImageRatioSettings>(MaterialPageRoute(
-        builder: (_) =>
-            WallpaperPreviewPage(filePath: path!, finishLabel: '내 보관함에 저장',
-                title: widget.post.title, uploader: widget.post.username,
-                tags: widget.post.tags,
-                downloadCount: _downloadCount, downloadCountUpdate: downloadCountUpdate),
+      final ratio = await Navigator.of(context)
+          .push<ImageRatioSettings>(MaterialPageRoute(
+        builder: (_) => WallpaperPreviewPage(
+            filePath: path!,
+            finishLabel: '내 보관함에 저장',
+            title: widget.post.title,
+            uploader: widget.post.username,
+            tags: widget.post.tags,
+            downloadCount: _downloadCount,
+            downloadCountUpdate: downloadCountUpdate),
       ));
       if (ratio == null || !mounted) return;
       final bytes = await File(path).readAsBytes();
@@ -949,7 +1181,8 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
 
   Future<int> _recordDownload() async {
     try {
-      final count = await widget.apiClient.recordGalleryDownload(widget.post.id);
+      final count =
+          await widget.apiClient.recordGalleryDownload(widget.post.id);
       if (mounted) setState(() => _downloadCount = count);
       return count;
     } catch (_) {
@@ -981,46 +1214,73 @@ class _GalleryPostCardState extends State<_GalleryPostCard> {
 
   @override
   Widget build(BuildContext context) => Material(
-    color: Theme.of(context).colorScheme.surfaceContainerHighest,
-    clipBehavior: Clip.antiAlias,
-    child: InkWell(
-      onTap: _importing ? null : _import,
-      child: Stack(fit: StackFit.expand, children: [
-        _previewImage(),
-        Positioned(top: 6, right: 6, left: 6, child: Align(
-          alignment: Alignment.topRight,
-          child: Tooltip(message: '다운로드 $_downloadCount회',
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(color: Colors.black.withValues(alpha: .6),
-                  borderRadius: BorderRadius.circular(20)),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.download_outlined, size: 14, color: Colors.white),
-                const SizedBox(width: 4),
-                Flexible(child: Text('$_downloadCount',
-                    key: ValueKey('gallery-download-${widget.post.id}'),
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white, fontSize: 12))),
-              ]),
-            ),
-          ),
-        )),
-        Positioned(bottom: 0, left: 0, right: 0, child: ColoredBox(
-          color: Colors.black.withValues(alpha: .65),
-          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-            child: Text(widget.post.title, maxLines: 1, overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white, fontSize: 14,
-                  fontWeight: FontWeight.w500)),
-          ),
-        )),
-        if (_loadingPreview) Positioned.fill(child: ColoredBox(color: Colors.black38,
-          child: Center(child: Semantics(label: '이미지 불러오는 중',
-              child: const CircularProgressIndicator(color: Colors.white))))),
-      ]),
-    ),
-  );
-
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: _importing ? null : _import,
+          child: Stack(fit: StackFit.expand, children: [
+            _previewImage(),
+            Positioned(
+                top: 6,
+                right: 6,
+                left: 6,
+                child: Align(
+                  alignment: Alignment.topRight,
+                  child: Tooltip(
+                    message: '다운로드 $_downloadCount회',
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: .6),
+                          borderRadius: BorderRadius.circular(20)),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        const Icon(Icons.download_outlined,
+                            size: 14, color: Colors.white),
+                        const SizedBox(width: 4),
+                        Flexible(
+                            child: Text('$_downloadCount',
+                                key: ValueKey(
+                                    'gallery-download-${widget.post.id}'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 12))),
+                      ]),
+                    ),
+                  ),
+                )),
+            Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: ColoredBox(
+                  color: Colors.black.withValues(alpha: .65),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+                    child: Text(widget.post.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500)),
+                  ),
+                )),
+            if (_loadingPreview)
+              Positioned.fill(
+                  child: ColoredBox(
+                      color: Colors.black38,
+                      child: Center(
+                          child: Semantics(
+                              label: '이미지 불러오는 중',
+                              child: const CircularProgressIndicator(
+                                  color: Colors.white))))),
+          ]),
+        ),
+      );
 }
 
 /// App-owned preview. Unlike the Android system preview, this keeps our UI visible.
@@ -1045,148 +1305,181 @@ class HomeWallpaperPreviewPage extends StatefulWidget {
 
 class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
   bool _busy = false;
-  WallpaperTarget _target = WallpaperTarget.home;
+  bool _choosingWallpaper = false;
+  late final Future<Map<Object?, Object?>>? _layers =
+      widget.image.isLive2D ? widget.store.live2DLayers(widget.image.id) : null;
 
-  Future<void> _apply() async {
-    setState(() => _busy = true);
+  Future<void> _wallpaperSettings() async {
+    if (_busy || _choosingWallpaper) return;
+    _choosingWallpaper = true;
     try {
-      await widget.store.applyWallpaper(widget.image.id, target: _target);
+      final bool confirmed;
+      if (widget.image.isLive2D) {
+        final target = await Live2DService.activeTarget();
+        if (!mounted) return;
+        if (target == null) {
+          final reconnect = await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                      title: const Text('Live 2D 연결'),
+                      content: const Text(
+                          'Android에서 Live 2D 연결이 해제되어 있습니다. Live 2D 적용에서 화면을 선택하면 이후에는 바로 등록됩니다.'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(context, false),
+                            child: const Text('취소')),
+                        FilledButton(onPressed: () => Navigator.pop(context, true),
+                            child: const Text('Live 2D 적용')),
+                      ]));
+          if (reconnect != true || !mounted) return;
+          setState(() => _busy = true);
+          confirmed = await widget.store.activateLive2D(widget.image.id);
+        } else {
+          setState(() => _busy = true);
+          confirmed = await widget.store.registerWallpaper(widget.image.id, target: target);
+        }
+      } else {
+        final target = await showDialog<WallpaperTarget>(
+            context: context, builder: (_) => const WallpaperApplyDialog());
+        if (target == null || !mounted) return;
+        setState(() => _busy = true);
+        confirmed = await widget.store.registerWallpaper(widget.image.id, target: target);
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('배경화면을 적용했습니다.')));
-    } on PlatformException catch (e) {
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(
+            content: Text(confirmed ? '배경화면을 등록했습니다.' : '배경화면 등록을 취소했습니다.')));
+    } on PlatformException catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message ?? '$e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(error.message ?? '배경화면을 등록하지 못했습니다.')));
       }
-    } catch (e) {
+    } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('적용하지 못했습니다: $e')));
+            .showSnackBar(SnackBar(content: Text('배경화면을 등록하지 못했습니다: $error')));
+      }
+    } finally {
+      _choosingWallpaper = false;
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _original() => Image.file(File(widget.image.path),
+      key: const ValueKey('wallpaper-preview-image'),
+      width: double.infinity, height: double.infinity, fit: BoxFit.contain);
+
+  Future<void> _changeLiveTarget() async {
+    if (_busy || _choosingWallpaper) return;
+    setState(() => _busy = true);
+    try {
+      final confirmed = await widget.store.activateLive2D(widget.image.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(content: Text(confirmed
+            ? 'Android에서 선택한 화면에 Live 2D를 적용했습니다.'
+            : '적용 화면 변경을 취소했습니다.')));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+            error is PlatformException ? error.message ?? '적용 화면을 변경하지 못했습니다.'
+                : '적용 화면을 변경하지 못했습니다.')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
+  Widget _preview() => widget.image.isLive2D
+      ? FutureBuilder<Map<Object?, Object?>>(
+          future: _layers,
+          builder: (_, snapshot) {
+            final layers = snapshot.data;
+            if (layers == null) {
+              return snapshot.hasError
+                  ? _original()
+                  : const Center(child: CircularProgressIndicator());
+            }
+            return Center(
+                child: AspectRatio(
+                    aspectRatio: widget.image.width / widget.image.height,
+                    child: Live2DPreview(
+                        backgroundPath: layers['backgroundPath']! as String,
+                        foregroundPath: layers['foregroundPath']! as String)));
+          })
+      : _original();
+
   @override
-  Widget build(BuildContext context) => DeviceDisplayBuilder(
-        builder: (context, display) => AnnotatedRegion<SystemUiOverlayStyle>(
+  Widget build(BuildContext context) => PopScope(
+      canPop: !_busy,
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
           value: AppTheme.overlayFor(Brightness.dark),
           child: Scaffold(
-            extendBody: false,
-            backgroundColor: Colors.black,
-            bottomNavigationBar: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xDD20232B),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<WallpaperTarget>(
-                          dropdownColor: const Color(0xFF20232B),
-                          value: _target,
-                          style: TextStyle(color: Colors.white),
-                          isExpanded: true,
-                          items: const [
-                            DropdownMenuItem(
-                              value: WallpaperTarget.home,
-                              child: Text('홈 화면'),
-                            ),
-                            DropdownMenuItem(
-                              value: WallpaperTarget.lock,
-                              child: Text('잠금 화면'),
-                            ),
-                            DropdownMenuItem(
-                              value: WallpaperTarget.both,
-                              child: Text('홈 화면 및 잠금 화면'),
-                            ),
-                          ],
-                          onChanged: _busy
-                              ? null
-                              : (value) {
-                                  if (value != null) {
-                                    setState(() => _target = value);
-                                  }
-                                },
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: _busy ? null : _apply,
-                        icon: _busy
-                            ? const SizedBox.square(
-                                dimension: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : Icon(Icons.wallpaper),
-                        label: Text('배경화면 설정'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            body: SafeArea(
-              bottom: false,
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: Image.file(
-                      File(widget.image.path),
-                      key: const ValueKey('wallpaper-preview-image'),
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                  Positioned(
+              backgroundColor: Colors.black,
+              body: SafeArea(
+                  child: Stack(children: [
+                Positioned.fill(
+                    child: InteractiveViewer(
+                        key: const ValueKey('library-preview-viewer'),
+                        maxScale: 8,
+                        child: Center(child: _preview()))),
+                Positioned(
                     top: 8,
                     left: 8,
                     child: IconButton.filledTonal(
-                      onPressed: () => Navigator.pop(context),
-                      icon: Icon(Icons.arrow_back),
-                    ),
-                  ),
-                  Positioned(
+                        tooltip: '미리보기 닫기',
+                        onPressed: _busy ? null : () => Navigator.pop(context),
+                        icon: const Icon(Icons.arrow_back))),
+                Positioned(
                     top: 8,
                     right: 8,
-                    child: PopupMenuButton<String>(
-                      icon: Icon(Icons.more_vert, color: Colors.white),
-                      onSelected: (action) {
-                        Navigator.pop(context);
-                        switch (action) {
-                          case 'edit':
-                            widget.onEdit();
-                          case 'share':
-                            widget.onShare();
-                          case 'delete':
-                            widget.onDelete();
-                        }
-                      },
-                      itemBuilder: (_) => [
-                        const PopupMenuItem(value: 'edit', child: Text('수정')),
-                        PopupMenuItem(
-                          value: 'share',
-                          child: Text(widget.image.isShared ? '공유 취소' : '공유'),
-                        ),
-                        const PopupMenuItem(value: 'delete', child: Text('삭제')),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      IconButton.filledTonal(
+                          key: const ValueKey('preview-wallpaper-settings'),
+                          tooltip: '배경화면 설정',
+                          onPressed: _busy ? null : _wallpaperSettings,
+                          icon: _busy
+                              ? const SizedBox.square(
+                                  dimension: 20,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.wallpaper)),
+                      PopupMenuButton<String>(
+                          enabled: !_busy,
+                          tooltip: '이미지 메뉴',
+                          icon:
+                              const Icon(Icons.more_vert, color: Colors.white),
+                          onSelected: (action) {
+                            if (action == 'live-target') {
+                              _changeLiveTarget();
+                              return;
+                            }
+                            Navigator.pop(context);
+                            switch (action) {
+                              case 'edit':
+                                widget.onEdit();
+                              case 'share':
+                                widget.onShare();
+                              case 'delete':
+                                widget.onDelete();
+                            }
+                          },
+                          itemBuilder: (_) => [
+                                if (widget.image.isLive2D)
+                                  const PopupMenuItem(value: 'live-target',
+                                      child: Text('Live 2D 적용 화면 변경')),
+                                if (!widget.image.isShared)
+                                  const PopupMenuItem(
+                                      value: 'edit', child: Text('수정')),
+                                PopupMenuItem(
+                                    value: 'share',
+                                    child: Text(widget.image.isShared
+                                        ? '공유 취소'
+                                        : '공유')),
+                                const PopupMenuItem(
+                                    value: 'delete', child: Text('삭제')),
+                              ]),
+                    ])),
+              ])))));
 }

@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.ClipData
 import android.content.ActivityNotFoundException
-import android.app.RecoverableSecurityException
 import androidx.core.content.FileProvider
 import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
@@ -22,6 +21,7 @@ import android.util.DisplayMetrics
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.EventChannel
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -30,10 +30,7 @@ import java.io.FilterInputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
-import java.util.TimeZone
 import java.util.UUID
 import java.security.MessageDigest
 import java.util.concurrent.ExecutorService
@@ -61,24 +58,29 @@ class MainActivity : FlutterActivity() {
     }
     private var pendingDownload: PendingDownload? = null
     private var pendingLocalSave: PendingLocalSave? = null
-    private val galleryStore by lazy { GalleryLocalImageStore(applicationContext) }
-    private data class PendingGalleryRead(
-        val ownerId: String,
-        val legacyScope: String,
-        val result: MethodChannel.Result,
-    )
-    private var pendingGalleryRead: PendingGalleryRead? = null
-    private data class PendingGalleryImport(
-        val ownerId: String,
-        val arguments: Map<*, *>?,
-        val result: MethodChannel.Result,
-    )
-    private var pendingGalleryImport: PendingGalleryImport? = null
-    private var pendingGalleryAction: (() -> Unit)? = null
-    private var pendingGalleryResult: MethodChannel.Result? = null
-
+    @Volatile private var pendingLiveActivation: MethodChannel.Result? = null
+    private val imageStore by lazy { PrivateImageStore(File(filesDir, "image_library")) }
+    private val legacyGalleryImporter by lazy { LegacyGalleryImporter(applicationContext, imageStore) }
+    private val live2DStore by lazy { Live2DStore(applicationContext) }
+    private var tiltEvents: EventChannel.EventSink? = null
+    private val tiltSensor by lazy {
+        TiltSensor(applicationContext, { windowManager.defaultDisplay.rotation }) { x, y ->
+            tiltEvents?.success(listOf(x.toDouble(), y.toDouble()))
+        }
+    }
+    private data class PendingLegacyMigration(val ownerId: String, val scope: String,
+        val result: MethodChannel.Result, val summary: LegacyImageMigration.Result? = null)
+    private var pendingLegacyMigration: PendingLegacyMigration? = null
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, "live_layer/tilt")
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+                    tiltEvents = events
+                    tiltSensor.start()
+                }
+                override fun onCancel(arguments: Any?) { tiltSensor.stop(); tiltEvents = null }
+            })
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "live_layer/config")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -104,6 +106,51 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "live_layer/wallpaper")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "getActiveLive2DTarget" -> result.success(activeLiveWallpaperFlags())
+                    "cloneLive2DDraft" -> ioExecutor.execute {
+                        try {
+                            val draft = live2DStore.cloneDraft(call.argument<String>("draftId") ?: error("분리 ID가 없습니다."))
+                            runOnUiThread { result.success(draft) }
+                        } catch (error: Exception) { runOnUiThread { result.error("live2d_failed", error.message, null) } }
+                    }
+                    "activateLive2DDraft" -> ioExecutor.execute {
+                        try {
+                            val manifest = live2DStore.activateDraft(call.argument<String>("draftId") ?: error("분리 ID가 없습니다."))
+                            runOnUiThread { launchLiveActivation(manifest, result,
+                                allowDirect = call.argument<Boolean>("showSettings") != true) }
+                        } catch (error: Exception) {
+                            runOnUiThread { result.error("live2d_failed", error.message, null) }
+                        }
+                    }
+                    "splitLive2D" -> ioExecutor.execute {
+                        try {
+                            val source = File(call.argument<String>("sourcePath") ?: error("이미지가 없습니다."))
+                            val draft = live2DStore.split(source)
+                            runOnUiThread { result.success(draft) }
+                        } catch (error: Exception) {
+                            runOnUiThread { result.error("live2d_failed", error.cause?.message ?: error.message, null) }
+                        }
+                    }
+                    "editLive2D" -> ioExecutor.execute {
+                        try {
+                            val draft = live2DStore.edit(
+                                call.argument<String>("draftId") ?: error("분리 ID가 없습니다."),
+                                File(call.argument<String>("backgroundPath") ?: error("배경 이미지가 없습니다.")),
+                                File(call.argument<String>("foregroundPath") ?: error("전경 이미지가 없습니다.")),
+                            )
+                            runOnUiThread { result.success(draft) }
+                        } catch (error: Exception) {
+                            runOnUiThread { result.error("live2d_failed", error.message, null) }
+                        }
+                    }
+                    "discardLive2D" -> ioExecutor.execute {
+                        try {
+                            live2DStore.discard(call.argument<String>("draftId") ?: error("분리 ID가 없습니다."))
+                            runOnUiThread { result.success(null) }
+                        } catch (error: Exception) {
+                            runOnUiThread { result.error("live2d_failed", error.message, null) }
+                        }
+                    }
                     "getDisplaySize" -> {
                         val size = deviceDisplaySize()
                         result.success(mapOf("width" to size.x, "height" to size.y))
@@ -162,12 +209,65 @@ class MainActivity : FlutterActivity() {
                         require(!ownerId.isNullOrBlank()) { "로그인 사용자 ID가 필요합니다." }
                     }
                     when (call.method) {
+                        "attachLocalLive2D" -> storageMutation(result) {
+                            val id = call.argument<String>("id") ?: error("이미지 ID가 없습니다.")
+                            val item = imageStore.requireEditable(ownerId!!, id)
+                            live2DStore.attach(ownerId, id, call.argument<String>("draftId") ?: error("분리 ID가 없습니다."))
+                            try {
+                                if (item.optString("mode") != "live2d") {
+                                    imageStore.update(ownerId, id) { it.put("mode", "live2d") }
+                                }
+                            } catch (error: Exception) {
+                                live2DStore.delete(ownerId, id)
+                                throw error
+                            }
+                        }
+                        "getLocalLive2D" -> ioExecutor.execute {
+                            try {
+                                val id = call.argument<String>("id") ?: error("이미지 ID가 없습니다.")
+                                imageStore.item(ownerId!!, id)
+                                val layers = live2DStore.layers(ownerId, id)
+                                runOnUiThread { result.success(layers) }
+                            } catch (error: Exception) {
+                                runOnUiThread { result.error("live2d_failed", error.message, null) }
+                            }
+                        }
+                        "getLocalLive2DDraft" -> ioExecutor.execute {
+                            try {
+                                val id = call.argument<String>("id") ?: error("이미지 ID가 없습니다.")
+                                val item = imageStore.requireEditable(ownerId!!, id)
+                                require(item.optString("mode") == "live2d") { "Live 2D 이미지가 아닙니다." }
+                                val draft = live2DStore.editableLayers(ownerId, id)
+                                runOnUiThread { result.success(draft) }
+                            } catch (error: Exception) { runOnUiThread { result.error("image_edit_failed", error.message, null) } }
+                        }
+                        "saveLocalImageEdits" -> ioExecutor.execute {
+                            try {
+                                val id = call.argument<String>("id") ?: error("이미지 ID가 없습니다.")
+                                val draftId = call.argument<String>("draftId")
+                                val updated = imageStore.saveEdits(ownerId!!, id,
+                                    File(call.argument<String>("sourcePath") ?: error("이미지가 없습니다.")),
+                                    call.argument<String>("title") ?: error("이름이 없습니다."),
+                                    call.argument<List<String>>("tags") ?: error("태그가 없습니다."),
+                                    call.argument<Int>("width") ?: 0, call.argument<Int>("height") ?: 0,
+                                    JSONObject(WallpaperRatio.fromMap(call.argument<Map<*, *>>("ratio")).toMap()),
+                                    draftId != null,
+                                    if (draftId == null) null else { destination -> live2DStore.copyDraftLayers(draftId, destination) })
+                                runOnUiThread { result.success(updated) }
+                            } catch (error: Exception) { runOnUiThread { result.error("image_edit_failed", error.message, null) } }
+                        }
+                        "activateLocalLive2D" -> prepareOwnedLiveWallpaper(ownerId!!,
+                            call.argument<String>("id"), result, call.argument<Any>("target"),
+                            forcePreview = call.argument<Boolean>("showSettings") == true)
+                        "applyLocalLive2D" -> applyOwnedLiveWallpaper(ownerId!!,
+                            call.argument<String>("id"), call.argument<Any>("target"), result)
                         "saveImageToGallery" -> enqueueLocalImageSave(
                             call.argument<String>("sourcePath"),
                             call.argument<String>("fileName"),
                             result,
                         )
-                        "listLocalImages" -> listGalleryImages(ownerId!!, scope, result)
+                        "listLocalImages" -> listPrivateImages(ownerId!!, scope, result)
+                        "migrateGalleryImages" -> migrateLegacyImages(ownerId!!, scope, result)
                         "getLibraryOrder" -> {
                             val value = JSONObject(getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE)
                                 .getString("order_$scope", "{}") ?: "{}")
@@ -186,6 +286,10 @@ class MainActivity : FlutterActivity() {
                             ioExecutor.execute {
                                 try {
                                     val item = localWallpaperItem(ownerId!!, call.argument<String>("id"))
+                                    if (item.optString("mode") == "live2d") {
+                                        applyOwnedLiveWallpaper(ownerId, item.getString("id"), call.argument<Any>("target"), result)
+                                        return@execute
+                                    }
                                     runOnUiThread {
                                         applyLocalStaticWallpaper(
                                             File(item.getString("path")).canonicalPath,
@@ -198,48 +302,52 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                         "downloadSharedImage" -> downloadSharedImage(call.arguments as? Map<*, *>, scope, result)
-                        "importLocalImage" -> galleryImport(
+                        "importLocalImage" -> privateImport(
                             ownerId!!, call.arguments as? Map<*, *>, result)
-                        "markLocalImageShared" -> galleryMutation(result) {
+                        "markLocalImageShared" -> storageMutation(result) {
                             val args = call.arguments as? Map<*, *>
                             val id = args?.get("id") as? String ?: error("이미지 ID가 없습니다.")
                             val project = args["cloudProjectId"] as? String ?: error("프로젝트 ID가 없습니다.")
                             val post = args["galleryPostId"] as? String ?: error("공유 ID가 없습니다.")
-                            galleryStore.update(ownerId!!, id) {
+                            imageStore.update(ownerId!!, id) {
                                 it.put("cloudProjectId", project).put("galleryPostId", post)
                             }
                         }
-                        "markLocalImageUnshared" -> galleryMutation(result) {
-                            galleryStore.update(ownerId!!, call.argument<String>("id") ?: error("이미지 ID가 없습니다.")) {
+                        "markLocalImageUnshared" -> storageMutation(result) {
+                            imageStore.update(ownerId!!, call.argument<String>("id") ?: error("이미지 ID가 없습니다.")) {
                                 it.put("cloudProjectId", JSONObject.NULL).put("galleryPostId", JSONObject.NULL)
                             }
                         }
-                        "updateLocalImageTag" -> galleryMutation(result) {
+                        "updateLocalImageTag" -> storageMutation(result) {
                             val args = call.arguments as? Map<*, *>
                             val id = args?.get("id") as? String ?: error("이미지 ID가 없습니다.")
+                            imageStore.requireEditable(ownerId!!, id)
                             val tags = (args["tags"] as? List<*>)?.filterIsInstance<String>()
                                 ?.filter { it.isNotBlank() } ?: error("태그가 없습니다.")
                             require(tags.isNotEmpty())
-                            galleryStore.update(ownerId!!, id) {
+                            imageStore.update(ownerId!!, id) {
                                 it.put("tags", JSONArray(tags)).put("tag", tags.first())
                             }
                         }
-                        "updateLocalImageDetails" -> galleryMutation(result) {
+                        "updateLocalImageDetails" -> storageMutation(result) {
                             val args = call.arguments as? Map<*, *>
                             val id = args?.get("id") as? String ?: error("이미지 ID가 없습니다.")
+                            imageStore.requireEditable(ownerId!!, id)
                             val title = (args["title"] as? String)?.trim() ?: error("이름이 없습니다.")
                             val tags = (args["tags"] as? List<*>)?.filterIsInstance<String>()
                                 ?.filter { it.isNotBlank() } ?: error("태그가 없습니다.")
                             require(title.isNotBlank() && title.length <= 160 && tags.isNotEmpty())
-                            galleryStore.update(ownerId!!, id) {
+                            imageStore.update(ownerId!!, id) {
                                 it.put("title", title).put("tags", JSONArray(tags)).put("tag", tags.first())
                                 if (args["ratio"] is Map<*, *>) {
                                     it.put("ratio", JSONObject(WallpaperRatio.fromMap(args["ratio"] as Map<*, *>).toMap()))
                                 }
                             }
                         }
-                        "deleteLocalImage" -> galleryMutation(result) {
-                            galleryStore.delete(ownerId!!, call.argument<String>("id") ?: error("이미지 ID가 없습니다."))
+                        "deleteLocalImage" -> storageMutation(result) {
+                            val id = call.argument<String>("id") ?: error("이미지 ID가 없습니다.")
+                            imageStore.delete(ownerId!!, id)
+                            live2DStore.delete(ownerId, id)
                         }
                         else -> result.notImplemented()
                     }
@@ -250,20 +358,23 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        tiltSensor.stop()
+        tiltEvents = null
         pendingDownload?.result?.error("cancelled", "다운로드 요청이 취소되었습니다.", null)
         pendingDownload = null
         pendingLocalSave?.result?.error("cancelled", "로컬 저장 요청이 취소되었습니다.", null)
         pendingLocalSave = null
-        pendingGalleryRead?.result?.error("cancelled", "사진 조회가 취소되었습니다.", null)
-        pendingGalleryRead = null
-        pendingGalleryImport?.result?.error("cancelled", "이미지 저장이 취소되었습니다.", null)
-        pendingGalleryImport = null
-        pendingGalleryAction = null
-        pendingGalleryResult?.error("cancelled", "이미지 수정이 취소되었습니다.", null)
-        pendingGalleryResult = null
+        pendingLiveActivation?.error("cancelled", "Live 2D 활성화가 취소되었습니다.", null)
+        pendingLiveActivation = null
+        pendingLegacyMigration?.result?.error("cancelled", "이미지 이전 요청이 취소되었습니다.", null)
+        pendingLegacyMigration = null
         ioExecutor.shutdownNow()
         super.onDestroy()
     }
+
+    override fun onPause() { tiltSensor.stop(); super.onPause() }
+
+    override fun onResume() { super.onResume(); if (tiltEvents != null) tiltSensor.start() }
 
     override fun onRequestPermissionsResult(
         requestCode: Int,
@@ -271,25 +382,11 @@ class MainActivity : FlutterActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == GALLERY_WRITE_PERMISSION_REQUEST) {
-            val pending = pendingGalleryImport ?: return
-            pendingGalleryImport = null
-            if (hasGalleryWritePermission()) {
-                galleryImport(pending.ownerId, pending.arguments, pending.result)
-            } else {
-                pending.result.error("storage_permission_denied", "사진을 저장하려면 저장소 권한이 필요합니다.", null)
-            }
-            return
-        }
         if (requestCode == GALLERY_READ_PERMISSION_REQUEST) {
-            val pending = pendingGalleryRead ?: return
-            pendingGalleryRead = null
-            if (hasGalleryReadPermission()) {
-                listGalleryImages(pending.ownerId, pending.legacyScope, pending.result)
-            } else {
-                pending.result.error("gallery_permission_denied",
-                    "자동 복원을 위해 사진 접근 권한에서 '모든 사진 허용'을 선택해 주세요.", null)
-            }
+            val pending = pendingLegacyMigration ?: return
+            pendingLegacyMigration = null
+            if (hasLegacyMigrationPermission()) migrateLegacyImages(pending.ownerId, pending.scope, pending.result)
+            else pending.result.error("migration_permission_denied", "기존 이미지 이전을 위해 사진 접근 권한이 필요합니다. 새 이미지 저장에는 권한이 필요하지 않습니다.", null)
             return
         }
         if (requestCode != DOWNLOAD_PERMISSION_REQUEST) return
@@ -314,58 +411,19 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun hasGalleryWritePermission(): Boolean = Build.VERSION.SDK_INT >= 29 ||
-        Build.VERSION.SDK_INT < 23 || checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
-            PackageManager.PERMISSION_GRANTED
-
-    private fun hasGalleryReadPermission(): Boolean = hasGalleryWritePermission() && when {
-        Build.VERSION.SDK_INT >= 33 -> checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) ==
-            PackageManager.PERMISSION_GRANTED
-        Build.VERSION.SDK_INT >= 23 -> checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) ==
-            PackageManager.PERMISSION_GRANTED
-        else -> true
-    }
-
-    private fun listGalleryImages(ownerId: String, legacyScope: String, result: MethodChannel.Result) {
-        if (!hasGalleryReadPermission()) {
-            if (pendingGalleryRead != null) {
-                result.error("gallery_busy", "이미지 읽기 권한을 확인하는 중입니다.", null)
-                return
-            }
-            pendingGalleryRead = PendingGalleryRead(ownerId, legacyScope, result)
-            if (Build.VERSION.SDK_INT >= 34) {
-                requestPermissions(arrayOf(Manifest.permission.READ_MEDIA_IMAGES,
-                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED), GALLERY_READ_PERMISSION_REQUEST)
-            } else if (Build.VERSION.SDK_INT <= 28) {
-                requestPermissions(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE), GALLERY_READ_PERMISSION_REQUEST)
-            } else {
-                requestPermissions(arrayOf(
-                    if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES
-                    else Manifest.permission.READ_EXTERNAL_STORAGE), GALLERY_READ_PERMISSION_REQUEST)
-            }
-            return
-        }
+    private fun listPrivateImages(ownerId: String, legacyScope: String, result: MethodChannel.Result) {
         ioExecutor.execute {
             try {
-                val images = galleryStore.list(ownerId, legacyScope)
+                runCatching { legacyGalleryImporter.migrate(ownerId, legacyScope) }
+                    .onFailure { android.util.Log.w("PrivateImages", "Legacy migration can be retried", it) }
+                val images = imageStore.list(ownerId)
                 runOnUiThread { result.success(images) }
             } catch (error: Exception) {
-                runOnUiThread { result.error("gallery_read_failed", error.message, null) }
+                runOnUiThread { result.error("local_read_failed", error.message, null) }
             }
         }
     }
-
-    private fun galleryImport(ownerId: String, arguments: Map<*, *>?, result: MethodChannel.Result) {
-        if (!hasGalleryWritePermission()) {
-            if (pendingGalleryImport != null) {
-                result.error("gallery_busy", "이미지 저장 권한을 확인하는 중입니다.", null)
-                return
-            }
-            pendingGalleryImport = PendingGalleryImport(ownerId, arguments, result)
-            requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), GALLERY_WRITE_PERMISSION_REQUEST)
-            return
-        }
+    private fun privateImport(ownerId: String, arguments: Map<*, *>?, result: MethodChannel.Result) {
         ioExecutor.execute {
             try {
                 val source = File(arguments?.get("sourcePath") as? String ?: error("이미지 경로가 없습니다."))
@@ -376,7 +434,7 @@ class MainActivity : FlutterActivity() {
                 val height = (arguments["height"] as? Number)?.toInt() ?: error("이미지 높이가 없습니다.")
                 require(title.isNotBlank() && width > 0 && height > 0)
                 val ratio = JSONObject(WallpaperRatio.fromMap(arguments["ratio"] as? Map<*, *>).toMap())
-                val image = galleryStore.importImage(ownerId, source, source.name, title, tags, width, height,
+                val image = imageStore.importImage(ownerId, source, arguments["fileName"] as? String ?: source.name, title, tags, width, height,
                     arguments["mode"] as? String ?: "original", ratio)
                 runOnUiThread { result.success(image) }
             } catch (error: Exception) {
@@ -385,58 +443,91 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    /** Requests user consent for modifying photos created before a reinstall (Android 10+). */
-    private fun galleryMutation(result: MethodChannel.Result, action: () -> Unit) {
-        fun attempt(retryAllowed: Boolean) {
-            ioExecutor.execute {
-                try {
-                    action()
-                    runOnUiThread { result.success(null) }
-                } catch (need: GalleryLocalImageStore.MediaAccessRequired) {
-                    if (!retryAllowed || pendingGalleryAction != null) {
-                        runOnUiThread { result.error("media_permission_required", "사진 수정 권한이 필요합니다.", null) }
-                        return@execute
-                    }
-                    runOnUiThread {
-                        try {
-                            val sender = if (Build.VERSION.SDK_INT >= 30) {
-                                if (need.deleting) MediaStore.createDeleteRequest(contentResolver, listOf(need.mediaUri)).intentSender
-                                else MediaStore.createWriteRequest(contentResolver, listOf(need.mediaUri)).intentSender
-                            } else if (Build.VERSION.SDK_INT == 29 && need.cause is RecoverableSecurityException) {
-                                (need.cause as RecoverableSecurityException).userAction.actionIntent.intentSender
-                            } else {
-                                result.error("media_permission_required", "갤러리에서 사진 수정 권한을 허용해 주세요.", null)
-                                return@runOnUiThread
-                            }
-                            pendingGalleryAction = { attempt(false) }
-                            pendingGalleryResult = result
-                            startIntentSenderForResult(sender, GALLERY_EDIT_PERMISSION_REQUEST,
-                                null, 0, 0, 0)
-                        } catch (error: Exception) {
-                            pendingGalleryAction = null
-                            pendingGalleryResult = null
-                            result.error("media_permission_failed", error.message, null)
-                        }
-                    }
-                } catch (error: Exception) {
-                    runOnUiThread { result.error("gallery_update_failed", error.message, null) }
-                }
-            }
+    private fun storageMutation(result: MethodChannel.Result, action: () -> Unit) {
+        ioExecutor.execute {
+            try { action(); runOnUiThread { result.success(null) } }
+            catch (error: Exception) { runOnUiThread { result.error("local_update_failed", error.message, null) } }
         }
-        attempt(true)
     }
 
+    private fun migrateLegacyImages(ownerId: String, scope: String, result: MethodChannel.Result) {
+        if (pendingLegacyMigration != null) {
+            result.error("migration_busy", "기존 이미지 이전이 진행 중입니다.", null)
+            return
+        }
+        if (!hasLegacyMigrationPermission()) {
+            pendingLegacyMigration = PendingLegacyMigration(ownerId, scope, result)
+            val permissions = if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+                else if (Build.VERSION.SDK_INT <= 28) arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+            requestPermissions(permissions, GALLERY_READ_PERMISSION_REQUEST)
+            return
+        }
+        ioExecutor.execute {
+            try {
+                val summary = legacyGalleryImporter.migrate(ownerId, scope, force = true)
+                val legacyConsent = legacyGalleryImporter.deletionConsent(summary.pending.firstOrNull())
+                runOnUiThread {
+                    if (summary.pending.isNotEmpty() && (Build.VERSION.SDK_INT >= 30 || legacyConsent != null)) {
+                        try {
+                            pendingLegacyMigration = PendingLegacyMigration(ownerId, scope, result, summary)
+                            val sender = if (Build.VERSION.SDK_INT >= 30) MediaStore.createDeleteRequest(contentResolver,
+                                summary.pending.map { Uri.parse(it) }).intentSender else legacyConsent!!
+                            startIntentSenderForResult(sender,
+                                GALLERY_EDIT_PERMISSION_REQUEST, null, 0, 0, 0)
+                        } catch (error: Exception) {
+                            pendingLegacyMigration = null
+                            result.success(migrationSummary(summary))
+                        }
+                    } else result.success(migrationSummary(summary))
+                }
+            } catch (error: Exception) { runOnUiThread { result.error("migration_failed", error.message, null) } }
+        }
+    }
+
+    private fun finishLegacyMigration(approved: Boolean) {
+        val pending = pendingLegacyMigration ?: return
+        pendingLegacyMigration = null
+        val summary = pending.summary ?: return
+        if (!approved) { pending.result.success(migrationSummary(summary)); return }
+        ioExecutor.execute {
+            try {
+                val refreshed = legacyGalleryImporter.migrate(pending.ownerId, pending.scope, force = true)
+                val total = refreshed.copy(imported = summary.imported + refreshed.imported,
+                    removed = summary.removed + (if (Build.VERSION.SDK_INT >= 30) summary.pending.size else 0) + refreshed.removed)
+                runOnUiThread { pending.result.success(migrationSummary(total)) }
+            } catch (error: Exception) { runOnUiThread { pending.result.error("migration_failed", error.message, null) } }
+        }
+    }
+
+    private fun hasLegacyMigrationPermission(): Boolean = legacyGalleryImporter.hasReadPermission() &&
+        (Build.VERSION.SDK_INT >= 29 || checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED)
+
+    private fun migrationSummary(summary: LegacyImageMigration.Result): Map<String, Any> = mapOf(
+        "imported" to summary.imported, "removed" to summary.removed,
+        "remaining" to summary.pending.size, "failed" to summary.failed)
     @Deprecated("Used for explicit gallery write authorization")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == GALLERY_EDIT_PERMISSION_REQUEST) {
-            val continuation = pendingGalleryAction
-            val pendingResult = pendingGalleryResult
-            pendingGalleryAction = null
-            pendingGalleryResult = null
-            if (resultCode == RESULT_OK) continuation?.invoke()
-            else pendingResult?.error("media_permission_denied", "사진 수정 권한을 허용하지 않았습니다.", null)
+        if (requestCode == LIVE_2D_PICKER_REQUEST) {
+            val preferences = getSharedPreferences("live_layer", MODE_PRIVATE)
+            val path = preferences.getString("preview_manifest_path", null)
+            val edit = preferences.edit().remove("preview_manifest_path")
+            val confirmed = path != null && (resultCode == RESULT_OK || preferences.getString("manifest_path", null) == path)
+            if (confirmed) edit.putString("manifest_path", path)
+            if (edit.commit()) {
+                // A prior confirmed selection can still belong to a separate lock/home
+                // engine on Android 16. Only discard an unselected preview copy.
+                val expired = if (confirmed) null else path
+                if (expired != preferences.getString("manifest_path", null)) {
+                    ioExecutor.execute { live2DStore.discardWallpaper(expired) }
+                }
+            }
+            pendingLiveActivation?.success(confirmed)
+            pendingLiveActivation = null
+            return
         }
+        if (requestCode == GALLERY_EDIT_PERMISSION_REQUEST) finishLegacyMigration(resultCode == RESULT_OK)
     }
 
     private fun enqueueImageDownload(
@@ -538,70 +629,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun importLocalImage(arguments: Map<*, *>?, scope: String, result: MethodChannel.Result) {
-        val sourcePath = arguments?.get("sourcePath") as? String
-        val requestedFileName = arguments?.get("fileName") as? String
-        val requestedTitle = (arguments?.get("title") as? String)?.trim()
-        val tags = (arguments?.get("tags") as? List<*>)?.filterIsInstance<String>()?.distinct()
-            ?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() } ?: listOf("장르 설정되지 않음")
-        val width = (arguments?.get("width") as? Number)?.toInt()
-        val height = (arguments?.get("height") as? Number)?.toInt()
-        val mode = arguments?.get("mode") as? String ?: "original"
-        val ratio = WallpaperRatio.fromMap(arguments?.get("ratio") as? Map<*, *>)
-        if (sourcePath.isNullOrBlank() || requestedTitle.isNullOrBlank() || width == null || height == null) {
-            result.error("invalid_local_image", "로컬 이미지 정보가 올바르지 않습니다.", null)
-            return
-        }
-
-        ioExecutor.execute {
-            try {
-                val source = File(sourcePath)
-                check(source.isFile) { "선택한 이미지 파일을 찾을 수 없습니다." }
-                val id = UUID.randomUUID().toString()
-                val directory = File(filesDir, LOCAL_IMAGES_DIRECTORY)
-                check(directory.exists() || directory.mkdirs()) { "로컬 이미지 폴더를 만들 수 없습니다." }
-                val safeName = ensureImageExtension(
-                    sanitizeFileName(requestedFileName.orEmpty()),
-                    source.toURI().toString(),
-                )
-                val extension = safeName.substringAfterLast('.', "jpg")
-                val destination = File(directory, "$id.$extension")
-                source.inputStream().use { input ->
-                    FileOutputStream(destination).use { output -> input.copyTo(output) }
-                }
-
-                val item = JSONObject()
-                    .put("id", id)
-                    .put("title", requestedTitle.take(160))
-                    .put("tag", tags.first())
-                    .put("tags", JSONArray(tags))
-                    .put("ownerScope", scope)
-                    .put("path", destination.absolutePath)
-                    .put("width", width)
-                    .put("height", height)
-                    .put("mode", mode)
-                    .put("ratio", JSONObject(ratio.toMap()))
-                    .put("createdAt", utcTimestamp())
-                    .put("cloudProjectId", JSONObject.NULL)
-                    .put("galleryPostId", JSONObject.NULL)
-                synchronized(localImagesLock) {
-                    val items = readLocalImagesJson(scope)
-                    items.put(item)
-                    writeLocalImagesJson(scope, items)
-                }
-                runOnUiThread { result.success(jsonObjectToMap(item)) }
-            } catch (error: Exception) {
-                runOnUiThread {
-                    result.error(
-                        "local_import_failed",
-                        "이미지를 로컬에 등록하지 못했습니다.",
-                        error.message,
-                    )
-                }
-            }
-        }
-    }
-
     private fun downloadSharedImage(arguments: Map<*, *>?, scope: String, result: MethodChannel.Result) {
         val url = arguments?.get("url") as? String
         if (url.isNullOrBlank() || Uri.parse(url).scheme !in listOf("https", "http")) {
@@ -626,152 +653,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun readLocalImages(scope: String): List<Map<String, Any?>> = synchronized(localImagesLock) {
-        val items = readLocalImagesJson(scope)
-        buildList {
-            for (index in items.length() - 1 downTo 0) {
-                add(jsonObjectToMap(items.getJSONObject(index)))
-            }
-        }
-    }
-
-    private fun markLocalImageShared(arguments: Map<*, *>?, scope: String, result: MethodChannel.Result) {
-        val id = arguments?.get("id") as? String
-        val cloudProjectId = arguments?.get("cloudProjectId") as? String
-        val galleryPostId = arguments?.get("galleryPostId") as? String
-        if (id.isNullOrBlank() || cloudProjectId.isNullOrBlank() || galleryPostId.isNullOrBlank()) {
-            result.error("invalid_share", "공유 정보가 올바르지 않습니다.", null)
-            return
-        }
-        synchronized(localImagesLock) {
-            val items = readLocalImagesJson(scope)
-            for (index in 0 until items.length()) {
-                val item = items.getJSONObject(index)
-                if (item.optString("id") == id) {
-                    item.put("cloudProjectId", cloudProjectId)
-                    item.put("galleryPostId", galleryPostId)
-                    writeLocalImagesJson(scope, items)
-                    result.success(null)
-                    return
-                }
-            }
-        }
-        result.error("local_image_not_found", "로컬 이미지를 찾을 수 없습니다.", null)
-    }
-
-    private fun markLocalImageUnshared(id: String?, scope: String, result: MethodChannel.Result) {
-        if (id.isNullOrBlank()) {
-            result.error("invalid_local_image", "공유를 취소할 이미지가 없습니다.", null)
-            return
-        }
-        synchronized(localImagesLock) {
-            val items = readLocalImagesJson(scope)
-            for (index in 0 until items.length()) {
-                val item = items.getJSONObject(index)
-                if (item.optString("id") == id) {
-                    item.put("cloudProjectId", JSONObject.NULL)
-                    item.put("galleryPostId", JSONObject.NULL)
-                    writeLocalImagesJson(scope, items)
-                    result.success(null)
-                    return
-                }
-            }
-        }
-        result.error("local_image_not_found", "로컬 이미지를 찾을 수 없습니다.", null)
-    }
-
-    private fun updateLocalImageTag(arguments: Map<*, *>?, scope: String, result: MethodChannel.Result) {
-        val id = arguments?.get("id") as? String
-        val tags = (arguments?.get("tags") as? List<*>)?.filterIsInstance<String>()?.distinct()
-        if (id.isNullOrBlank() || tags.isNullOrEmpty() || tags.any { it.isBlank() }) {
-            result.error("invalid_local_image", "수정할 태그 정보가 올바르지 않습니다.", null)
-            return
-        }
-        synchronized(localImagesLock) {
-            val items = readLocalImagesJson(scope)
-            for (index in 0 until items.length()) {
-                val item = items.getJSONObject(index)
-                if (item.optString("id") == id) {
-                    item.put("tag", tags.first())
-                    item.put("tags", JSONArray(tags))
-                    writeLocalImagesJson(scope, items)
-                    result.success(null)
-                    return
-                }
-            }
-        }
-        result.error("local_image_not_found", "로컬 이미지를 찾을 수 없습니다.", null)
-    }
-
-    private fun updateLocalImageDetails(arguments: Map<*, *>?, scope: String, result: MethodChannel.Result) {
-        val id = arguments?.get("id") as? String
-        val title = (arguments?.get("title") as? String)?.trim()
-        val tags = (arguments?.get("tags") as? List<*>)?.filterIsInstance<String>()?.distinct()
-        if (id.isNullOrBlank() || title.isNullOrBlank() || title.length > 160 ||
-            tags.isNullOrEmpty() || tags.any { it.isBlank() }) {
-            result.error("invalid_local_image", "이름과 태그를 확인해 주세요.", null)
-            return
-        }
-        synchronized(localImagesLock) {
-            val items = readLocalImagesJson(scope)
-            for (index in 0 until items.length()) {
-                val item = items.getJSONObject(index)
-                if (item.optString("id") == id) {
-                    item.put("title", title)
-                    item.put("tag", tags.first())
-                    item.put("tags", JSONArray(tags))
-                    if (arguments?.get("ratio") is Map<*, *>) {
-                        item.put("ratio", JSONObject(WallpaperRatio.fromMap(arguments["ratio"] as Map<*, *>).toMap()))
-                    }
-                    item.put("updatedAt", utcTimestamp())
-                    writeLocalImagesJson(scope, items)
-                    result.success(null)
-                    return
-                }
-            }
-        }
-        result.error("local_image_not_found", "로컬 이미지를 찾을 수 없습니다.", null)
-    }
-
-    private fun deleteLocalImage(id: String?, scope: String, result: MethodChannel.Result) {
-        if (id.isNullOrBlank()) {
-            result.error("invalid_local_image", "삭제할 이미지가 없습니다.", null)
-            return
-        }
-        ioExecutor.execute {
-            try {
-                synchronized(localImagesLock) {
-                    val items = readLocalImagesJson(scope)
-                    val remaining = JSONArray()
-                    var found = false
-                    for (index in 0 until items.length()) {
-                        val item = items.getJSONObject(index)
-                        if (item.optString("id") == id) {
-                            found = true
-                            val file = File(item.optString("path"))
-                            check(!file.exists() || file.delete()) { "로컬 이미지 파일을 삭제할 수 없습니다." }
-                        } else {
-                            remaining.put(item)
-                        }
-                    }
-                    check(found) { "로컬 이미지를 찾을 수 없습니다." }
-                    writeLocalImagesJson(scope, remaining)
-                }
-                runOnUiThread { result.success(null) }
-            } catch (error: Exception) {
-                runOnUiThread {
-                    result.error("local_delete_failed", "로컬 이미지를 삭제하지 못했습니다.", error.message)
-                }
-            }
-        }
-    }
-
-    private fun readAllLocalImagesJson(): JSONArray {
-        val value = getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE)
-            .getString(LOCAL_IMAGES_KEY, "[]") ?: "[]"
-        return JSONArray(value)
-    }
-
     private fun saveLibraryOrder(ownerId: String, scope: String, arguments: Map<*, *>?, result: MethodChannel.Result) {
         val sort = arguments?.get("sort") as? String ?: "manual"
         require(sort in setOf("manual", "newest", "oldest", "korean", "english")) { "올바르지 않은 정렬 방식입니다." }
@@ -779,7 +660,7 @@ class MainActivity : FlutterActivity() {
         ioExecutor.execute {
             try {
                 synchronized(localImagesLock) {
-                    val ownedIds = galleryStore.list(ownerId, scope)
+                    val ownedIds = imageStore.list(ownerId)
                         .mapNotNull { it["id"] as? String }.toSet()
                     val value = JSONObject().put("sort", sort).put("ids", JSONArray(ids.filter { it in ownedIds }))
                     check(getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE).edit()
@@ -794,11 +675,110 @@ class MainActivity : FlutterActivity() {
 
     private fun localWallpaperItem(ownerId: String, id: String?): JSONObject {
         require(!id.isNullOrBlank()) { "이미지 ID가 없습니다." }
-        return galleryStore.item(ownerId, id)
+        return imageStore.item(ownerId, id)
+    }
+
+    private fun prepareOwnedLiveWallpaper(ownerId: String, id: String?, result: MethodChannel.Result,
+        requestedTarget: Any? = null, forcePreview: Boolean = false) {
+        ioExecutor.execute {
+            try {
+                val item = localWallpaperItem(ownerId, id)
+                require(item.optString("mode") == "live2d") { "먼저 Live 2D 이미지를 분리해 주세요." }
+                val manifest = live2DStore.activate(ownerId, item.getString("id"))
+                val requestedFlags = requestedTarget?.let { WallpaperTarget.fromArgument(it).flags }
+                runOnUiThread { launchLiveActivation(manifest, result, requestedFlags, !forcePreview) }
+            } catch (error: Exception) { runOnUiThread { result.error("live2d_failed", error.message, null) } }
+        }
+    }
+
+    private fun launchLiveActivation(manifest: File, result: MethodChannel.Result,
+        requestedFlags: Int? = null, allowDirect: Boolean = true) {
+        if (pendingLiveActivation != null) {
+            ioExecutor.execute { live2DStore.discardWallpaper(manifest.absolutePath) }
+            result.error("live2d_busy", "다른 Live 2D 활성화가 진행 중입니다.", null)
+            return
+        }
+        try {
+            val active = activeLiveWallpaperFlags()
+            if (LiveWallpaperSelection.canActivateDirect(active, requestedFlags, !allowDirect)) {
+                ioExecutor.execute {
+                    try {
+                        commitLiveSelection(manifest)
+                        runOnUiThread { result.success(true) }
+                    } catch (error: Exception) {
+                        live2DStore.discardWallpaper(manifest.absolutePath)
+                        runOnUiThread { result.error("live2d_failed", error.message, null) }
+                    }
+                }
+                return
+            }
+            check(getSharedPreferences("live_layer", MODE_PRIVATE).edit()
+                .putString("preview_manifest_path", manifest.absolutePath).commit())
+            pendingLiveActivation = result
+            openWallpaperPicker(null)
+        } catch (error: Exception) {
+            pendingLiveActivation = null
+            getSharedPreferences("live_layer", MODE_PRIVATE).edit().remove("preview_manifest_path").apply()
+            ioExecutor.execute { live2DStore.discardWallpaper(manifest.absolutePath) }
+            result.error("wallpaper_picker_failed", error.message, null)
+        }
+    }
+
+    private fun activeLiveWallpaperFlags(): Int {
+        val manager = WallpaperManager.getInstance(this)
+        val component = ComponentName(this, LiveLayerWallpaperService::class.java)
+        val home = manager.wallpaperInfo?.component == component
+        val lock = if (Build.VERSION.SDK_INT >= 34) manager.getWallpaperInfo(WallpaperManager.FLAG_LOCK)?.component == component
+            || (home && manager.getWallpaperId(WallpaperManager.FLAG_LOCK) < 0)
+            else home && manager.getWallpaperId(WallpaperManager.FLAG_LOCK) < 0
+        return (if (home) WallpaperManager.FLAG_SYSTEM else 0) or (if (lock) WallpaperManager.FLAG_LOCK else 0)
+    }
+
+    private fun commitLiveSelection(manifest: File) {
+        val manager = WallpaperManager.getInstance(this)
+        check(manager.isWallpaperSupported && manager.isSetWallpaperAllowed) { "이 기기에서 배경화면 변경이 허용되지 않습니다." }
+        val preferences = getSharedPreferences("live_layer", MODE_PRIVATE)
+        val previous = preferences.getString("manifest_path", null)
+        val direct = preferences.getString("direct_manifest_path", null)
+        if (!preferences.edit().putString("manifest_path", manifest.absolutePath)
+                .putString("direct_manifest_path", manifest.absolutePath).commit()) {
+            preferences.edit().putString("manifest_path", previous).putString("direct_manifest_path", direct).commit()
+            error("배경화면 설정을 저장하지 못했습니다.")
+        }
+    }
+
+    private fun applyOwnedLiveWallpaper(ownerId: String, id: String?, rawTarget: Any?, result: MethodChannel.Result) {
+        val target = wallpaperTarget(rawTarget, result) ?: return
+        ioExecutor.execute {
+            var manifest: File? = null
+            try {
+                val item = localWallpaperItem(ownerId, id)
+                require(item.optString("mode") == "live2d") { "Live 2D 이미지가 아닙니다." }
+                val manager = WallpaperManager.getInstance(this)
+                check(manager.isWallpaperSupported && manager.isSetWallpaperAllowed) { "이 기기에서 배경화면 변경이 허용되지 않습니다." }
+                if (!LiveWallpaperSelection.canUpdate(target.flags, activeLiveWallpaperFlags())) {
+                    runOnUiThread { result.error("live2d_activation_required",
+                        "Live 2D 적용에서 Android 배경화면 설정을 먼저 완료해 주세요.", null) }
+                    return@execute
+                }
+                check(pendingLiveActivation == null) { "Live 2D 활성화 확인이 진행 중입니다." }
+                val snapshot = live2DStore.activate(ownerId, item.getString("id"))
+                manifest = snapshot
+                commitLiveSelection(snapshot)
+                runOnUiThread { result.success(null) }
+            } catch (error: Exception) {
+                manifest?.let { live2DStore.discardWallpaper(it.absolutePath) }
+                runOnUiThread { result.error("live2d_failed", error.message, null) }
+            }
+        }
     }
 
     private fun previewLocalWallpaper(ownerId: String, id: String?, result: MethodChannel.Result) {
         val item = localWallpaperItem(ownerId, id)
+        if (item.optString("mode") == "live2d") {
+            prepareOwnedLiveWallpaper(ownerId, id, result, forcePreview = true)
+            return
+        }
         val source = File(item.getString("path")).canonicalFile
         val ratio = ratioFromJson(item.optJSONObject("ratio"))
         val display = deviceDisplaySize()
@@ -849,51 +829,9 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun readLocalImagesJson(scope: String): JSONArray {
-        return LocalImageOwnership.owned(readAllLocalImagesJson(), scope)
-    }
-
-    private fun writeLocalImagesJson(scope: String, items: JSONArray) {
-        val merged = LocalImageOwnership.replaceOwned(readAllLocalImagesJson(), scope, items)
-        check(getSharedPreferences(LOCAL_IMAGES_PREFERENCES, MODE_PRIVATE)
-            .edit()
-            .putString(LOCAL_IMAGES_KEY, merged.toString())
-            .commit()) { "이미지 기록을 저장할 수 없습니다." }
-    }
-
     private fun ratioFromJson(value: JSONObject?): WallpaperRatio = WallpaperRatio.fromMap(value?.let {
         it.keys().asSequence().associateWith { key -> it.opt(key).takeUnless { field -> field == JSONObject.NULL } }
     })
-
-    private fun jsonObjectToMap(item: JSONObject): Map<String, Any?> = mapOf(
-        "id" to item.getString("id"),
-        "title" to item.getString("title"),
-        "path" to item.getString("path"),
-        "width" to item.getInt("width"),
-        "height" to item.getInt("height"),
-        "mode" to item.optString("mode", "original"),
-        "ratio" to ratioFromJson(item.optJSONObject("ratio")).toMap(),
-        "tag" to item.optString("tag", "장르 설정되지 않음"),
-        "tags" to (item.optJSONArray("tags")?.let { values ->
-            (0 until values.length()).map { values.getString(it) }
-        } ?: listOf(item.optString("tag", "장르 설정되지 않음"))),
-        "createdAt" to item.getString("createdAt"),
-        "cloudProjectId" to if (item.isNull("cloudProjectId")) {
-            null
-        } else {
-            item.optString("cloudProjectId").takeIf { it.isNotBlank() }
-        },
-        "galleryPostId" to if (item.isNull("galleryPostId")) {
-            null
-        } else {
-            item.optString("galleryPostId").takeIf { it.isNotBlank() }
-        },
-    )
-
-    private fun utcTimestamp(): String = SimpleDateFormat(
-        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
-        Locale.US,
-    ).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
 
     private fun saveWithMediaStore(source: File, fileName: String): Uri {
         val resolver = applicationContext.contentResolver
@@ -1143,6 +1081,7 @@ class MainActivity : FlutterActivity() {
                         .put("sensitivity", sensitivity)
                         .put("layers", manifestLayers)
                     File(staging, "manifest.json").writeText(manifest.toString())
+                    live2DStore.stampSelection(File(staging, "manifest.json"))
 
                     val destination = File(root, safeProjectId)
                     if (destination.exists() && !destination.deleteRecursively()) {
@@ -1152,7 +1091,7 @@ class MainActivity : FlutterActivity() {
                     getSharedPreferences("live_layer", MODE_PRIVATE)
                         .edit()
                         .putString("project_id", projectId)
-                        .putString("manifest_path", File(destination, "manifest.json").absolutePath)
+                        .putString("preview_manifest_path", File(destination, "manifest.json").absolutePath)
                         .apply()
                 } catch (error: Exception) {
                     staging.deleteRecursively()
@@ -1194,7 +1133,7 @@ class MainActivity : FlutterActivity() {
                 ComponentName(this@MainActivity, LiveLayerWallpaperService::class.java),
             )
         }
-        startActivity(intent)
+        startActivityForResult(intent, LIVE_2D_PICKER_REQUEST)
     }
 
     private fun downloadToFile(url: String, destination: File) {
@@ -1266,11 +1205,12 @@ class MainActivity : FlutterActivity() {
         }
 
     private companion object {
+        const val LIVE_2D_PICKER_REQUEST = 4105
         val localImagesLock = Any()
         const val DOWNLOAD_PERMISSION_REQUEST = 4101
         const val GALLERY_READ_PERMISSION_REQUEST = 4102
         const val GALLERY_EDIT_PERMISSION_REQUEST = 4103
-        const val GALLERY_WRITE_PERMISSION_REQUEST = 4104
+
         const val CONFIG_PREFERENCES = "live_layer_config"
         const val API_BASE_URL_KEY = "api_base_url"
         const val LOCAL_IMAGES_PREFERENCES = "local_images"

@@ -7,8 +7,12 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
 
     <uses-feature android:name="android.software.live_wallpaper" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false" />
 
     <queries>
+        <intent>
+            <action android:name="android.service.wallpaper.WallpaperService" />
+        </intent>
         <intent>
             <action android:name="android.service.wallpaper.CROP_AND_SET_WALLPAPER" />
             <data android:mimeType="image/*" />
@@ -57,5 +61,6 @@
         </service>
 
         <meta-data android:name="flutterEmbedding" android:value="2" />
+        <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="subject_segment" />
     </application>
 </manifest>

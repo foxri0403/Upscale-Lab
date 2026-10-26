@@ -1,6 +1,8 @@
 # Upscale Lab
 
-기존 Upscale Lab의 ASP.NET Core 8 백엔드, PostgreSQL 스키마, 인증, S3 이미지 저장소와 갤러리를 보존하면서 AI 레이어 분해 기반 2.5D 라이브 배경화면 서비스로 확장한 저장소입니다. 이미지 바이너리는 S3에, 사용자·프로젝트·레이어 메타데이터는 PostgreSQL(RDS)에 저장합니다.
+기존 Upscale Lab의 ASP.NET Core 8 백엔드, PostgreSQL 스키마, 인증, S3 이미지 저장소와 갤러리를 보존하면서 이미지 분리 기반 Live 2D 라이브 배경화면 서비스로 확장한 저장소입니다. 클라우드 이미지 바이너리는 S3에, 사용자·프로젝트·레이어 메타데이터는 PostgreSQL(RDS)에 저장합니다.
+
+Android의 **Live 2D** 버튼은 일반 사진을 기기에서 **고정 배경 + 투명 인물·사물** 두 장으로 분리합니다. 미리보기에서 결과를 확인한 뒤 보관함에 저장하거나 Android 라이브 배경화면 설정으로 적용할 수 있습니다. 자이로 기울기에 따라 전경만 움직이며, 적용한 레이어는 앱 종료·기기 재시작 후에도 유지됩니다. 분리에는 Google Play 서비스 모델의 최초 다운로드가 필요합니다. 상세 동작과 검증 방법은 [Live 2D 가이드](docs/live-2d.md)를 참고하세요.
 
 기존 저장소가 FastAPI가 아닌 .NET 계층형 구조로 이미 구현되어 있어 API를 전면 교체하지 않았습니다. See-through AI만 공식 Python CLI를 별도 프로세스로 호출하며, 모바일 클라이언트는 Flutter/Android Kotlin으로 구성합니다.
 

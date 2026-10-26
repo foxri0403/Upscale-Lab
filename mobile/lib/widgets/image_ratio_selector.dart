@@ -111,7 +111,7 @@ class ImageRatioSelector extends StatelessWidget {
       );
 
   Widget _orientation(BuildContext context, bool portrait) => Semantics(
-        selected: _portrait == portrait,
+        selected: !value.automatic && _portrait == portrait,
         child: IconButton(
           constraints: automaticOnly
               ? const BoxConstraints.tightFor(width: 32, height: 32) : null,
@@ -125,7 +125,7 @@ class ImageRatioSelector extends StatelessWidget {
               portrait
                   ? Icons.stay_current_portrait
                   : Icons.stay_current_landscape,
-              color: _portrait == portrait
+              color: !value.automatic && _portrait == portrait
                   ? Theme.of(context).colorScheme.primary
                   : Theme.of(context).colorScheme.onSurfaceVariant),
         ),
