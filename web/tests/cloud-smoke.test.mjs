@@ -18,7 +18,9 @@ run(
     const bundle = await get(src);
     assert.equal(bundle.status, 200);
     assert.match(bundle.headers.get("content-type"), /javascript/);
-    assert.match(await bundle.text(), /\/api\/gallery/, "deployed UI must query the existing mobile gallery");
+    const code = await bundle.text();
+    assert.match(code, /\/api\/gallery/, "deployed UI must query the existing mobile gallery");
+    assert.match(code, /\/api\/auth\/find-id/, "deployed UI must include mobile ID recovery");
   },
 );
 run("runtime configuration enables same-origin cloud API", async () => {
@@ -96,6 +98,21 @@ run(
     });
     assert.equal(r.status, 400);
     assert.match(r.headers.get("content-type"), /json/);
+  },
+);
+run(
+  "mobile account recovery endpoints validate requests without sending email or changing passwords",
+  async () => {
+    for (const path of ["find-id", "forgot-password", "reset-password"]) {
+      const response = await fetch(`${base}/api/auth/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "", code: "", newPassword: "" }),
+        signal: AbortSignal.timeout(15000),
+      });
+      assert.equal(response.status, 400, path);
+      assert.match(response.headers.get("content-type"), /json/);
+    }
   },
 );
 run(

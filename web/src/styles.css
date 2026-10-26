@@ -778,6 +778,8 @@ small {
 }
 .form-options {
   display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
   align-items: center;
   justify-content: space-between;
   margin: 10px 0 24px;
@@ -797,10 +799,6 @@ small {
   accent-color: var(--primary);
   margin: 0;
 }
-.form-options .text-button {
-  font-size: 0.7857143rem;
-  color: #8490a6;
-}
 .form-error {
   color: #d94762;
   font-size: 0.8571429rem;
@@ -819,6 +817,58 @@ small {
 .auth-switch a {
   color: var(--primary);
   margin-left: 10px;
+}
+.auth-recovery-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  color: var(--line);
+  font-size: 0.7857143rem;
+}
+.auth-recovery-links button {
+  color: #8490a6;
+}
+.recovery-description {
+  color: var(--muted);
+  font-size: 0.8571429rem;
+  line-height: 1.7;
+  margin: 0 0 22px;
+}
+.recovery-code-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -8px 0 20px;
+  color: var(--primary);
+  font-size: 0.7857143rem;
+}
+.recovery-form input[readonly] {
+  background: #fafbff;
+  color: var(--muted);
+}
+.recovery-result {
+  margin: 16px 0;
+  padding: 18px;
+  border-radius: 10px;
+  background: #f0f3ff;
+  color: #465578;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.recovery-result span,
+.recovery-result strong {
+  display: block;
+}
+.recovery-result span {
+  font-size: 0.7857143rem;
+  margin-bottom: 8px;
+}
+.recovery-form .button + .button {
+  margin-top: 12px;
 }
 .demo-credentials {
   margin-top: 30px;

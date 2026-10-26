@@ -23,6 +23,11 @@ import {
 } from "./auth";
 import { imageSrc, write, read } from "./model";
 import { cloud, cloudLogin, cloudVerify, request } from "./api";
+import { AccountRecovery, type RecoveryMode } from "./AccountRecovery";
+import {
+  rememberLoginIdentifier,
+  savedLoginIdentifier,
+} from "./login-preferences";
 
 export function PublicHeader({ contact }: { contact: () => void }) {
   return (
@@ -277,21 +282,23 @@ export function AuthPage({
   signup: boolean;
   onLogin: (session: Session) => void;
 }) {
-  const [email, setEmail] = useState("");
+  const [savedIdentifier] = useState(savedLoginIdentifier);
+  const [email, setEmail] = useState(signup ? "" : savedIdentifier);
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [show, setShow] = useState(false);
   const [remember, setRemember] = useState(false);
+  const [rememberId, setRememberId] = useState(!signup && !!savedIdentifier);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [complete, setComplete] = useState(false);
-  const [recovery, setRecovery] = useState(false);
+  const [recovery, setRecovery] = useState<RecoveryMode | null>(null);
   const [code, setCode] = useState("");
-  const [recoveryStep, setRecoveryStep] = useState(0);
   const [recoveryMessage, setRecoveryMessage] = useState("");
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setError("");
     setBusy(true);
     try {
@@ -313,6 +320,7 @@ export function AuthPage({
         const session = cloud
           ? await cloudLogin(email, password, remember)
           : await signIn(email, password, remember);
+        rememberLoginIdentifier(email, rememberId);
         onLogin(session);
         navigate("/app/images", true);
       }
@@ -431,15 +439,18 @@ export function AuthPage({
         ) : (
           <form onSubmit={submit}>
             <label>
-              {signup ? "이메일" : "이메일 또는 사용자 이름"}
+              {signup ? "이메일" : "이메일 또는 아이디"}
               <input
                 type={signup ? "email" : "text"}
                 autoComplete={signup ? "email" : "username"}
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                maxLength={150}
+                placeholder={
+                  signup ? "you@example.com" : "이메일 또는 아이디를 입력해 주세요"
+                }
+                maxLength={320}
+                disabled={busy}
               />
             </label>
             {signup && (
@@ -505,18 +516,25 @@ export function AuthPage({
                 <label className="check-label">
                   <input
                     type="checkbox"
+                    checked={rememberId}
+                    disabled={busy}
+                    onChange={(event) => {
+                      setRememberId(event.target.checked);
+                      if (!event.target.checked)
+                        rememberLoginIdentifier("", false);
+                    }}
+                  />
+                  아이디 저장
+                </label>
+                <label className="check-label">
+                  <input
+                    type="checkbox"
                     checked={remember}
+                    disabled={busy}
                     onChange={(e) => setRemember(e.target.checked)}
                   />{" "}
-                  로그인 상태 유지
+                  자동 로그인
                 </label>
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={() => setRecovery(true)}
-                >
-                  비밀번호 찾기
-                </button>
               </div>
             )}
             {error && (
@@ -542,6 +560,25 @@ export function AuthPage({
             </Link>
           </p>
         )}
+        {!signup && !complete && (
+          <nav className="auth-recovery-links" aria-label="계정 복구">
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => setRecovery("id")}
+            >
+              아이디 찾기
+            </button>
+            <span aria-hidden="true">|</span>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => setRecovery("password")}
+            >
+              비밀번호 재설정
+            </button>
+          </nav>
+        )}
         {!cloud && (
           <div className="demo-credentials">
             <span className="demo-tag">LOCAL PREVIEW</span>
@@ -562,138 +599,16 @@ export function AuthPage({
         )}
       </div>
       {recovery && (
-        <Modal
-          title="비밀번호 찾기"
-          close={() => {
-            setRecovery(false);
-            setRecoveryStep(0);
-            setRecoveryMessage("");
+        <AccountRecovery
+          mode={recovery}
+          identifier={email}
+          close={() => setRecovery(null)}
+          useIdentifier={(identifier) => {
+            setEmail(identifier);
+            setPassword("");
             setError("");
           }}
-        >
-          {cloud ? (
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const form = new FormData(e.currentTarget);
-                setBusy(true);
-                setError("");
-                try {
-                  if (!recoveryStep) {
-                    await request(
-                      "/api/auth/forgot-password",
-                      {
-                        method: "POST",
-                        body: JSON.stringify({ email: form.get("email") }),
-                      },
-                      false,
-                    );
-                    setRecoveryStep(1);
-                    setRecoveryMessage(
-                      "일치하는 계정이 있다면 인증 코드가 전송됩니다.",
-                    );
-                  } else {
-                    await request(
-                      "/api/auth/reset-password",
-                      {
-                        method: "POST",
-                        body: JSON.stringify({
-                          email: form.get("email"),
-                          code: form.get("code"),
-                          newPassword: form.get("newPassword"),
-                        }),
-                      },
-                      false,
-                    );
-                    setRecoveryStep(2);
-                    setRecoveryMessage(
-                      "비밀번호를 변경했습니다. 새 비밀번호로 로그인해 주세요.",
-                    );
-                  }
-                } catch (e) {
-                  setError((e as Error).message);
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              <label>
-                이메일
-                <input
-                  name="email"
-                  required
-                  type="email"
-                  defaultValue={email}
-                />
-              </label>
-              {recoveryStep === 1 && (
-                <>
-                  <label>
-                    인증 코드
-                    <input
-                      name="code"
-                      required
-                      pattern="[0-9]{6}"
-                      maxLength={6}
-                    />
-                  </label>
-                  <label>
-                    새 비밀번호
-                    <input
-                      name="newPassword"
-                      type="password"
-                      required
-                      minLength={10}
-                    />
-                  </label>
-                </>
-              )}
-              {error && (
-                <p className="form-error" role="alert">
-                  {error}
-                </p>
-              )}
-              {recoveryMessage && <Notice>{recoveryMessage}</Notice>}
-              {recoveryStep < 2 ? (
-                <button className="button primary full" disabled={busy}>
-                  {busy ? (
-                    <Busy />
-                  ) : recoveryStep ? (
-                    "비밀번호 변경"
-                  ) : (
-                    "인증 코드 받기"
-                  )}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="button primary full"
-                  onClick={() => setRecovery(false)}
-                >
-                  로그인으로 돌아가기
-                </button>
-              )}
-            </form>
-          ) : (
-            <>
-              <Notice>
-                로컬 미리보기에서는 이메일 인증·비밀번호 복구를 제공하지
-                않습니다.
-              </Notice>
-              <p>화면을 둘러보려면 데모 계정을 이용해 주세요.</p>
-              <button
-                className="button primary full"
-                onClick={() => {
-                  setEmail(demoEmail);
-                  setPassword(demoPassword);
-                  setRecovery(false);
-                }}
-              >
-                데모 계정으로 입력
-              </button>
-            </>
-          )}
-        </Modal>
+        />
       )}
     </main>
   );
