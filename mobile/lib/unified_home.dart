@@ -172,6 +172,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
           builder: (_) => ImageFeaturePage(
             filePath: picked.path,
             title: picked.name,
+            apiClient: widget.apiClient,
           ),
         ),
       );
@@ -426,6 +427,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
           builder: (_) => ImageFeaturePage(
               filePath: image.path,
               title: image.title,
+              apiClient: widget.apiClient,
               initialTags: image.tags,
               initialRatio: image.ratio,
               loadLive2D:

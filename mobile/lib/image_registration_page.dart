@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter/rendering.dart' show OverflowBoxFit;
 import 'services/live_2d_service.dart';
+import 'services/api_client.dart';
+import 'character_live2d_page.dart';
 import 'widgets/live_2d_preview.dart';
 
 import 'models/gallery_tags.dart';
@@ -35,6 +37,8 @@ class ImageRegistrationOptions {
   final Live2DDraft? live2D;
 }
 
+enum _Live2DMode { object, character }
+
 enum _RegistrationTool {
   information('사진 정보', Icons.info_outline),
   crop('자르기', Icons.crop),
@@ -55,12 +59,14 @@ class ImageFeaturePage extends StatefulWidget {
       this.initialTags = const [],
       this.initialRatio = const ImageRatioSettings(),
       this.loadLive2D,
+      this.apiClient,
       this.onSave});
   final String filePath;
   final String title;
   final List<String> initialTags;
   final ImageRatioSettings initialRatio;
   final Future<Live2DDraft?> Function()? loadLive2D;
+  final ApiClient? apiClient;
   final Future<void> Function(ImageRegistrationOptions)? onSave;
 
   @override
@@ -93,6 +99,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   bool _live2DActivated = false;
   String? _splitError;
   String _liveLayer = 'composite';
+  _Live2DMode? _live2DMode;
   int _splitGeneration = 0;
 
   void _clearLive2D() {
@@ -110,7 +117,10 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
 
   Future<void> _openLive2D({bool retry = false}) async {
     if (_source == null || _saving || _splitting) return;
-    setState(() => _tool = _RegistrationTool.parallax);
+    setState(() {
+      _tool = _RegistrationTool.parallax;
+      _live2DMode = _Live2DMode.object;
+    });
     if (!retry && (_live2D != null || _candidate != null)) return;
     final generation = ++_splitGeneration;
     setState(() {
@@ -228,7 +238,18 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   void _selectTool(_RegistrationTool tool) {
     FocusScope.of(context).unfocus();
     if (tool == _RegistrationTool.parallax) {
-      _openLive2D();
+      FocusScope.of(context).unfocus();
+      // Reopening an existing object draft keeps the original workflow.
+      // A new image first offers an explicit Object / Character choice.
+      if (_live2D != null || _candidate != null) {
+        _openLive2D();
+      } else {
+        setState(() {
+          _tool = tool;
+          _live2DMode = null;
+          _splitError = null;
+        });
+      }
       return;
     }
     if (tool == _RegistrationTool.upscale) {
@@ -240,6 +261,31 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
       Scrollable.ensureVisible(toolContext,
           alignment: .5, duration: const Duration(milliseconds: 180));
     }
+  }
+
+  Future<void> _openCharacterLive2D() async {
+    if (_source == null || _saving || _splitting) return;
+    final client = widget.apiClient;
+    setState(() {
+      _tool = _RegistrationTool.parallax;
+      _live2DMode = _Live2DMode.character;
+    });
+    if (client == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('캐릭터 파츠 분리는 로그인한 계정의 이미지 등록 화면에서 사용할 수 있습니다.'),
+      ));
+      return;
+    }
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => CharacterLive2DPage(
+        apiClient: client,
+        sourcePath: widget.filePath,
+        title: _titleController.text.trim().isEmpty
+            ? '캐릭터 이미지' : _titleController.text.trim(),
+        width: _source!.size.width.round(),
+        height: _source!.size.height.round(),
+      ),
+    ));
   }
 
   Future<void> _openTagPicker() async {
@@ -586,13 +632,45 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
       ]);
 
   Widget _live2DControls() {
+    final colors = Theme.of(context).colorScheme;
+    final modeButtons = Row(children: [
+      Expanded(child: OutlinedButton.icon(
+        key: const ValueKey('live2d-mode-object'),
+        style: OutlinedButton.styleFrom(
+          backgroundColor: _live2DMode == _Live2DMode.object
+              ? colors.primaryContainer : null),
+        onPressed: _saving || _splitting ? null : () => _openLive2D(),
+        icon: const Icon(Icons.directions_car_outlined),
+        label: const Text('사물'),
+      )),
+      const SizedBox(width: 8),
+      Expanded(child: OutlinedButton.icon(
+        key: const ValueKey('live2d-mode-character'),
+        style: OutlinedButton.styleFrom(
+          backgroundColor: _live2DMode == _Live2DMode.character
+              ? colors.primaryContainer : null),
+        onPressed: _saving || _splitting ? null : _openCharacterLive2D,
+        icon: const Icon(Icons.face_outlined),
+        label: const Text('캐릭터'),
+      )),
+    ]);
+    if (_live2DMode != _Live2DMode.object) {
+      return Column(mainAxisSize: MainAxisSize.min, children: [
+        modeButtons,
+        const SizedBox(height: 8),
+        Text(_live2DMode == _Live2DMode.character
+            ? '캐릭터: 얼굴·눈·머리카락 파츠를 분리해 기울기에 반응하는 움직임을 미리 봅니다.'
+            : '사물은 기존 배경·전경 분리 및 자이로 이동을 사용합니다. 캐릭터는 세부 파츠 분리 실험으로 이동합니다.',
+            textAlign: TextAlign.center),
+      ]);
+    }
     final draft = _candidate ?? _live2D;
     final wide = MediaQuery.sizeOf(context).aspectRatio > 1;
     final layers = SegmentedButton<String>(
         segments: const [
           ButtonSegment(value: 'composite', label: Text('미리보기')),
           ButtonSegment(value: 'background', label: Text('배경')),
-          ButtonSegment(value: 'foreground', label: Text('인물·사물'))
+          ButtonSegment(value: 'foreground', label: Text('사물'))
         ],
         selected: {
           _liveLayer
@@ -615,12 +693,14 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
         onPressed: _saving ? null : () => _openLive2D(retry: true),
         child: const Text('다시 분리'));
     return Column(mainAxisSize: MainAxisSize.min, children: [
+      modeButtons,
+      const SizedBox(height: 8),
       if (_splitting)
         const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           SizedBox.square(
               dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)),
           SizedBox(width: 10),
-          Flexible(child: Text('배경과 인물·사물을 분리하고 있습니다…')),
+          Flexible(child: Text('배경과 사물을 분리하고 있습니다…')),
         ]),
       if (_splitError != null) Text(_splitError!, textAlign: TextAlign.center),
       if (!_splitting && draft != null) ...[
