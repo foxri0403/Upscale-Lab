@@ -128,9 +128,15 @@ builder.Services.AddSingleton<GalleryThumbnailCache>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IProjectProcessingService, ProjectProcessingService>();
 builder.Services.AddSingleton<IProcessingJobQueue, ProcessingJobQueue>();
-builder.Services.AddSingleton<IImageLayerProcessor, SeeThroughImageLayerProcessor>();
-builder.Services.AddSingleton<ExistingLayerProjectProcessor>();
-builder.Services.AddSingleton<IProjectImageProcessor, RunPodProjectImageProcessor>();
+builder.Services.AddSingleton<SeeThroughImageLayerProcessor>();
+builder.Services.AddHttpClient<RunPodPretrainedSeeThroughProcessor>(client =>
+    client.Timeout = Timeout.InfiniteTimeSpan);
+builder.Services.AddScoped<IImageLayerProcessor>(services =>
+    string.Equals(seeThroughOptions.Provider, "RunPod", StringComparison.OrdinalIgnoreCase)
+        ? services.GetRequiredService<RunPodPretrainedSeeThroughProcessor>()
+        : services.GetRequiredService<SeeThroughImageLayerProcessor>());
+builder.Services.AddScoped<ExistingLayerProjectProcessor>();
+builder.Services.AddScoped<IProjectImageProcessor, RunPodProjectImageProcessor>();
 builder.Services.AddHostedService<LiveLayerProcessingWorker>();
 
 builder.Services.AddClientAuthentication(jwtOptions);
