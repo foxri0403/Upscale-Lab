@@ -3,7 +3,7 @@ name: Build See-through Worker
 on:
   push:
     branches:
-      - live2d-see-through
+      - inho/live2d-see-through
     paths:
       - 'backend/ai-worker/**'
       - '.github/workflows/build-see-through.yml'
