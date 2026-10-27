@@ -425,14 +425,14 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                                         mainAxisAlignment:
                                             MainAxisAlignment.center,
                                         children: [
-                                          const Text('업스케일 배율'),
+                                          const Text('출력 해상도'),
                                           const SizedBox(width: 16),
                                           SegmentedButton<int>(
                                             segments: const [
                                               ButtonSegment(
-                                                  value: 2, label: Text('2배')),
+                                                  value: 2, label: Text('FHD')),
                                               ButtonSegment(
-                                                  value: 4, label: Text('4배')),
+                                                  value: 4, label: Text('QHD')),
                                             ],
                                             selected: {_upscaleFactor},
                                             onSelectionChanged: _saving
