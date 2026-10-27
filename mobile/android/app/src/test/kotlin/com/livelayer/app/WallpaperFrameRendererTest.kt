@@ -4,6 +4,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WallpaperFrameRendererTest {
+    @Test fun failedDrawingOrPostingCannotBeAcknowledgedAsAnAppliedLiveWallpaper() {
+        assertFalse(WallpaperFrameRenderer.render({ Any() }, { throw IllegalStateException("draw failed") }, {}, {}))
+        assertFalse(WallpaperFrameRenderer.render({ Any() }, {}, { throw IllegalArgumentException("post failed") }, {}))
+        assertFalse(WallpaperFrameRenderer.render<Any>({ null }, {}, {}, {}))
+        assertTrue(WallpaperFrameRenderer.render({ Any() }, {}, {}, {}))
+    }
     @Test fun missingSurfaceDoesNotDrawOrPost() {
         WallpaperFrameRenderer.render<Any>({ null }, { fail("draw") }, { fail("post") }, { fail("error") })
     }

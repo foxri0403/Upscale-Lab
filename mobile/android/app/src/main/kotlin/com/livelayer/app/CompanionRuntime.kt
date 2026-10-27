@@ -129,6 +129,7 @@ internal object CompanionRuntime {
             .putLong("companion_valid_until", System.currentTimeMillis() + 60000).apply()
     }
     private fun requireLatest(command: JSONObject): JSONObject {
+        api.request("/api/agent/commands/${command.getString("id")}/manifest", agent = true)
         val state = api.request("/api/agent/state", agent = true) as JSONObject
         val displays = state.getJSONArray("displays")
         val display = (0 until displays.length()).map { displays.getJSONObject(it) }.firstOrNull {
@@ -153,7 +154,7 @@ internal object CompanionRuntime {
             val remote = api.request("/api/agent/state", agent = true) as JSONObject
             if (System.currentTimeMillis() >= nextHeartbeat) {
                 val body = JSONObject().put("revision", remote.getLong("inventoryRevision") + 1).put("osVersion", "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-                    .put("agentVersion", "1.0.0").put("manufacturer", Build.MANUFACTURER.take(120)).put("model", Build.MODEL.take(120))
+                    .put("agentVersion", context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0.1").put("manufacturer", Build.MANUFACTURER.take(120)).put("model", Build.MODEL.take(120))
                     .put("architecture", Build.SUPPORTED_ABIS.firstOrNull()?.take(32) ?: "").put("supportsLive2D", context.packageManager.hasSystemFeature("android.software.live_wallpaper"))
                     .put("supportsLockScreen", true).put("displays", inventory.read(saved))
                 try { api.request("/api/agent/heartbeat", "POST", body, agent = true); nextHeartbeat = System.currentTimeMillis() + 30000 }
@@ -210,7 +211,7 @@ internal object CompanionRuntime {
                     if (epoch != generation.get() || !running) return
                     if (error is CompanionApiError && error.status == 401) throw error
                     if (error is CompanionApiError && error.status in listOf(404, 409)) continue
-                    if (!didApply) runCatching { api.report(id, "Failed", error.message) }
+                    if (!didApply && error !is java.io.IOException) runCatching { api.report(id, "Failed", error.message) }
                     message = if (didApply) "적용 결과 보고를 다시 시도합니다." else error.message ?: "배경화면 적용에 실패했습니다."
                 }
             }

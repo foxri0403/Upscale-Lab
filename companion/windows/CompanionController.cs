@@ -110,7 +110,7 @@ internal sealed class CompanionController : IDisposable
     {
         Monitors = DisplayInventory.Read(); var state = await State(ct);
         var body = new { revision = state.InventoryRevision + 1, osVersion = RuntimeInformation.OSDescription,
-            agentVersion = "1.0.0", manufacturer = DisplayInventory.Hardware("SystemManufacturer"),
+            agentVersion = typeof(CompanionController).Assembly.GetName().Version?.ToString(3) ?? "1.0.1", manufacturer = DisplayInventory.Hardware("SystemManufacturer"),
             model = DisplayInventory.Hardware("SystemProductName"), architecture = RuntimeInformation.OSArchitecture.ToString(),
             supportsLive2D = engine.SupportsLive, supportsLockScreen = false,
             displays = Monitors.Select(m => new { m.NativeId, m.Name, m.Width, m.Height, m.Scale, m.Rotation, m.OffsetX, m.OffsetY,
@@ -159,6 +159,8 @@ internal sealed class CompanionController : IDisposable
                         if (!display.Wallpapers.Any(a => a.Target == "Desktop" && a.Sequence == command.Sequence && a.DesiredAssetId == command.AssetId)) continue;
                         var monitor = Monitors.SingleOrDefault(m => m.NativeId == display.NativeId)
                             ?? throw new InvalidOperationException("연결된 모니터를 찾지 못했습니다.");
+                        // Revalidate expiration/revocation after downloading; state alone retains expired desired assignments.
+                        await api.Call<WallpaperManifest>($"/api/agent/commands/{command.Id}/manifest", agent: true, ct: ct);
                         ct.ThrowIfCancellationRequested();
                         if (!applied.TryGetValue(monitor.NativeId, out var old) || old.CommandId != command.Id || !engine.Matches(monitor, old))
                         {
@@ -173,7 +175,9 @@ internal sealed class CompanionController : IDisposable
                     catch (Exception error)
                     {
                         if (error is ApiFailure { Status: 401 }) throw;
-                        if (!didApply) try { await api.Report(command.Id, "Failed", error.Message[..Math.Min(error.Message.Length, 900)], ct); } catch { }
+                        if (!didApply && error is not (HttpRequestException or TaskCanceledException) &&
+                            (error is not IOException || error is InvalidDataException))
+                            try { await api.Report(command.Id, "Failed", error.Message[..Math.Min(error.Message.Length, 900)], ct); } catch { }
                         Notify(didApply ? "적용 결과 보고를 다시 시도합니다." : error.Message);
                     }
                 }

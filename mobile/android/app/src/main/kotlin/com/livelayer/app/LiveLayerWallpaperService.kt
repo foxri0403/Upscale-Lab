@@ -198,8 +198,7 @@ class LiveLayerWallpaperService : WallpaperService() {
 
         private fun draw() {
             if (!lifecycle.surfaceReady || !surfaceHolder.surface.isValid) return
-            var rendered = false
-            WallpaperFrameRenderer.render(
+            val rendered = WallpaperFrameRenderer.render(
                 acquire = { surfaceHolder.lockCanvas() },
                 draw = { canvas ->
                     canvas.drawColor(Color.BLACK)
@@ -228,9 +227,9 @@ class LiveLayerWallpaperService : WallpaperService() {
                             layer.rotation, layer.scale * if (live2D) 1.08f else 1f)
                     }
                 },
-                post = { surfaceHolder.unlockCanvasAndPost(it); rendered = layers.isNotEmpty() },
+                post = { surfaceHolder.unlockCanvasAndPost(it) },
                 failed = { Log.w("Live2D", "Wallpaper surface changed while drawing", it) })
-            if (rendered && agent && !isPreview && authorized() && preferences.getString("companion_rendered_manifest", null) != loadedManifest)
+            if (rendered && layers.isNotEmpty() && agent && !isPreview && authorized() && preferences.getString("companion_rendered_manifest", null) != loadedManifest)
                 preferences.edit().putString("companion_rendered_manifest", loadedManifest).apply()
         }
 

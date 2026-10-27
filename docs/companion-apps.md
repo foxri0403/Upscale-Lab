@@ -32,7 +32,7 @@ Windows 창을 닫으면 트레이에서 계속 실행합니다. 트레이의 �
 
 ## 빌드와 다운로드 배포
 
-APK 버전/빌드 번호는 `AGENTS.md`, `mobile/pubspec.yaml`, `mobile/README.md`를 함께 갱신합니다. 공유 서명 설정은 Git 밖 파일을 지정하고 `apksigner verify --print-certs`로 반드시 검증합니다. 최신 APK는 **1.0.0+30**, Windows 앱은 **1.0.0**입니다.
+APK 버전/빌드 번호는 `AGENTS.md`, `mobile/pubspec.yaml`, `mobile/README.md`를 함께 갱신합니다. 공유 서명 설정은 Git 밖 파일을 지정하고 `apksigner verify --print-certs`로 반드시 검증합니다. 최신 APK는 **1.0.1+31**, Windows 앱은 **1.0.1**입니다.
 
 ```powershell
 $env:UPSCALE_SIGNING_PROPERTIES_FILE = 'C:\UpscaleLab-Secrets\key.properties'
@@ -50,3 +50,5 @@ $env:UPSCALE_SIGNING_PROPERTIES_FILE = 'C:\UpscaleLab-Secrets\key.properties'
 `backend/tools/UpscaleLab.DatabaseTool`은 운영자가 명시적으로 실행하는 유지보수 도구입니다. `status`로 대상 DB/소유자와 미적용 migration을 확인하고, `apply-companion /absolute/backup.dump`는 새 migration 하나만 남아 있을 때 `pg_dump` 전체 백업을 완료한 뒤 적용합니다. DB 자격은 서비스와 같은 보안 환경 공급자로만 받으며 명령행 인수나 로그에 출력하지 않습니다. API 시작 시 자동 migration이나 자동 배포를 추가하지 않습니다.
 
 관련 규격: [agent API](agent-api.md). 플랫폼 문서: [Windows IDesktopWallpaper](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-idesktopwallpaper), [Android Display.Mode](https://developer.android.com/reference/android/view/Display.Mode), [Android specialUse foreground service](https://developer.android.com/develop/background-work/services/fgs/service-types#special-use).
+
+검증: 백엔드 95건, Windows 계정·기기 자격 테스트 7건, Android 앱 자체 테스트 61건, 웹 및 클라우드 HTTP 점검 38건을 통과했습니다. Windows 실제 모니터에서 1920×1080/60 Hz 정보를 읽었으며 다운로드 파일은 서명 검증한 APK/실행 가능한 EXE 헤더·바이트 크기·SHA-256을 대조합니다. 계정 로그인 후 실제 배경화면 변경은 실기기 통합 검증이 남아 있습니다. Android 전체 하위 프로젝트 테스트에서는 외부 image_picker 플러그인 10건이 테스트 리소스 누락으로 실패했으며, `:app:testDebugUnitTest`로 앱 자체 범위를 분리해 통과를 확인했습니다.
