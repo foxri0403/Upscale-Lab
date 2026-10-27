@@ -11,13 +11,11 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string>(
-                name: "Operation",
-                table: "processing_jobs",
-                type: "character varying(30)",
-                maxLength: 30,
-                nullable: false,
-                defaultValue: "Layers");
+            // Present already in production databases that ran AddLocalGpuProcessing.
+            migrationBuilder.Sql("""
+                ALTER TABLE public.processing_jobs
+                ADD COLUMN IF NOT EXISTS "Operation" character varying(30) NOT NULL DEFAULT 'Layers';
+                """);
 
             migrationBuilder.AddColumn<int>(
                 name: "ResultHeight",
@@ -40,12 +38,42 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                 nullable: false,
                 defaultValue: 0);
 
-            migrationBuilder.AddColumn<int>(
-                name: "UpscaleFactor",
-                table: "processing_jobs",
-                type: "integer",
-                nullable: false,
-                defaultValue: 2);
+            migrationBuilder.Sql("""
+                ALTER TABLE public.processing_jobs
+                ADD COLUMN IF NOT EXISTS "UpscaleFactor" integer NOT NULL DEFAULT 2;
+                """);
+
+            // Preserve upscaled images from databases using the older GPU schema.
+            // Fresh installations have no UpscaledObjectKey; the DO block is then a no-op.
+            migrationBuilder.Sql("""
+                DO $migration$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'processing_jobs'
+                          AND column_name = 'UpscaledObjectKey'
+                    ) AND EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'processing_jobs'
+                          AND column_name = 'OutputWidth'
+                    ) AND EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'processing_jobs'
+                          AND column_name = 'OutputHeight'
+                    ) THEN
+                        UPDATE public.processing_jobs
+                        SET "ResultObjectKey" = "UpscaledObjectKey",
+                            "ResultWidth" = COALESCE("OutputWidth", 0),
+                            "ResultHeight" = COALESCE("OutputHeight", 0)
+                        WHERE "UpscaledObjectKey" IS NOT NULL
+                          AND "ResultObjectKey" IS NULL;
+                    END IF;
+                END
+                $migration$;
+                """);
 
             migrationBuilder.AddColumn<string>(
                 name: "AgentTokenHash",
@@ -251,12 +279,12 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         onDelete: ReferentialAction.Restrict);
                 });
 
-            migrationBuilder.CreateIndex(
-                name: "IX_processing_jobs_ProjectId",
-                table: "processing_jobs",
-                column: "ProjectId",
-                unique: true,
-                filter: "\"Status\" IN ('Queued', 'Processing')");
+            // Already present in production databases that ran AddLocalGpuProcessing.
+            migrationBuilder.Sql("""
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_processing_jobs_ProjectId"
+                ON public.processing_jobs ("ProjectId")
+                WHERE "Status" IN ('Queued', 'Processing');
+                """);
 
             migrationBuilder.CreateIndex(
                 name: "IX_devices_AgentTokenHash",
@@ -344,17 +372,26 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
             migrationBuilder.DropTable(
                 name: "wallpaper_assets");
 
-            migrationBuilder.DropIndex(
-                name: "IX_processing_jobs_ProjectId",
-                table: "processing_jobs");
+            // Never remove an index or columns owned by the older production migration.
+            // On a fresh database (no AddLocalGpuProcessing), undo what this migration added.
+            migrationBuilder.Sql("""
+                DO $migration$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM public."__EFMigrationsHistory"
+                        WHERE "MigrationId" = '20261013114349_AddLocalGpuProcessing'
+                    ) THEN
+                        DROP INDEX IF EXISTS public."IX_processing_jobs_ProjectId";
+                    END IF;
+                END
+                $migration$;
+                """);
 
             migrationBuilder.DropIndex(
                 name: "IX_devices_AgentTokenHash",
                 table: "devices");
 
-            migrationBuilder.DropColumn(
-                name: "Operation",
-                table: "processing_jobs");
+
 
             migrationBuilder.DropColumn(
                 name: "ResultHeight",
@@ -368,9 +405,20 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                 name: "ResultWidth",
                 table: "processing_jobs");
 
-            migrationBuilder.DropColumn(
-                name: "UpscaleFactor",
-                table: "processing_jobs");
+            migrationBuilder.Sql("""
+                DO $migration$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM public."__EFMigrationsHistory"
+                        WHERE "MigrationId" = '20261013114349_AddLocalGpuProcessing'
+                    ) THEN
+                        ALTER TABLE public.processing_jobs
+                            DROP COLUMN IF EXISTS "Operation",
+                            DROP COLUMN IF EXISTS "UpscaleFactor";
+                    END IF;
+                END
+                $migration$;
+                """);
 
             migrationBuilder.DropColumn(
                 name: "AgentTokenHash",
