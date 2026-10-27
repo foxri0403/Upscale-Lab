@@ -83,6 +83,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         entity.HasIndex(x => x.AgentTokenHash).IsUnique();
         entity.Property(x => x.OsVersion).HasMaxLength(120);
         entity.Property(x => x.AgentVersion).HasMaxLength(40);
+        entity.Property(x => x.Manufacturer).HasMaxLength(120);
+        entity.Property(x => x.Model).HasMaxLength(120);
+        entity.Property(x => x.Architecture).HasMaxLength(32);
         entity.Property(x => x.ControlVersion).IsConcurrencyToken();
         entity.HasOne(x => x.User).WithMany(x => x.Devices).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
     }
@@ -188,6 +191,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         display.ToTable("device_displays");
         display.Property(x => x.NativeId).HasMaxLength(200).IsRequired();
         display.Property(x => x.Name).HasMaxLength(120).IsRequired();
+        display.Property(x => x.CanApplyWallpaper).HasDefaultValue(true);
         display.HasIndex(x => new { x.DeviceId, x.NativeId }).IsUnique();
         display.HasOne(x => x.Device).WithMany(x => x.Displays).HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Cascade);
 

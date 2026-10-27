@@ -60,7 +60,8 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
                     d.OffsetX, d.OffsetY, d.IsPrimary, d.IsConnected,
                     assignments.Where(x => x.DeviceDisplayId == d.Id).Select(x =>
                         new AssignmentResponse(x.Target, x.DesiredAssetId, x.ReportedAssetId,
-                            x.Observation, x.Sequence, x.LastReportedAt)).ToList())).ToList());
+                            x.Observation, x.Sequence, x.LastReportedAt)).ToList(), d.RefreshRateHz, d.CanApplyWallpaper)).ToList(),
+            device.Manufacturer, device.Model, device.Architecture);
     }
 
     public async Task<DeviceState> HeartbeatAsync(AgentIdentity agent, AgentHeartbeat request, CancellationToken ct)
@@ -70,6 +71,8 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
             throw new ConflictException("이전 기기 상태입니다. inventoryRevision보다 큰 revision을 전송하세요.");
         if (request.Revision < 1 || string.IsNullOrWhiteSpace(request.OsVersion) || request.OsVersion.Length > 120 ||
             string.IsNullOrWhiteSpace(request.AgentVersion) || request.AgentVersion.Length > 40 ||
+            (request.Manufacturer?.Length ?? 0) > 120 || (request.Model?.Length ?? 0) > 120 ||
+            (request.Architecture?.Length ?? 0) > 32 ||
             request.Displays is null || request.Displays.Count > 16 || request.Displays.Any(x => x is null) ||
             request.Displays.Select(x => x.NativeId).Distinct(StringComparer.Ordinal).Count() != request.Displays.Count ||
             request.Displays.Count(x => x.IsConnected && x.IsPrimary) > 1)
@@ -82,6 +85,8 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
                 string.IsNullOrWhiteSpace(display.Name) || display.Name.Length > 120 ||
                 display.Width is < 1 or > 32768 || display.Height is < 1 or > 32768 ||
                 !double.IsFinite(display.Scale) || display.Scale is < 0.25 or > 8 ||
+                (display.RefreshRateHz.HasValue && (!double.IsFinite(display.RefreshRateHz.Value) ||
+                    display.RefreshRateHz is < 1 or > 1000)) ||
                 display.Rotation is not (0 or 90 or 180 or 270) ||
                 (display.Wallpapers?.Count ?? 0) > 3 || display.Wallpapers?.Any(x => x is null) == true ||
                 display.Wallpapers?.Select(x => x.Target).Distinct().Count() != display.Wallpapers?.Count)
@@ -100,6 +105,9 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
 
         device.OsVersion = request.OsVersion.Trim();
         device.AgentVersion = request.AgentVersion.Trim();
+        device.Manufacturer = request.Manufacturer?.Trim() ?? "";
+        device.Model = request.Model?.Trim() ?? "";
+        device.Architecture = request.Architecture?.Trim() ?? "";
         device.SupportsLive2D = request.SupportsLive2D;
         device.SupportsLockScreen = request.SupportsLockScreen;
         device.InventoryRevision = request.Revision;
@@ -117,6 +125,8 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
             display.Scale = item.Scale; display.Rotation = item.Rotation;
             display.OffsetX = item.OffsetX; display.OffsetY = item.OffsetY;
             display.IsPrimary = item.IsPrimary; display.IsConnected = item.IsConnected;
+            display.RefreshRateHz = item.RefreshRateHz;
+            display.CanApplyWallpaper = item.CanApplyWallpaper;
             foreach (var report in item.Wallpapers ?? [])
             {
                 var assignment = await Assignment(display, report.Target, ct);
@@ -143,6 +153,7 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
         }
         var display = device.Displays.SingleOrDefault(x => x.Id == request.DisplayId && x.IsConnected)
             ?? throw new NotFoundException("연결된 화면을 찾을 수 없습니다.");
+        if (!display.CanApplyWallpaper) throw new ConflictException("이 화면은 정보 조회만 지원합니다.");
         var asset = await db.WallpaperAssets.SingleOrDefaultAsync(
             x => x.Id == request.AssetId && x.UserId == userId && !x.IsArchived, ct)
             ?? throw new NotFoundException("내 배경화면을 찾을 수 없습니다.");

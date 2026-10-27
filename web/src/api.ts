@@ -258,12 +258,18 @@ export type CloudState = {
   platform: "Windows" | "Android";
   recentlySeen: boolean;
   isLinked: boolean;
+  manufacturer?: string;
+  model?: string;
+  architecture?: string;
   displays: {
     id: string;
     name: string;
     width: number;
     height: number;
     isConnected: boolean;
+    refreshRateHz?: number | null;
+    canApplyWallpaper?: boolean;
+    isPrimary?: boolean;
     wallpapers: {
       target: "Desktop" | "Home" | "Lock";
       desiredAssetId?: string;

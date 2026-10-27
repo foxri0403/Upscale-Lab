@@ -73,6 +73,33 @@ class MainActivity : FlutterActivity() {
     private var pendingLegacyMigration: PendingLegacyMigration? = null
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        CompanionRuntime.initialize(applicationContext)
+        val companionState = CompanionStore(applicationContext).read()
+        if (companionState.optBoolean("remember") && companionState.optBoolean("enabled") && companionState.has("session"))
+            androidx.core.content.ContextCompat.startForegroundService(this, Intent(this, CompanionSyncService::class.java))
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "upscale/companion").setMethodCallHandler { call, result ->
+            if (call.method == "status") { result.success(CompanionRuntime.status()); return@setMethodCallHandler }
+            if (call.method in listOf("login", "logout", "disable", "reconnect")) {
+                CompanionRuntime.invalidate()
+                stopService(Intent(this, CompanionSyncService::class.java))
+            }
+            CompanionRuntime.action(call.method, call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()) { value, error ->
+                runOnUiThread {
+                    if (error != null) result.error("companion_failed", error, null)
+                    else try {
+                        if (call.method == "activateLive") {
+                            startActivity(Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER)
+                                .putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, ComponentName(this, LiveLayerWallpaperService::class.java)))
+                        } else if (call.method in listOf("login", "enable", "reconnect")) {
+                            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+                                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2102)
+                            androidx.core.content.ContextCompat.startForegroundService(this, Intent(this, CompanionSyncService::class.java))
+                        }
+                        result.success(value)
+                    } catch (failure: Exception) { result.error("companion_failed", failure.message, null) }
+                }
+            }
+        }
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, "live_layer/tilt")
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink) {

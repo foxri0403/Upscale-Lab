@@ -43,12 +43,19 @@ export type Display = {
   connected: boolean;
   nativeId?: string;
   target?: string;
+  refreshRateHz?: number | null;
+  canApplyWallpaper?: boolean;
+  isPrimary?: boolean;
 };
 export type Device = {
   id: string;
   name: string;
   platform: "Windows" | "Android";
   osVersion?: string;
+  manufacturer?: string;
+  model?: string;
+  architecture?: string;
+  physicalDisplayCount?: number;
   online: boolean;
   displays: Display[];
 };

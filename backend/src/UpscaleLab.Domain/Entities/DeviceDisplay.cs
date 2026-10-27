@@ -14,4 +14,6 @@ public sealed class DeviceDisplay : BaseEntity
     public int OffsetY { get; set; }
     public bool IsPrimary { get; set; }
     public bool IsConnected { get; set; }
+    public double? RefreshRateHz { get; set; }
+    public bool CanApplyWallpaper { get; set; } = true;
 }

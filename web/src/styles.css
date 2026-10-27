@@ -2546,6 +2546,16 @@ td:last-child {
   display: block;
   margin-top: 5px;
 }
+.download-platform > div { flex: 1; min-width: 0; }
+.download-platform > svg { flex-shrink: 0; }
+.download-platform .button { white-space: nowrap; font-size: .8rem; padding: 12px; }
+.download-checksum { font-size: .68rem; margin-top: 8px; }
+.download-checksum code { display: block; overflow-wrap: anywhere; margin-top: 6px; }
+.device-hardware { color: var(--muted); margin: 0 0 18px; font-size: .8rem; }
+@media (max-width: 600px) {
+  .download-platform { flex-wrap: wrap; }
+  .download-platform .button { margin-left: 44px; }
+}
 .toast {
   position: fixed;
   z-index: 100;

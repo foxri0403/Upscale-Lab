@@ -137,7 +137,7 @@ export function Studio({ route }: { route: string }) {
   const published = isImageShared(picture);
   const options = library.devices.flatMap((d) =>
     d.displays
-      .filter((s) => s.connected)
+      .filter((s) => s.connected && s.canApplyWallpaper !== false)
       .map((s) => ({ id: `${d.id}/${s.id}`, name: `${d.name} · ${s.name}` })),
   );
   const selectedTarget = options.some((o) => o.id === target)
@@ -696,7 +696,7 @@ export function Studio({ route }: { route: string }) {
             className="button primary full"
             disabled={busy}
             onClick={async () => {
-              if (!(await save())) return;
+              if (!published && !(await save())) return;
               const [d, s] = selectedTarget.split("/");
               await apply({ ...picture, edit }, d, s);
               setDialog(null);

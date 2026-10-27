@@ -21,8 +21,6 @@ import {
   ArrowDownUp,
   X,
   Check,
-  Monitor,
-  Smartphone,
 } from "lucide-react";
 import { type Session } from "./auth";
 import {
@@ -48,6 +46,7 @@ import {
 } from "./ui";
 import { Studio } from "./Studio";
 import { Devices } from "./Devices";
+import { Downloads } from "./Downloads";
 import { cloud, request, post, type Asset } from "./api";
 import {
   fetchLibrary,
@@ -509,28 +508,7 @@ export function Workspace({
         )}
         {dialog === "downloads" && (
           <Modal title="연결 앱 다운로드" close={() => setDialog(null)}>
-            <p>
-              배경화면을 직접 적용하려면 같은 계정으로 로그인한 연결 앱이
-              필요합니다.
-            </p>
-            <div className="download-platform">
-              <Monitor />
-              <div>
-                <strong>Windows 연결 앱</strong>
-                <small>EXE · 배포 준비 중</small>
-              </div>
-            </div>
-            <div className="download-platform">
-              <Smartphone />
-              <div>
-                <strong>Android 연결 앱</strong>
-                <small>APK · 배포 준비 중</small>
-              </div>
-            </div>
-            <Notice>
-              새 연결 앱 설치 파일은 배포 준비 중입니다. 이미 준비된 연결 앱이
-              있다면 같은 계정과 발급된 기기 연결 키를 사용하세요.
-            </Notice>
+            <Downloads />
           </Modal>
         )}
       </div>

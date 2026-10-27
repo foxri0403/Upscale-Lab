@@ -14,6 +14,9 @@ public sealed class Device : BaseEntity
     public string? AgentTokenHash { get; set; }
     public string OsVersion { get; set; } = string.Empty;
     public string AgentVersion { get; set; } = string.Empty;
+    public string Manufacturer { get; set; } = string.Empty;
+    public string Model { get; set; } = string.Empty;
+    public string Architecture { get; set; } = string.Empty;
     public DateTime? LastSeenAt { get; set; }
     public long InventoryRevision { get; set; }
     public long CommandSequence { get; set; }

@@ -12,22 +12,28 @@ public sealed record DisplayInventory(
     [param: Range(1, 32768)] int Width,
     [param: Range(1, 32768)] int Height,
     double Scale = 1, int Rotation = 0, int OffsetX = 0, int OffsetY = 0,
-    bool IsPrimary = false, bool IsConnected = true, IReadOnlyList<WallpaperReport>? Wallpapers = null);
+    bool IsPrimary = false, bool IsConnected = true, IReadOnlyList<WallpaperReport>? Wallpapers = null,
+    [param: Range(1, 1000)] double? RefreshRateHz = null, bool CanApplyWallpaper = true);
 public sealed record AgentHeartbeat(
     [param: Range(1, long.MaxValue)] long Revision,
     [param: Required, MaxLength(120)] string OsVersion,
     [param: Required, MaxLength(40)] string AgentVersion,
     bool SupportsLive2D, bool SupportsLockScreen,
-    [param: Required, MaxLength(16)] IReadOnlyList<DisplayInventory> Displays);
+    [param: Required, MaxLength(16)] IReadOnlyList<DisplayInventory> Displays,
+    [param: MaxLength(120)] string? Manufacturer = null,
+    [param: MaxLength(120)] string? Model = null,
+    [param: MaxLength(32)] string? Architecture = null);
 public sealed record ApplyWallpaperRequest(Guid RequestId, Guid DisplayId, Guid AssetId, WallpaperTarget Target);
 public sealed record CommandReport(DeviceCommandStatus Status, [param: MaxLength(1000)] string? Error = null);
 public sealed record AssignmentResponse(WallpaperTarget Target, Guid? DesiredAssetId, Guid? ReportedAssetId,
     WallpaperObservation Observation, long Sequence, DateTime? LastReportedAt);
 public sealed record DisplayState(Guid Id, string NativeId, string Name, int Width, int Height, double Scale,
-    int Rotation, int OffsetX, int OffsetY, bool IsPrimary, bool IsConnected, IReadOnlyList<AssignmentResponse> Wallpapers);
+    int Rotation, int OffsetX, int OffsetY, bool IsPrimary, bool IsConnected, IReadOnlyList<AssignmentResponse> Wallpapers,
+    double? RefreshRateHz = null, bool CanApplyWallpaper = true);
 public sealed record DeviceState(Guid Id, DevicePlatform Platform, string Name, string OsVersion, string AgentVersion,
     bool IsLinked, DateTime? LastSeenAt, bool RecentlySeen, long InventoryRevision, bool SupportsLive2D,
-    bool SupportsLockScreen, IReadOnlyList<DisplayState> Displays);
+    bool SupportsLockScreen, IReadOnlyList<DisplayState> Displays, string Manufacturer = "", string Model = "",
+    string Architecture = "");
 public sealed record DeviceCommandResponse(Guid Id, Guid DeviceId, Guid DisplayId, Guid AssetId, WallpaperTarget Target,
     Guid RequestId, long Sequence, DeviceCommandStatus Status, DateTime ExpiresAt, string? Error);
 

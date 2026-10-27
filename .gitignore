@@ -77,3 +77,4 @@ gpu-worker/main_backup.py
 web/node_modules/
 web/dist/
 web/*.tsbuildinfo
+web/public/downloads/

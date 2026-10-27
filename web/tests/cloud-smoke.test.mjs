@@ -5,6 +5,30 @@ const base = process.env.WEB_TEST_URL;
 const run = (name, action) => test(name, { skip: !base }, action);
 const get = (path) =>
   fetch(`${base}${path}`, { signal: AbortSignal.timeout(15000) });
+run("companion release manifest points to real Windows and signed Android binaries", async () => {
+  const response = await get("/downloads/manifest.json");
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /json/);
+  assert.match(response.headers.get("cache-control"), /no-store/);
+  const manifest = await response.json();
+  assert.deepEqual(manifest.releases.map(r => r.platform).sort(), ["Android", "Windows"]);
+  for (const release of manifest.releases) {
+    assert.match(release.sha256, /^[a-f0-9]{64}$/);
+    assert.ok(release.sizeBytes > 1000000);
+    assert.match(release.url, /^\/downloads\/[A-Za-z0-9_.-]+\.(exe|apk)$/);
+    const head = await fetch(`${base}${release.url}`, { method: "HEAD", signal: AbortSignal.timeout(15000) });
+    assert.equal(head.status, 200);
+    assert.equal(Number(head.headers.get("content-length")), release.sizeBytes);
+    assert.doesNotMatch(head.headers.get("content-type"), /text\/html/);
+    const sample = await fetch(`${base}${release.url}`, { headers: { Range: "bytes=0-3" }, signal: AbortSignal.timeout(15000) });
+    assert.equal(sample.status, 206);
+    const magic = Buffer.from(await sample.arrayBuffer());
+    assert.equal(magic.subarray(0, 2).toString("ascii"), release.platform === "Windows" ? "MZ" : "PK");
+  }
+});
+run("missing companion download returns 404 instead of the SPA shell", async () => {
+  assert.equal((await get("/downloads/not-a-release.apk")).status, 404);
+});
 run(
   "cloud serves the landing page and a real compiled JavaScript bundle",
   async () => {

@@ -219,7 +219,7 @@ export function Devices() {
         <div className="device-grid">
           {library.devices.map((device) => {
             const mobile = device.platform === "Android";
-            const activeTab = phoneTab[device.id] || device.displays[0].id;
+            const activeTab = phoneTab[device.id] || device.displays[0]?.id;
             return (
               <article
                 key={device.id}
@@ -235,7 +235,7 @@ export function Devices() {
                       {cloud
                         ? device.osVersion || device.platform
                         : device.platform + (mobile ? "" : " 11")}
-                      {!mobile && ` · 모니터 ${device.displays.length}개`}
+                      {` · 화면 ${device.physicalDisplayCount ?? new Set(device.displays.filter(d => d.connected).map(d => d.nativeId ?? d.id)).size}개`}
                     </p>
                   </div>
                   <span
@@ -266,6 +266,8 @@ export function Devices() {
                     </div>
                   </details>
                 </div>
+                {[device.manufacturer, device.model, device.architecture].some(Boolean) &&
+                  <p className="device-hardware">{[device.manufacturer, device.model, device.architecture].filter(Boolean).join(" · ")}</p>}
                 {mobile && (
                   <div className="phone-tabs">
                     {device.displays.map((s) => (
@@ -299,7 +301,7 @@ export function Devices() {
                         <div className="display-card" key={display.id}>
                           <div className="display-label">
                             <h3>{display.name}</h3>
-                            {!mobile && i === 0 && <span>주 화면</span>}
+                            {!mobile && (display.isPrimary ?? i === 0) && <span>주 화면</span>}
                             <span
                               className={
                                 display.connected ? "connected-text" : "muted"
@@ -327,6 +329,7 @@ export function Devices() {
                           </div>
                           <p className="display-resolution">
                             {display.resolution}
+                            {display.refreshRateHz != null && ` · ${Number(display.refreshRateHz.toFixed(2))} Hz`}
                           </p>
                           <div className="wallpaper-state">
                             <span>현재 배경화면</span>
@@ -340,11 +343,11 @@ export function Devices() {
                           <button
                             className="button secondary full"
                             disabled={
-                              !library.images.length || !display.connected
+                              !library.images.length || !display.connected || display.canApplyWallpaper === false
                             }
                             onClick={() => choose(device, display.id)}
                           >
-                            배경화면 변경
+                            {display.canApplyWallpaper === false ? "정보 조회 전용 화면" : "배경화면 변경"}
                           </button>
                         </div>
                       );
@@ -434,8 +437,7 @@ export function Devices() {
           {agentToken ? (
             <>
               <Notice>
-                이 키는 지금 한 번만 표시됩니다. 연결 앱에서 같은 계정으로
-                로그인하고 아래 기기 ID와 연결 키를 입력하세요.
+                이 키는 수동 연동용으로 한 번만 표시됩니다. 배포된 연결 앱은 같은 계정으로 로그인하면 기기를 자동 등록합니다.
               </Notice>
               <label>
                 기기 ID

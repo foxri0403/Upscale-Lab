@@ -25,6 +25,18 @@ server {
         proxy_send_timeout 180s;
     }
 
+    location = /downloads/manifest.json {
+        add_header Cache-Control "no-store";
+        add_header X-Content-Type-Options nosniff always;
+        try_files $uri =404;
+    }
+    location ^~ /downloads/ {
+        types { application/vnd.android.package-archive apk; application/octet-stream exe; }
+        default_type application/octet-stream;
+        add_header X-Content-Type-Options nosniff always;
+        add_header Content-Disposition attachment;
+        try_files $uri =404;
+    }
     location /assets/ {
         try_files $uri =404;
         expires 1y;

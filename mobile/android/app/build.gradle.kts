@@ -75,6 +75,7 @@ android {
     }
 
     defaultConfig {
+        manifestPlaceholders["companionCleartext"] = providers.gradleProperty("companionAllowHttp").orElse("false").get()
         applicationId = "com.livelayer.app"
         minSdk = maxOf(24, flutter.minSdkVersion)
         targetSdk = flutter.targetSdkVersion

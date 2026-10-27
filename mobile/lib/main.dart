@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'companion.dart';
 
 import 'models/live_layer_models.dart';
 import 'services/api_client.dart';
@@ -29,7 +30,10 @@ Future<void> _logoutToLogin(BuildContext context, ApiClient apiClient) async {
   );
 }
 
-Future<void> main() async {
+Future<void> main() => runCompanion();
+
+// Kept for reuse of the previous editor, authentication and gallery flows.
+Future<void> legacyMain() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Keep both system bars visible. Android chooses three-button or gesture
   // navigation according to the device settings; SafeArea reserves its insets.

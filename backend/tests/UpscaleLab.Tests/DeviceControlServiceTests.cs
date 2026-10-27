@@ -44,6 +44,51 @@ public sealed class DeviceControlServiceTests
         new(nativeId, "Monitor", 1920, 1080, Wallpapers: reports);
 
     [Fact]
+    public async Task CompanionInventory_PersistsFractionalRefreshAndRejectsApplyToInformationOnlyDisplay()
+    {
+        await using var db = WorkflowData.Db();
+        var device = WorkflowData.Device(Guid.NewGuid());
+        var asset = new WallpaperAsset { UserId = device.UserId, ManifestJson = "{}" };
+        db.AddRange(device, asset); await db.SaveChangesAsync();
+        var service = new DeviceControlService(db, new WorkflowClock());
+        await service.RotateTokenAsync(device.UserId, device.Id, Ct);
+        var identity = new AgentIdentity(device.Id, device.UserId);
+        var state = await service.HeartbeatAsync(identity, Inventory(1,
+            Screen() with { RefreshRateHz = 59.94005994 },
+            Screen("external") with { RefreshRateHz = 144, CanApplyWallpaper = false }) with {
+                Manufacturer = "Maker", Model = "Model", Architecture = "Arm64"
+            }, Ct);
+        Assert.Equal("Maker", state.Manufacturer);
+        Assert.Equal("Model", state.Model);
+        Assert.Equal("Arm64", state.Architecture);
+        Assert.Equal(59.94005994, state.Displays.Single(d => d.NativeId == "monitor-1").RefreshRateHz);
+        var external = state.Displays.Single(d => d.NativeId == "external");
+        Assert.False(external.CanApplyWallpaper);
+        await Assert.ThrowsAsync<ConflictException>(() => service.ApplyAsync(device.UserId, device.Id,
+            new(Guid.NewGuid(), external.Id, asset.Id, WallpaperTarget.Desktop), Ct));
+        var compatible = await service.HeartbeatAsync(identity, Inventory(2, Screen()), Ct);
+        Assert.True(compatible.Displays.Single(d => d.NativeId == "monitor-1").CanApplyWallpaper);
+        Assert.Null(compatible.Displays.Single(d => d.NativeId == "monitor-1").RefreshRateHz);
+    }
+
+    [Theory]
+    [InlineData(-1)] [InlineData(0)] [InlineData(1001)] [InlineData(double.NaN)] [InlineData(double.PositiveInfinity)]
+    public async Task CompanionInventory_InvalidRefreshDoesNotMutatePreviouslyReportedState(double rate)
+    {
+        await using var db = WorkflowData.Db();
+        var device = WorkflowData.Device(Guid.NewGuid()); db.Add(device); await db.SaveChangesAsync();
+        var service = new DeviceControlService(db, new WorkflowClock());
+        await service.RotateTokenAsync(device.UserId, device.Id, Ct);
+        var identity = new AgentIdentity(device.Id, device.UserId);
+        await service.HeartbeatAsync(identity, Inventory(1, Screen() with { RefreshRateHz = 120 }) with { Model = "Before" }, Ct);
+        await Assert.ThrowsAsync<ValidationException>(() => service.HeartbeatAsync(identity,
+            Inventory(2, Screen() with { RefreshRateHz = rate }) with { Model = "After" }, Ct));
+        var state = await service.GetStateAsync(device.UserId, device.Id, Ct);
+        Assert.Equal(1, state.InventoryRevision); Assert.Equal("Before", state.Model);
+        Assert.Equal(120, state.Displays.Single().RefreshRateHz);
+    }
+
+    [Fact]
     public async Task Credentials_AreHashedRotatedRevokedAndOwned()
     {
         await using var db = WorkflowData.Db();

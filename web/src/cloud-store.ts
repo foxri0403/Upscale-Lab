@@ -124,6 +124,10 @@ export async function fetchLibrary(
     name: s.name,
     platform: s.platform,
     osVersion: s.osVersion,
+    manufacturer: s.manufacturer,
+    model: s.model,
+    architecture: s.architecture,
+    physicalDisplayCount: s.displays.filter(d => d.isConnected).length,
     online: s.recentlySeen,
     displays: s.displays.flatMap((d) => {
       const assignments = d.wallpapers.length
@@ -141,13 +145,16 @@ export async function fetchLibrary(
         nativeId: d.id,
         target: w.target,
         name:
-          s.platform === "Android"
+          s.platform === "Android" && d.canApplyWallpaper !== false
             ? w.target === "Lock"
               ? "잠금 화면"
               : "홈 화면"
             : d.name,
         resolution: `${d.width} × ${d.height}`,
         connected: d.isConnected,
+        refreshRateHz: d.refreshRateHz,
+        canApplyWallpaper: d.canApplyWallpaper ?? true,
+        isPrimary: d.isPrimary,
         current: w.reportedAssetId ? `asset:${w.reportedAssetId}` : "",
         desired:
           w.desiredAssetId && w.desiredAssetId !== w.reportedAssetId
