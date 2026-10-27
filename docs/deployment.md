@@ -6,6 +6,10 @@
 
 ## 웹 기기 관리 변경의 수동 적용
 
+이미지 설정의 이름 변경 API는 `PATCH /api/projects/{id}`, `PATCH /api/wallpapers/{id}`이며 소유권과 공유 상태를 검증합니다. 이 API 추가에는 새 migration이 필요하지 않습니다. 배경화면 목록의 본인 응답에는 원본 프로젝트 연결이 포함되어, 원본에서 만든 공개 버전도 웹의 편집 잠금에 반영됩니다.
+
+운영 서버의 오래된 Git 체크아웃에는 현재 배포 코드가 빠질 수 있으므로 그 폴더를 그대로 빌드해 덮어쓰지 않습니다. 현재 실행 파일 폴더의 `SOURCE_REVISION`, `SOURCE_DIRECTORY`를 기준으로 배포 소스를 확인합니다. 완전한 백엔드 소스는 `/home/ubuntu/upscale-api-sources/<revision>/backend`에 별도로 보관합니다. 실행 파일은 교체 전 `/home/ubuntu/deploy-backups/api/<revision>/`에 백업합니다. RunPod 통합 코드는 기존 `feature/main-runpod-integration` 내용을 main에 합쳐 유지하며 공급자 설정·비밀값은 기존 서버 설정을 사용합니다.
+
 2026-10-26 변경은 기존 .NET 8 API에 기기/화면/적용 명령/결과물 API를 추가합니다. 웹 UI와 새 EXE/APK는 포함하지 않습니다. 공급자 연결과 운영 DB 적용도 자동으로 수행하지 않습니다.
 
 1. `AddPersistentAuthSessions`까지 기존 migration 적용 상태와 백업을 확인합니다.

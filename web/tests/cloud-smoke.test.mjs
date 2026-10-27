@@ -21,6 +21,7 @@ run(
     const code = await bundle.text();
     assert.match(code, /\/api\/gallery/, "deployed UI must query the existing mobile gallery");
     assert.match(code, /\/api\/auth\/find-id/, "deployed UI must include mobile ID recovery");
+    assert.ok(code.includes("/app/studio?new=1"), "image addition must open a new studio");
   },
 );
 run("runtime configuration enables same-origin cloud API", async () => {
@@ -63,6 +64,22 @@ run("shared wallpaper API returns JSON, never the SPA fallback", async () => {
   const r = await get("/api/wallpapers/shared");
   assert.equal(r.status, 200);
   assert.ok(Array.isArray(await r.json()));
+});
+run("image settings PATCH routes exist and require authentication", async () => {
+  for (const resource of ["projects", "wallpapers"]) {
+    const path = `/api/${resource}/00000000-0000-0000-0000-000000000001`;
+    const options = await fetch(`${base}${path}`, {
+      method: "OPTIONS", signal: AbortSignal.timeout(15000),
+    });
+    assert.equal(options.status, 405, resource);
+    assert.match(options.headers.get("allow"), /PATCH/, resource);
+    const patch = await fetch(`${base}${path}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Unauthenticated test" }),
+      signal: AbortSignal.timeout(15000),
+    });
+    assert.equal(patch.status, 401, resource);
+  }
 });
 run(
   "the explore feed includes existing mobile posts alongside new wallpapers",
