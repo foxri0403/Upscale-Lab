@@ -13,7 +13,8 @@ import {
 import { useDemo } from "./Workspace";
 import { sampleImages, type Device, type Picture } from "./model";
 import { Modal, Notice, Empty, PictureView } from "./ui";
-import { cloud, post, request, type CloudDevice } from "./api";
+import { cloud, post, request } from "./api";
+import { Downloads } from "./Downloads";
 
 export function Devices() {
   const { library, session, update, toast, apply, refresh } = useDemo();
@@ -70,32 +71,7 @@ export function Devices() {
   async function connect(e: FormEvent) {
     e.preventDefault();
     if (!deviceName.trim()) return;
-    if (cloud) {
-      setBusy(true);
-      try {
-        const d = await post<CloudDevice>("/api/devices", {
-          platform,
-          deviceName: deviceName.trim(),
-          screenWidth: platform === "Windows" ? 1920 : 1080,
-          screenHeight: platform === "Windows" ? 1080 : 2400,
-          aspectRatio: platform === "Windows" ? "16:9" : "9:20",
-          orientation: platform === "Windows" ? "Landscape" : "Portrait",
-        });
-        setIssuedId(d.id);
-        const result = await post<{ token: string }>(
-          `/api/devices/${d.id}/agent-token`,
-          {},
-        );
-        setAgentToken(result.token);
-        await refresh();
-      } catch (e) {
-        toast((e as Error).message);
-        await refresh();
-      } finally {
-        setBusy(false);
-      }
-      return;
-    }
+    if (cloud) return;
     const device: Device = {
       id: crypto.randomUUID(),
       name: deviceName.trim(),
@@ -333,7 +309,7 @@ export function Devices() {
                           </p>
                           <div className="wallpaper-state">
                             <span>현재 배경화면</span>
-                            <strong>{current?.name || "이전 이미지"}</strong>
+                            <strong>{current?.name || (display.observation === "External" ? "기기에서 변경된 배경화면" : "확인된 이미지 없음")}</strong>
                           </div>
                           {desired && (
                             <div className="pending-wallpaper">
@@ -459,7 +435,7 @@ export function Devices() {
                 확인
               </button>
             </>
-          ) : (
+          ) : cloud ? <Downloads /> : (
             <>
               <p>
                 현재 로그인한 <strong>{session.name}</strong> 계정에{" "}

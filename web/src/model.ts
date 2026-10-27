@@ -46,6 +46,7 @@ export type Display = {
   refreshRateHz?: number | null;
   canApplyWallpaper?: boolean;
   isPrimary?: boolean;
+  observation?: string;
 };
 export type Device = {
   id: string;

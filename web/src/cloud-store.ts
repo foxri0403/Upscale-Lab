@@ -155,6 +155,7 @@ export async function fetchLibrary(
         refreshRateHz: d.refreshRateHz,
         canApplyWallpaper: d.canApplyWallpaper ?? true,
         isPrimary: d.isPrimary,
+        observation: w.observation,
         current: w.reportedAssetId ? `asset:${w.reportedAssetId}` : "",
         desired:
           w.desiredAssetId && w.desiredAssetId !== w.reportedAssetId
