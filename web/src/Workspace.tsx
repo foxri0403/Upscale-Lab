@@ -166,6 +166,9 @@ export function Workspace({
               background: previous.background,
               foregrounds: previous.foregrounds,
               jobId: previous.jobId,
+              width: previous.width,
+              height: previous.height,
+              contentType: previous.contentType,
               detailsUntil: previous.detailsUntil,
             }
           : p;

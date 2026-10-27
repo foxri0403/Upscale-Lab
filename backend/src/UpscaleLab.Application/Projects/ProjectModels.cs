@@ -21,7 +21,8 @@ public sealed record ProjectSummaryResponse(
     int LayerCount,
     string? FailureReason,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    string? OriginalContentType = null);
 
 public sealed record ProjectDetailResponse(
     Guid Id,
@@ -34,7 +35,8 @@ public sealed record ProjectDetailResponse(
     DateTime CreatedAt,
     DateTime UpdatedAt,
     IReadOnlyList<LayerResponse> Layers,
-    ProcessingStatusResponse? LatestJob);
+    ProcessingStatusResponse? LatestJob,
+    string? OriginalContentType = null);
 
 public sealed record LayerResponse(
     Guid Id,

@@ -22,6 +22,7 @@ run(
     assert.match(code, /\/api\/gallery/, "deployed UI must query the existing mobile gallery");
     assert.match(code, /\/api\/auth\/find-id/, "deployed UI must include mobile ID recovery");
     assert.ok(code.includes("/app/studio?new=1"), "image addition must open a new studio");
+    assert.ok(code.includes("originalContentType"), "studio must read authoritative image format metadata");
   },
 );
 run("runtime configuration enables same-origin cloud API", async () => {

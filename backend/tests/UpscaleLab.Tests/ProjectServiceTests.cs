@@ -32,6 +32,9 @@ public sealed class ProjectServiceTests
         Assert.Equal("character.png", project.OriginalImage.FileName);
         Assert.Contains($"users/{userId:N}/projects/{project.Id:N}/original/", project.OriginalImage.OriginalObjectKey);
         Assert.Equal(3, storage.Objects[project.OriginalImage.OriginalObjectKey].Length);
+        Assert.Equal("image/png", result.OriginalContentType);
+        Assert.Equal("image/png", (await service.GetAsync(userId, project.Id, CancellationToken.None)).OriginalContentType);
+        Assert.Equal("image/png", (await service.GetAllAsync(userId, CancellationToken.None)).Single().OriginalContentType);
     }
 
     [Fact]

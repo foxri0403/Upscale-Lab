@@ -17,6 +17,7 @@ import {
   Save,
   ArrowRight,
   RotateCcw,
+  Info,
 } from "lucide-react";
 import { useDemo } from "./Workspace";
 import {
@@ -32,6 +33,7 @@ import { detailPicture, processProject } from "./cloud-store";
 import { StudioUpload } from "./StudioUpload";
 import { ImageSharingToggle } from "./ImageSharingToggle";
 import { isImageShared } from "./image-sharing";
+import { ImageInformation } from "./ImageInformation";
 
 const tools: {
   id: Tool;
@@ -82,24 +84,18 @@ export function Studio({ route }: { route: string }) {
   } = useDemo();
   const parameters = new URLSearchParams(route.split("?")[1]);
   const id = parameters.get("id");
-  const picture = parameters.get("new") === "1" ? undefined : id
-    ? library.images.find((p) => p.id === id)
-    : library.images.find((p) => p.id === "fox") || library.images[0];
+  const picture = parameters.get("new") !== "1" && id
+    ? library.images.find((p) => p.id === id) : undefined;
   const [tool, setTool] = useState<Tool>("live");
-  const [view, setView] = useState("preview");
   const [edit, setEdit] = useState<Edit>(picture?.edit || defaultEdit);
   const [xy, setXy] = useState({ x: 0, y: 0 });
   const editRef = useRef(edit);
   editRef.current = edit;
-  const [dialog, setDialog] = useState<"share" | "apply" | null>(null);
+  const [dialog, setDialog] = useState<"share" | "apply" | "info" | null>(null);
   const [busy, setBusy] = useState(false);
   const [target, setTarget] = useState("pc/monitor1");
   const [copied, setCopied] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
-  useEffect(() => {
-    if (!id && picture)
-      navigate(`/app/studio?id=${encodeURIComponent(picture.id)}`, true);
-  }, [id, picture?.id]);
   useEffect(() => {
     setJob(null);
   }, [picture?.id]);
@@ -128,7 +124,6 @@ export function Studio({ route }: { route: string }) {
   }, [picture?.id, picture?.detailsUntil]);
   useEffect(() => {
     setEdit(picture?.edit || { ...defaultEdit });
-    setView("preview");
   }, [picture?.id]);
   const isFox =
     !!(picture?.background && picture.foregrounds?.length) ||
@@ -298,16 +293,8 @@ export function Studio({ route }: { route: string }) {
   return (
     <div className="studio-layout">
       <section className="studio-workspace">
-        <div className="page-heading studio-heading">
-          <div>
-            <h1>이미지 편집</h1>
-            <p>{picture.name}</p>
-          </div>
-          <span className={`save-state ${dirty ? "unsaved" : ""}`}>
-            <i />
-            {published ? "공유 중 · 편집 잠금" : dirty ? "저장하지 않은 변경" : "저장됨"}
-          </span>
-        </div>
+        <h1 className="visually-hidden">{picture.name} 작업실</h1>
+        <div className="studio-toolbar">
         <div className="tool-tabs" role="tablist" aria-label="이미지 편집 도구">
           {tools.map(({ id, name, icon: Icon }) => (
             <button
@@ -316,7 +303,6 @@ export function Studio({ route }: { route: string }) {
               aria-selected={tool === id}
               onClick={() => {
                 setTool(id);
-                setView("preview");
               }}
               className={tool === id ? "active" : ""}
             >
@@ -325,37 +311,24 @@ export function Studio({ route }: { route: string }) {
             </button>
           ))}
         </div>
+          <button className="button secondary image-information-button" onClick={() => setDialog("info")}>
+            <Info size={18} /> 이미지 정보
+          </button>
+        </div>
         <div className="canvas-panel">
-          <div className="preview-tabs" role="tablist" aria-label="레이어 보기">
-            {[
-              ["preview", "미리보기"],
-              ["background", "배경"],
-              ["foreground", "인물·사물"],
-            ].map(([key, label]) => (
-              <button
-                key={key}
-                role="tab"
-                aria-selected={view === key}
-                disabled={!isFox && key !== "preview"}
-                className={view === key ? "active" : ""}
-                onClick={() => setView(key)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
           <div
-            className={`canvas-stage ${view === "foreground" ? "checker" : ""} ${tool === "crop" ? "crop-stage" : ""}`}
+            className={`canvas-stage ${cropRatio ? "crop-stage" : ""}`}
             style={
               cropRatio
                 ? {
                     aspectRatio: cropRatio,
-                    maxWidth: edit.crop === "portrait" ? 320 : undefined,
+                    width: `min(100%, calc(var(--studio-canvas-height) * ${edit.crop === "wide" ? 16 / 9 : edit.crop === "portrait" ? 9 / 16 : 1}))`,
+                    height: "auto",
                   }
                 : undefined
             }
             onMouseMove={(e) => {
-              if (tool !== "live" || view !== "preview" || !isFox) return;
+              if (tool !== "live" || !isFox) return;
               const r = e.currentTarget.getBoundingClientRect();
               setXy({
                 x:
@@ -365,17 +338,13 @@ export function Studio({ route }: { route: string }) {
             }}
             onMouseLeave={() => setXy({ x: 0, y: 0 })}
           >
-            {isFox &&
-            (tool === "live" || tool === "layers" || view !== "preview") ? (
+            {isFox && (tool === "live" || tool === "layers") ? (
               <div
                 className="live-canvas"
                 style={{ filter: filterStyle(edit.filter) }}
               >
-                {view !== "foreground" && (
-                  <img src={backgroundSrc} alt="배경 레이어" />
-                )}
-                {view !== "background" &&
-                  edit.foreground &&
+                <img src={backgroundSrc} alt="배경 레이어" />
+                {edit.foreground &&
                   foregroundSrcs.map((src, index) => (
                     <img
                       key={src}
@@ -410,20 +379,7 @@ export function Studio({ route }: { route: string }) {
                 ? "가운데를 기준으로 선택한 비율로 저장합니다"
                 : "로컬 편집 미리보기"}
           </p>
-          <div className="filmstrip" aria-label="편집할 이미지 선택">
-            {library.images.slice(0, 8).map((p) => (
-              <button
-                key={p.id}
-                title={p.name}
-                aria-label={`${p.name} 선택`}
-                aria-pressed={p.id === picture.id}
-                className={p.id === picture.id ? "selected" : ""}
-                onClick={() => navigate(`/app/studio?id=${p.id}`)}
-              >
-                <img src={p.src} alt={p.name} />
-              </button>
-            ))}
-          </div>
+
         </div>
       </section>
       <aside className="feature-panel">
@@ -431,6 +387,10 @@ export function Studio({ route }: { route: string }) {
         <div className="feature-panel-heading">
           <h2>{active.name}</h2>
           <p>{active.description}</p>
+          <span className={`save-state ${dirty ? "unsaved" : ""}`}>
+            <i />
+            {published ? "공유 중 · 편집 잠금" : dirty ? "저장하지 않은 변경" : "저장됨"}
+          </span>
         </div>
         <fieldset className="photo-settings" disabled={published || busy}>
         {cloud && (tool === "upscale" || tool === "layers") && (
@@ -599,7 +559,6 @@ export function Studio({ route }: { route: string }) {
           className="text-button reset-edit"
           onClick={() => {
             setEdit({ ...defaultEdit });
-            setView("preview");
           }}
         >
           <RotateCcw size={14} /> 편집 초기화
@@ -663,6 +622,8 @@ export function Studio({ route }: { route: string }) {
           </button>
         </div>
       </aside>
+      {dialog === "info" && <ImageInformation picture={picture}
+        layerCount={isFox ? foregroundSrcs.length + 1 : 1} close={() => setDialog(null)} />}
       {dialog === "share" && (
         <Modal title="이미지 공유" close={() => setDialog(null)}>
           <img className="share-preview" src={picture.src} alt={picture.name} />

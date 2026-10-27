@@ -186,7 +186,8 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
         project.Layers.Count,
         project.FailureReason,
         project.CreatedAt,
-        project.UpdatedAt);
+        project.UpdatedAt,
+        project.OriginalImage.ContentType);
 
     private ProjectDetailResponse MapDetail(LiveLayerProject project) => new(
         project.Id,
@@ -199,7 +200,8 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
         project.CreatedAt,
         project.UpdatedAt,
         project.Layers.OrderBy(x => x.LayerOrder).Select(MapLayer).ToList(),
-        project.ProcessingJobs.OrderByDescending(x => x.CreatedAt).Select(ProjectProcessingService.MapStatus).FirstOrDefault());
+        project.ProcessingJobs.OrderByDescending(x => x.CreatedAt).Select(ProjectProcessingService.MapStatus).FirstOrDefault(),
+        project.OriginalImage.ContentType);
 
     private LayerResponse MapLayer(ImageLayer layer) => new(
         layer.Id,

@@ -32,6 +32,7 @@ export type Picture = {
   detailsUntil?: number;
   width?: number;
   height?: number;
+  contentType?: string;
 };
 export type Display = {
   id: string;
@@ -239,6 +240,7 @@ export async function uploadImage(file: File): Promise<Picture> {
       tags: [],
       width: canvas.width,
       height: canvas.height,
+      contentType: "image/jpeg",
       created: new Date().toISOString(),
     };
   } finally {

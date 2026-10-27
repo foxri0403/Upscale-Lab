@@ -219,6 +219,7 @@ export type Project = {
   latestJob?: Job;
   originalWidth?: number;
   originalHeight?: number;
+  originalContentType?: string;
 };
 export type Job = {
   jobId: string;
@@ -243,7 +244,7 @@ export type Manifest = {
   mode: string;
   width: number;
   height: number;
-  files: { source: string; role: string; order: number }[];
+  files: { source: string; role: string; order: number; contentType?: string }[];
 };
 export type CloudDevice = {
   id: string;

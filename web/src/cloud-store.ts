@@ -44,6 +44,7 @@ export function projectPicture(p: Project): Picture {
     tags: [],
     width: p.originalWidth,
     height: p.originalHeight,
+    contentType: p.originalContentType,
     created: p.createdAt,
     background,
     foregrounds: p.layers
@@ -72,6 +73,7 @@ export async function assetPicture(a: Asset, fresh = false): Promise<Picture> {
     tags: [],
     width: m.width,
     height: m.height,
+    contentType: files[0]?.contentType,
     created: a.createdAt,
     kind: a.mode === "Live2D" ? "Live 2D" : undefined,
     sharedId: a.isPublic ? a.id : undefined,
@@ -296,6 +298,7 @@ export async function detailPicture(p: Picture): Promise<Picture> {
     result.kind = "업스케일";
     result.width = detail.latestJob.resultWidth;
     result.height = detail.latestJob.resultHeight;
+    result.contentType = "image/png";
   }
   return result;
 }
