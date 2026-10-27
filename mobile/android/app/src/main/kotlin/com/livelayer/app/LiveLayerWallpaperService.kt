@@ -229,8 +229,10 @@ class LiveLayerWallpaperService : WallpaperService() {
                 },
                 post = { surfaceHolder.unlockCanvasAndPost(it) },
                 failed = { Log.w("Live2D", "Wallpaper surface changed while drawing", it) })
-            if (rendered && layers.isNotEmpty() && agent && !isPreview && authorized() && preferences.getString("companion_rendered_manifest", null) != loadedManifest)
+            if (rendered && layers.isNotEmpty() && agent && !isPreview && authorized() && preferences.getString("companion_rendered_manifest", null) != loadedManifest) {
                 preferences.edit().putString("companion_rendered_manifest", loadedManifest).apply()
+                CompanionRuntime.pollSoon()
+            }
         }
 
         private fun drawBitmap(canvas: Canvas, bitmap: Bitmap, x: Float, y: Float, rotation: Float, layerScale: Float) {

@@ -15,6 +15,36 @@ public sealed class WallpaperServiceTests
     private static readonly CancellationToken Ct = CancellationToken.None;
 
     [Fact]
+    public async Task UnchangedApplicationReusesSnapshotAcrossServiceInstancesButChangedPixelsCreateAVersion()
+    {
+        await using var db = WorkflowData.Db(); var store = new WorkflowStore();
+        var project = WorkflowData.Project(Guid.NewGuid()); store.Files["source.png"] = [1, 2, 3];
+        db.Add(project); await db.SaveChangesAsync();
+        var request = new CreateWallpaperRequest(project.Id, "Wallpaper", WallpaperMode.Static, ReuseExisting: true);
+        var first = await new WallpaperService(db, store, store).CreateAsync(project.UserId, request, Ct);
+        var second = await new WallpaperService(db, store, store).CreateAsync(project.UserId, request, Ct);
+        Assert.Equal(first.Id, second.Id); Assert.Single(await db.WallpaperAssets.ToListAsync());
+        Assert.Equal(2, store.Files.Count);
+        project.OriginalImage.OriginalObjectKey = "changed.png"; store.Files["changed.png"] = [4, 5];
+        await db.SaveChangesAsync();
+        var changed = await new WallpaperService(db, store, store).CreateAsync(project.UserId, request, Ct);
+        Assert.NotEqual(first.Id, changed.Id); Assert.Equal(2, await db.WallpaperAssets.CountAsync());
+        await Assert.ThrowsAsync<NotFoundException>(() => new WallpaperService(db, store, store).CreateAsync(Guid.NewGuid(), request, Ct));
+    }
+    [Fact]
+    public async Task ArchivedSnapshotsAreNeverReusedAndExplicitVersionCreationStillCreatesAVersion()
+    {
+        await using var db = WorkflowData.Db(); var store = new WorkflowStore();
+        var project = WorkflowData.Project(Guid.NewGuid()); store.Files["source.png"] = [1]; db.Add(project); await db.SaveChangesAsync();
+        var service = new WallpaperService(db, store, store);
+        var request = new CreateWallpaperRequest(project.Id, "Saved", WallpaperMode.Static, ReuseExisting: true);
+        var first = await service.CreateAsync(project.UserId, request, Ct); await service.ArchiveAsync(project.UserId, first.Id, Ct);
+        var second = await service.CreateAsync(project.UserId, request, Ct);
+        var explicitVersion = await service.CreateAsync(project.UserId, request with { ReuseExisting = false }, Ct);
+        Assert.NotEqual(first.Id, second.Id); Assert.NotEqual(second.Id, explicitVersion.Id);
+    }
+
+    [Fact]
     public async Task Snapshot_SurvivesProjectDeletionAndGeneratesFreshDownloadUrls()
     {
         await using var db = WorkflowData.Db();

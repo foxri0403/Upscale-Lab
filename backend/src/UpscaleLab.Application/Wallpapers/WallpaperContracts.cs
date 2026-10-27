@@ -5,7 +5,7 @@ namespace UpscaleLab.Application.Wallpapers;
 
 public sealed record CreateWallpaperRequest(Guid ProjectId,
     [param: Required, MaxLength(160)] string Title, WallpaperMode Mode, Guid? ProcessingJobId = null,
-    Guid? OriginProjectId = null);
+    Guid? OriginProjectId = null, bool ReuseExisting = false);
 public sealed record RenameWallpaperRequest([param: Required, MaxLength(160)] string Title);
 public sealed record ShareWallpaperRequest(bool IsPublic);
 public sealed record WallpaperSummary(Guid Id, string Title, WallpaperMode Mode, bool IsPublic, DateTime CreatedAt,

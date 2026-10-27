@@ -20,6 +20,7 @@ JWT `sid`의 서버 로그인 세션이 유효하고, 이메일 인증 계정이
 | Method | 경로 | 용도 |
 |---|---|---|
 | GET/POST | `/api/devices` | 기존 기기 목록/등록 API 유지 |
+| GET | `/api/devices/updates?after=<cursor>` | 현재 계정의 기기 변경 대기. 첫 응답의 cursor로 다음 변경을 대기 |
 | POST | `/api/devices/{id}/agent-token` | 연결 키 발급/회전. 평문 키는 이 응답에서만 제공 |
 | DELETE | `/api/devices/{id}/agent-token` | 기기 연결 해제, 대기 명령 대체 처리 |
 | GET | `/api/devices/{id}/state` | 화면 목록, 지원 기능, 마지막 통신, 적용 요청/실제 관측 상태 |
@@ -53,10 +54,13 @@ Windows는 `Desktop`, Android는 `Home` 또는 지원하는 경우 `Lock`이다.
 | Method | 경로 | 용도 |
 |---|---|---|
 | GET | `/api/agent/state` | 현재 연결의 기기/화면 상태와 inventoryRevision |
+| GET | `/api/agent/updates?after=<cursor>` | 이 기기의 새 명령·연결 해제 알림 대기. 계정 JWT와 기기 키 모두 필요 |
 | POST | `/api/agent/heartbeat` | 화면/기기 전체 스냅샷 보고 |
 | GET | `/api/agent/commands` | 재시도 가능한 최신 대기/다운로드/사용자 확인 명령 |
 | GET | `/api/agent/commands/{id}/manifest` | 해당 명령의 파일 URL 갱신. 현재 적용 완료 명령의 복구도 허용 |
 | POST | `/api/agent/commands/{id}/report` | 명령 처리 결과 보고 |
+
+변경 대기는 최대 20초 뒤 `{ "cursor": "<uuid>" }`를 반환한다. cursor가 바뀌면 즉시 state/commands를 다시 읽는다. 동일 cursor는 변경 없음이며 다시 대기한다. 최초 연결·재연결·서버 재시작은 cursor를 재설정해 최신 상태를 따라잡는다. cursor 확인과 구독은 원자적으로 처리하며 알림은 계정/기기별로 분리한다. heartbeat·상태 보고는 웹만 깨워 연결 앱의 자기 알림 반복을 막는다. 데이터 변경은 기존 서비스 계층에서 수행하고 알림에는 자격·이미지·상태 데이터를 담지 않는다. DB migration은 추가하지 않는다.
 
 Heartbeat 예:
 

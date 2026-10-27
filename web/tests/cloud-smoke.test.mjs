@@ -77,6 +77,8 @@ run("private API routes still reject unauthenticated requests", async () => {
   for (const path of [
     "/api/projects",
     "/api/devices",
+    "/api/devices/updates",
+    "/api/agent/updates",
     "/api/wallpapers",
     "/api/auth/me",
   ]) {

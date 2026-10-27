@@ -6,7 +6,7 @@
 
 1. 연결할 기기에 앱을 내려받아 실행합니다. Windows는 x64 Windows 10/11, Android는 7.0(API 24) 이상을 대상으로 합니다.
 2. 서버 주소를 확인하고 웹과 같은 아이디/이메일 및 비밀번호로 로그인합니다. 비밀번호는 저장하지 않습니다.
-3. 웹 기기 관리에 기기가 나타나면 화면별 배경화면을 선택합니다. Windows는 약 5초, Android는 약 15초 간격으로 요청을 확인하며 화면 정보는 약 30초마다 갱신합니다.
+3. 웹 기기 관리에 기기가 나타나면 화면별 배경화면을 선택합니다. 웹과 연결 앱은 인증된 변경 알림을 대기하다가 요청·처리 결과를 즉시 조회합니다. 20초 대기 응답은 변경이 없을 때의 연결 유지 시간입니다. Windows/Android 화면 연결·해상도 변경도 OS 이벤트로 즉시 보고하고, 30초 주기 보고는 보조로 유지합니다. 이미지 다운로드·OS 처리와 Android 최초 승인에 필요한 시간은 별도로 걸립니다. 이 동작은 **1.0.2 연결 앱으로 업데이트**해야 사용할 수 있습니다.
 4. Android Live 2D의 첫 적용은 앱의 **Live 2D 적용 확인**을 눌러 시스템 승인 화면에서 적용합니다. 승인 전에는 웹에 **기기 확인 필요**로 표시됩니다. 시스템이 홈/잠금 화면을 함께 바꾸는 기종에서는 실제 변경 상태를 보고합니다.
 5. 동기화를 끄거나 로그아웃하면 새 요청을 적용하지 않습니다. 적용된 정적 배경화면은 남고 Live 2D 움직임은 중지합니다. 로그아웃은 이 앱의 계정 세션을 폐기합니다.
 
@@ -32,7 +32,7 @@ Windows 창을 닫으면 트레이에서 계속 실행합니다. 트레이의 �
 
 ## 빌드와 다운로드 배포
 
-APK 버전/빌드 번호는 `AGENTS.md`, `mobile/pubspec.yaml`, `mobile/README.md`를 함께 갱신합니다. 공유 서명 설정은 Git 밖 파일을 지정하고 `apksigner verify --print-certs`로 반드시 검증합니다. 최신 APK는 **1.0.1+31**, Windows 앱은 **1.0.1**입니다.
+APK 버전/빌드 번호는 `AGENTS.md`, `mobile/pubspec.yaml`, `mobile/README.md`를 함께 갱신합니다. 공유 서명 설정은 Git 밖 파일을 지정하고 `apksigner verify --print-certs`로 반드시 검증합니다. 최신 APK는 **1.0.2+32**, Windows 앱은 **1.0.2**입니다.
 
 ```powershell
 $env:UPSCALE_SIGNING_PROPERTIES_FILE = 'C:\UpscaleLab-Secrets\key.properties'
@@ -51,4 +51,4 @@ $env:UPSCALE_SIGNING_PROPERTIES_FILE = 'C:\UpscaleLab-Secrets\key.properties'
 
 관련 규격: [agent API](agent-api.md). 플랫폼 문서: [Windows IDesktopWallpaper](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-idesktopwallpaper), [Android Display.Mode](https://developer.android.com/reference/android/view/Display.Mode), [Android specialUse foreground service](https://developer.android.com/develop/background-work/services/fgs/service-types#special-use).
 
-검증: 백엔드 95건, Windows 계정·기기 자격 테스트 7건, Android 앱 자체 테스트 61건, 웹 및 클라우드 HTTP 점검 38건을 통과했습니다. Windows 실제 모니터에서 1920×1080/60 Hz 정보를 읽었으며 다운로드 파일은 서명 검증한 APK/실행 가능한 EXE 헤더·바이트 크기·SHA-256을 대조합니다. 계정 로그인 후 실제 배경화면 변경은 실기기 통합 검증이 남아 있습니다. Android 전체 하위 프로젝트 테스트에서는 외부 image_picker 플러그인 10건이 테스트 리소스 누락으로 실패했으며, `:app:testDebugUnitTest`로 앱 자체 범위를 분리해 통과를 확인했습니다.
+검증: 백엔드 101건(실제 HTTP 명령 전달·완료 보고와 계정/기기 분리 포함), Windows 계정·기기 자격 테스트 7건, Android 앱 자체 테스트 61건, 웹 및 클라우드 HTTP 점검 42건을 통과했습니다. Windows 실제 모니터에서 1920×1080/60 Hz 정보를 읽었으며 다운로드 파일은 서명 검증한 APK/실행 가능한 EXE 헤더·바이트 크기·SHA-256을 대조합니다. 계정 로그인 후 실제 배경화면 변경은 실기기 통합 검증이 남아 있습니다. Android 전체 하위 프로젝트 테스트에서는 외부 image_picker 플러그인 10건이 테스트 리소스 누락으로 실패했으며, `:app:testDebugUnitTest`로 앱 자체 범위를 분리해 통과를 확인했습니다.

@@ -401,7 +401,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onPause() { tiltSensor.stop(); super.onPause() }
 
-    override fun onResume() { super.onResume(); if (tiltEvents != null) tiltSensor.start() }
+    override fun onResume() { super.onResume(); if (tiltEvents != null) tiltSensor.start(); CompanionRuntime.pollSoon() }
 
     override fun onRequestPermissionsResult(
         requestCode: Int,

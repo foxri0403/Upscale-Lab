@@ -9,6 +9,8 @@ import java.net.URL
 internal class CompanionApiError(val status: Int, message: String) : Exception(message)
 
 internal class CompanionApi(private val store: CompanionStore) {
+    @Volatile private var updates: HttpURLConnection? = null
+    fun cancelUpdates() { updates?.disconnect() }
     companion object {
         fun normalize(raw: String): String {
             val uri = URI(raw.trim().trimEnd('/'))
@@ -28,8 +30,10 @@ internal class CompanionApi(private val store: CompanionStore) {
                 binding.optString("server") == server) { "같은 계정의 로그인과 기기 연결이 필요합니다." }
         }
         val connection = URL(server + path).openConnection() as HttpURLConnection
+        val waiting = path.startsWith("/api/agent/updates")
+        if (waiting) updates = connection
         try {
-            connection.connectTimeout = 15000; connection.readTimeout = 20000; connection.requestMethod = method
+            connection.connectTimeout = 15000; connection.readTimeout = if (waiting) 30000 else 20000; connection.requestMethod = method
             connection.instanceFollowRedirects = false
             if (!anonymous && session != null) connection.setRequestProperty("Authorization", "Bearer ${session.getString("accessToken")}")
             if (agent) connection.setRequestProperty("X-Device-Token", state.getJSONObject("binding").getString("token"))
@@ -50,7 +54,7 @@ internal class CompanionApi(private val store: CompanionStore) {
             }
             if (status == 204) return JSONObject()
             return JSONTokener(connection.inputStream.bufferedReader().use { it.readText() }).nextValue()
-        } finally { connection.disconnect() }
+        } finally { if (updates === connection) updates = null; connection.disconnect() }
     }
     fun report(id: String, status: String, error: String? = null) {
         request("/api/agent/commands/$id/report", "POST", JSONObject().put("status", status).put("error", error?.take(900)), agent = true)

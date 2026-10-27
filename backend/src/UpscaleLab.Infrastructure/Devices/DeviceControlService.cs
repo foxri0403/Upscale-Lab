@@ -24,7 +24,7 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
         device.AgentTokenHash = Hash(token);
         device.InventoryRevision = 0;
         device.LastSeenAt = null;
-        await Save(userId, deviceId, ct);
+        await Save(userId, deviceId, ct, notifyAgent: true);
         return new(deviceId, token);
     }
 
@@ -35,7 +35,7 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
         device.LastSeenAt = null;
         foreach (var command in await db.DeviceCommands.Where(x => x.DeviceId == deviceId).ToListAsync(ct))
             if (Active(command)) command.Status = DeviceCommandStatus.Superseded;
-        await Save(userId, deviceId, ct);
+        await Save(userId, deviceId, ct, notifyAgent: true);
     }
 
     public async Task<AgentIdentity?> AuthenticateAsync(string token, CancellationToken ct)
@@ -170,7 +170,7 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
         db.DeviceCommands.Add(next);
         var assignment = await Assignment(display, request.Target, ct);
         assignment.DesiredAssetId = asset.Id; assignment.Sequence = next.Sequence;
-        await Save(userId, deviceId, ct);
+        await Save(userId, deviceId, ct, notifyAgent: true);
         return Map(next);
     }
 
@@ -260,12 +260,12 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
             throw new ValidationException("기기에서 지원하지 않는 배경화면 대상입니다.");
     }
 
-    private async Task Save(Guid userId, Guid deviceId, CancellationToken ct)
+    private async Task Save(Guid userId, Guid deviceId, CancellationToken ct, bool notifyAgent = false)
     {
         var device = db.Devices.Local.Single(x => x.Id == deviceId);
         device.ControlVersion = Guid.NewGuid();
         await db.SaveChangesAsync(ct);
-        if (events != null) await events.ChangedAsync(userId, deviceId, ct);
+        if (events != null) await events.ChangedAsync(userId, deviceId, ct, notifyAgent);
     }
 
     private DeviceCommandResponse Map(DeviceCommand c) => new(c.Id, c.DeviceId, c.DeviceDisplayId,

@@ -12,6 +12,10 @@ internal sealed class CompanionController : IDisposable
     private AgentApi? api;
     private CancellationTokenSource? cancellation;
     private Task? loop;
+    private Task? watcher;
+    private readonly SemaphoreSlim wake = new(0, 1);
+    private bool inventoryDirty;
+    private SynchronizationContext? ui;
     private bool remember;
     private bool verified;
     private Dictionary<string, AppliedWallpaper> applied = new();
@@ -81,13 +85,41 @@ internal sealed class CompanionController : IDisposable
     public async Task Enable()
     {
         if (Enabled || !verified || api?.Session is null) return;
-        await Bind(); Enabled = true; Persist(); cancellation = new(); loop = Run(cancellation.Token);
+        await Bind(); Enabled = true; Persist(); cancellation = new(); inventoryDirty = true; ui = SynchronizationContext.Current;
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplayChanged;
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += PreferencesChanged;
+        watcher = Watch(cancellation.Token); loop = Run(cancellation.Token);
+    }
+    private void DisplayChanged(object? sender, EventArgs e) => InventoryChanged();
+    private void PreferencesChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e) {
+        if (e.Category == Microsoft.Win32.UserPreferenceCategory.Desktop) InventoryChanged();
+    }
+    private void InventoryChanged() {
+        void Signal(object? _) { inventoryDirty = true; Wake(); }
+        if (ui != null) ui.Post(Signal, null); else Signal(null);
+    }
+    private void Wake() { if (wake.CurrentCount == 0) try { wake.Release(); } catch (SemaphoreFullException) { } }
+    private sealed record UpdateNotice(Guid Cursor);
+    private async Task Watch(CancellationToken ct) {
+        Guid? cursor = null;
+        while (!ct.IsCancellationRequested) {
+            try {
+                var notice = await api!.Call<UpdateNotice>("/api/agent/updates" + (cursor.HasValue ? $"?after={cursor}" : ""), agent: true, ct: ct);
+                if (notice.Cursor != cursor) { cursor = notice.Cursor; Wake(); }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+            catch (Exception) { Wake(); try { await Task.Delay(3000, ct); } catch (OperationCanceledException) { return; } }
+        }
     }
     public void RefreshInventory() { Monitors = DisplayInventory.Read(); Changed?.Invoke(); }
     public async Task Stop()
     {
         Enabled = false; cancellation?.Cancel();
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= DisplayChanged;
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged -= PreferencesChanged;
         if (loop != null) try { await loop; } catch (OperationCanceledException) { }
+        if (watcher != null) try { await watcher; } catch (OperationCanceledException) { }
+        watcher = null;
         cancellation?.Dispose(); cancellation = null; loop = null; engine.Dispose();
         Persist(); Notify("동기화가 꺼져 있습니다.");
     }
@@ -128,7 +160,7 @@ internal sealed class CompanionController : IDisposable
         {
             try
             {
-                if (DateTime.UtcNow >= nextHeartbeat) { await Heartbeat(ct); nextHeartbeat = DateTime.UtcNow.AddSeconds(30); }
+                if (inventoryDirty || DateTime.UtcNow >= nextHeartbeat) { inventoryDirty = false; await Heartbeat(ct); nextHeartbeat = DateTime.UtcNow.AddSeconds(30); }
                 var cache = new WallpaperCache(downloads, api!.Session!.User.Id, api.Server);
                 if (restore)
                 {
@@ -185,10 +217,11 @@ internal sealed class CompanionController : IDisposable
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (ApiFailure error) when (error.Status == 401)
-            { Enabled = false; engine.Dispose(); Persist(); Notify("계정 또는 기기 연결을 다시 확인해 주세요. [기기 다시 연결]을 눌러 주세요."); return; }
+            { Enabled = false; cancellation?.Cancel(); engine.Dispose(); Persist(); Notify("계정 또는 기기 연결을 다시 확인해 주세요. [기기 다시 연결]을 눌러 주세요."); return; }
             catch (Exception error) { engine.Dispose(); restore = true; Notify("연결 재시도 중: " + error.Message); }
-            await Task.Delay(TimeSpan.FromSeconds(5), ct);
+            await wake.WaitAsync(TimeSpan.FromSeconds(15), ct);
         }
     }
-    public void Dispose() { cancellation?.Cancel(); engine.Dispose(); requests.Dispose(); downloads.Dispose(); }
+    public void Dispose() { cancellation?.Cancel(); Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= DisplayChanged;
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged -= PreferencesChanged; engine.Dispose(); requests.Dispose(); downloads.Dispose(); }
 }

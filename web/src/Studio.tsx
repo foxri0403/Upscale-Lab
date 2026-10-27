@@ -85,7 +85,7 @@ export function Studio({ route }: { route: string }) {
   const parameters = new URLSearchParams(route.split("?")[1]);
   const id = parameters.get("id");
   const picture = parameters.get("new") !== "1" && id
-    ? library.images.find((p) => p.id === id) : undefined;
+    ? [...library.images, ...(library.assets || [])].find((p) => p.id === id) : undefined;
   const [tool, setTool] = useState<Tool>("live");
   const [edit, setEdit] = useState<Edit>(picture?.edit || defaultEdit);
   const [xy, setXy] = useState({ x: 0, y: 0 });
@@ -696,10 +696,12 @@ export function Studio({ route }: { route: string }) {
             className="button primary full"
             disabled={busy}
             onClick={async () => {
-              if (!published && !(await save())) return;
-              const [d, s] = selectedTarget.split("/");
-              await apply({ ...picture, edit }, d, s);
-              setDialog(null);
+              setBusy(true);
+              try {
+                const [d, s] = selectedTarget.split("/");
+                await apply({ ...picture, edit }, d, s);
+                setDialog(null);
+              } finally { setBusy(false); }
             }}
           >
             적용 요청 저장 <ArrowRight size={17} />

@@ -14,6 +14,10 @@ public sealed class ExceptionHandlingMiddleware(
         {
             await next(context);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // Closing a long-poll connection is a normal client disconnect.
+        }
         catch (Exception exception)
         {
             await WriteProblemAsync(context, exception);

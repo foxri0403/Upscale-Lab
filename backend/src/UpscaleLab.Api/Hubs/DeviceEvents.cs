@@ -7,10 +7,11 @@ using UpscaleLab.Infrastructure.Database;
 namespace UpscaleLab.Api.Hubs;
 
 public sealed class DeviceEvents(IHubContext<NotificationHub> hub, ApplicationDbContext db,
-    IActiveSessionValidator sessions, TimeProvider clock, ILogger<DeviceEvents> logger) : IDeviceEvents
+    IActiveSessionValidator sessions, TimeProvider clock, ILogger<DeviceEvents> logger, DeviceChangeFeed feed) : IDeviceEvents
 {
-    public async Task ChangedAsync(Guid userId, Guid deviceId, CancellationToken ct)
+    public async Task ChangedAsync(Guid userId, Guid deviceId, CancellationToken ct, bool notifyAgent = false)
     {
+        feed.Publish(userId, deviceId, notifyAgent);
         try
         {
             var now = clock.GetUtcNow().UtcDateTime;

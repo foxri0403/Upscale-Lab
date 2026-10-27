@@ -52,5 +52,5 @@ public interface IDeviceControlService
 
 public interface IDeviceEvents
 {
-    Task ChangedAsync(Guid userId, Guid deviceId, CancellationToken ct);
+    Task ChangedAsync(Guid userId, Guid deviceId, CancellationToken ct, bool notifyAgent = false);
 }

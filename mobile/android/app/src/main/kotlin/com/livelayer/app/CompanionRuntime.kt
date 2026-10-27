@@ -9,6 +9,10 @@ import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicBoolean
+import android.hardware.display.DisplayManager
+import android.os.Handler
+import android.os.Looper
 
 /** All API and image work is serialized. Invalidation is immediate, including during downloads. */
 internal object CompanionRuntime {
@@ -16,6 +20,10 @@ internal object CompanionRuntime {
     private lateinit var store: CompanionStore
     private lateinit var api: CompanionApi
     private val worker = Executors.newSingleThreadScheduledExecutor()
+    private val watcher = Executors.newSingleThreadExecutor()
+    private val watchSignal = Object()
+    private val pollQueued = AtomicBoolean()
+    private val inventoryDirty = AtomicBoolean(true)
     private val generation = AtomicLong()
     @Volatile private var initialized = false
     @Volatile private var running = false
@@ -28,17 +36,40 @@ internal object CompanionRuntime {
         if (initialized) return
         context = value.applicationContext; store = CompanionStore(context); api = CompanionApi(store); initialized = true
         worker.scheduleWithFixedDelay({ if (running) poll() }, 0, 15, TimeUnit.SECONDS)
+        androidx.core.content.ContextCompat.registerReceiver(context, object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: android.content.Intent) { inventoryDirty.set(true); pollSoon() }
+        }, android.content.IntentFilter(android.content.Intent.ACTION_WALLPAPER_CHANGED), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        (context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).registerDisplayListener(object : DisplayManager.DisplayListener {
+            private fun changed() { inventoryDirty.set(true); pollSoon() }
+            override fun onDisplayAdded(id: Int) = changed()
+            override fun onDisplayRemoved(id: Int) = changed()
+            override fun onDisplayChanged(id: Int) = changed()
+        }, Handler(Looper.getMainLooper()))
+        watcher.execute {
+            var cursor: String? = null; var epoch = generation.get()
+            while (!Thread.currentThread().isInterrupted) {
+                if (!running) { synchronized(watchSignal) { if (!running) watchSignal.wait() }; continue }
+                val current = generation.get()
+                if (epoch != current) { cursor = null; epoch = current }
+                try {
+                    val notice = api.request("/api/agent/updates" + (cursor?.let { "?after=$it" } ?: ""), agent = true, retry = false) as JSONObject
+                    val next = notice.getString("cursor")
+                    if (epoch == generation.get() && running && next != cursor) { cursor = next; pollSoon() }
+                } catch (_: Exception) { if (running) pollSoon(); Thread.sleep(3000) }
+            }
+        }
     }
     fun invalidate() {
         generation.incrementAndGet(); running = false; pending = null
+        api.cancelUpdates()
         context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putLong("companion_valid_until", 0).apply()
     }
     fun resume(): Boolean {
         val state = store.read()
         if (!state.optBoolean("enabled") || !state.has("session")) return false
-        running = true; pollSoon(); return true
+        running = true; synchronized(watchSignal) { watchSignal.notifyAll() }; inventoryDirty.set(true); pollSoon(); return true
     }
-    fun pollSoon() { if (initialized && running) worker.execute { poll() } }
+    fun pollSoon() { if (initialized && running && pollQueued.compareAndSet(false, true)) worker.execute { pollQueued.set(false); if (running) poll() } }
     fun status(): Map<String, Any?> {
         val state = store.read(); val user = state.optJSONObject("session")?.optJSONObject("user")
         val displays = runCatching { CompanionInventory(context).read(applied(state)) }.getOrDefault(JSONArray())
@@ -152,7 +183,7 @@ internal object CompanionRuntime {
             val state = store.read(); val saved = applied(state)
             val inventory = CompanionInventory(context)
             val remote = api.request("/api/agent/state", agent = true) as JSONObject
-            if (System.currentTimeMillis() >= nextHeartbeat) {
+            if (inventoryDirty.getAndSet(false) || System.currentTimeMillis() >= nextHeartbeat) {
                 val body = JSONObject().put("revision", remote.getLong("inventoryRevision") + 1).put("osVersion", "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
                     .put("agentVersion", context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0.1").put("manufacturer", Build.MANUFACTURER.take(120)).put("model", Build.MODEL.take(120))
                     .put("architecture", Build.SUPPORTED_ABIS.firstOrNull()?.take(32) ?: "").put("supportsLive2D", context.packageManager.hasSystemFeature("android.software.live_wallpaper"))
@@ -220,7 +251,7 @@ internal object CompanionRuntime {
             if (epoch != generation.get() || !running) return
             context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putLong("companion_valid_until", 0).apply()
             if (error is CompanionApiError && error.status == 401) {
-                running = false; store.save(store.read().put("enabled", false)); message = "계정 또는 기기 연결이 만료되었습니다. 로그인 또는 기기 다시 연결이 필요합니다."
+                running = false; api.cancelUpdates(); store.save(store.read().put("enabled", false)); message = "계정 또는 기기 연결이 만료되었습니다. 로그인 또는 기기 다시 연결이 필요합니다."
             } else message = "연결 재시도 중 · ${error.message ?: "네트워크를 확인해 주세요."}"
         }
     }

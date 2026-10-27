@@ -3,15 +3,21 @@ using Microsoft.AspNetCore.Mvc;
 using UpscaleLab.Api.Authentication;
 using UpscaleLab.Application.Devices;
 using UpscaleLab.Application.Wallpapers;
+using UpscaleLab.Api.Hubs;
 
 namespace UpscaleLab.Api.Controllers;
 
 [ApiController]
 [Authorize(AuthenticationSchemes = DeviceAgentHandler.SchemeName)]
 [Route("api/agent")]
-public sealed class AgentController(IDeviceControlService devices, IWallpaperService wallpapers) : ControllerBase
+public sealed class AgentController(IDeviceControlService devices, IWallpaperService wallpapers, DeviceChangeFeed changes) : ControllerBase
 {
     private AgentIdentity Identity => new(Guid.Parse(User.FindFirst("device_id")!.Value), User.GetRequiredUserId());
+
+    [HttpGet("updates")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> Updates(Guid? after, CancellationToken ct) =>
+        Ok(new { cursor = await changes.WaitAsync(Identity.UserId, Identity.DeviceId, after, ct) });
 
     [HttpGet("state")]
     public async Task<ActionResult<DeviceState>> State(CancellationToken ct) =>

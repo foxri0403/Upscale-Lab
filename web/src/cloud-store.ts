@@ -27,6 +27,8 @@ import {
 } from "./explore-feed";
 import { unspecifiedTag } from "./image-tags";
 import { isImageShared, projectSharing } from "./image-sharing";
+import { mapDeviceLibrary } from "./device-state";
+import { galleryImages } from "./gallery-library";
 
 const manifests = new Map<string, { picture: Picture; until: number }>();
 export const preferencesKey = (userId: string) =>
@@ -59,6 +61,7 @@ export async function assetPicture(a: Asset, fresh = false): Promise<Picture> {
   if (!fresh && cached && cached.until > Date.now())
     return {
       ...cached.picture,
+      sourceProjectId: a.sourceProjectId ?? undefined,
       name: a.title,
       sharedId: a.isPublic ? a.id : undefined,
     };
@@ -67,6 +70,7 @@ export async function assetPicture(a: Asset, fresh = false): Promise<Picture> {
   const picture: Picture = {
     id: `asset:${a.id}`,
     assetId: a.id,
+    sourceProjectId: a.sourceProjectId ?? undefined,
     name: a.title,
     src: files[0]?.source || "",
     genre: unspecifiedTag,
@@ -91,6 +95,14 @@ export async function assetPicture(a: Asset, fresh = false): Promise<Picture> {
 }
 export function clearCloudCache() {
   manifests.clear();
+}
+export async function fetchDevices(pictures: Picture[]) {
+  const devices = await request<CloudDevice[]>("/api/devices");
+  const [states, commands] = await Promise.all([
+    Promise.all(devices.map(d => request<CloudState>(`/api/devices/${d.id}/state`))),
+    Promise.all(devices.map(d => request<CloudCommand[]>(`/api/devices/${d.id}/commands`))),
+  ]);
+  return mapDeviceLibrary(states, commands, pictures.filter(p => p.assetId).map(p => ({ id: p.assetId!, title: p.name })));
 }
 export async function fetchLibrary(
   userId: string,
@@ -119,76 +131,7 @@ export async function fetchLibrary(
     preferencesKey(userId),
     {},
   );
-  const mappedDevices: Device[] = states.map((s) => ({
-    id: s.id,
-    name: s.name,
-    platform: s.platform,
-    osVersion: s.osVersion,
-    manufacturer: s.manufacturer,
-    model: s.model,
-    architecture: s.architecture,
-    physicalDisplayCount: s.displays.filter(d => d.isConnected).length,
-    online: s.recentlySeen,
-    displays: s.displays.flatMap((d) => {
-      const assignments = d.wallpapers.length
-        ? d.wallpapers
-        : [
-            {
-              target: s.platform === "Android" ? "Home" : "Desktop",
-              desiredAssetId: undefined,
-              reportedAssetId: undefined,
-              observation: "Unknown",
-            },
-          ];
-      return assignments.map((w) => ({
-        id: `${d.id}:${w.target}`,
-        nativeId: d.id,
-        target: w.target,
-        name:
-          s.platform === "Android" && d.canApplyWallpaper !== false
-            ? w.target === "Lock"
-              ? "잠금 화면"
-              : "홈 화면"
-            : d.name,
-        resolution: `${d.width} × ${d.height}`,
-        connected: d.isConnected,
-        refreshRateHz: d.refreshRateHz,
-        canApplyWallpaper: d.canApplyWallpaper ?? true,
-        isPrimary: d.isPrimary,
-        observation: w.observation,
-        current: w.reportedAssetId ? `asset:${w.reportedAssetId}` : "",
-        desired:
-          w.desiredAssetId && w.desiredAssetId !== w.reportedAssetId
-            ? `asset:${w.desiredAssetId}`
-            : undefined,
-      }));
-    }),
-  }));
-  const mappedCommands: Command[] = commands.flatMap((list, i) =>
-    list.map(
-      (c) =>
-        ({
-          id: c.id,
-          device: states[i].name,
-          display:
-            states[i].platform === "Android"
-              ? c.target === "Lock"
-                ? "잠금 화면"
-                : "홈 화면"
-              : states[i].displays.find((d) => d.id === c.displayId)?.name ||
-                "화면",
-          picture: assets.find((a) => a.id === c.assetId)?.title || "배경화면",
-          status:
-            c.status === "Applied"
-              ? "완료"
-              : ["Failed", "Expired", "Superseded"].includes(c.status)
-                ? "실패"
-                : "대기",
-          created: "",
-          detail: c.error || c.status,
-        }) as Command,
-    ),
-  );
+  const { devices: mappedDevices, commands: mappedCommands } = mapDeviceLibrary(states, commands, assets);
   // Project previews and immutable saved wallpapers are distinct server resources.
   const projectsWithMetadata = projects.map((project) => {
     const picture = projectPicture(project);
@@ -210,7 +153,7 @@ export async function fetchLibrary(
       sharedId: published.id,
     }, assets);
   });
-  const images = [...projectsWithMetadata, ...ownPictures].map((p) => ({
+  const images = galleryImages(projectsWithMetadata, ownPictures).map((p) => ({
     ...p,
     ...preferences[p.id],
     src: p.src,
@@ -327,12 +270,14 @@ export async function createAsset(picture: Picture): Promise<Asset> {
       isPublic: !!picture.sharedId,
       createdAt: picture.created,
     };
+  let temporaryProjectId: string | undefined;
   if (rendered || !projectId) {
     const blob = await renderImage(picture, edit);
     const created = await uploadProject(
       new File([blob], `${picture.name}.png`, { type: "image/png" }),
     );
     projectId = created.projectId;
+    temporaryProjectId = created.projectId;
   }
   const mode =
     !rendered && picture.background && picture.foregrounds?.length
@@ -356,13 +301,20 @@ export async function createAsset(picture: Picture): Promise<Asset> {
         ),
     );
   }
-  return post<Asset>("/api/wallpapers", {
+  try {
+    return await post<Asset>("/api/wallpapers", {
     projectId,
     title: picture.name,
     mode,
     processingJobId: !rendered && mode === "Static" ? picture.jobId : undefined,
     originProjectId: picture.projectId,
-  });
+    reuseExisting: true,
+    });
+  } finally {
+    // The asset owns copies of these pixels. This freshly uploaded intermediate is not a library image.
+    if (temporaryProjectId && picture.projectId && temporaryProjectId !== picture.projectId)
+      await request(`/api/projects/${temporaryProjectId}`, { method: "DELETE" }).catch(() => {});
+  }
 }
 export async function processProject(
   picture: Picture,

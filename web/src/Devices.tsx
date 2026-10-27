@@ -17,7 +17,7 @@ import { cloud, post, request } from "./api";
 import { Downloads } from "./Downloads";
 
 export function Devices() {
-  const { library, session, update, toast, apply, refresh } = useDemo();
+  const { library, session, update, toast, apply, refresh, refreshDevices } = useDemo();
   const [connecting, setConnecting] = useState(false);
   const [platform, setPlatform] = useState<"Windows" | "Android">("Windows");
   const [deviceName, setDeviceName] = useState("");
@@ -39,7 +39,7 @@ export function Devices() {
   const findPicture = (id: string) => allPictures.find((p) => p.id === id);
   function sync(device: Device) {
     if (cloud) {
-      void refresh().then(() => toast("기기 상태를 새로 불러왔습니다."));
+      void refreshDevices().then(() => toast("기기 상태를 새로 불러왔습니다.")).catch(e => toast(e.message));
       return;
     }
     const pending = library.commands.filter(
@@ -196,10 +196,12 @@ export function Devices() {
           {library.devices.map((device) => {
             const mobile = device.platform === "Android";
             const activeTab = phoneTab[device.id] || device.displays[0]?.id;
+            const screens = device.physicalDisplayCount ?? (mobile ? Math.min(1, device.displays.filter(d => d.connected).length)
+              : new Set(device.displays.filter(d => d.connected).map(d => d.nativeId ?? d.id)).size);
             return (
               <article
                 key={device.id}
-                className={`device-card ${mobile ? "mobile-device" : "pc-device"}`}
+                className={`device-card ${mobile ? "mobile-device" : "pc-device"} ${screens >= 3 ? "device-many-screens" : screens === 2 ? "device-two-screens" : "device-one-screen"}`}
               >
                 <div className="device-card-header">
                   <span className="device-icon">
@@ -211,7 +213,7 @@ export function Devices() {
                       {cloud
                         ? device.osVersion || device.platform
                         : device.platform + (mobile ? "" : " 11")}
-                      {` · 화면 ${device.physicalDisplayCount ?? new Set(device.displays.filter(d => d.connected).map(d => d.nativeId ?? d.id)).size}개`}
+                      {` · 화면 ${screens}개`}
                     </p>
                   </div>
                   <span
@@ -246,7 +248,7 @@ export function Devices() {
                   <p className="device-hardware">{[device.manufacturer, device.model, device.architecture].filter(Boolean).join(" · ")}</p>}
                 {mobile && (
                   <div className="phone-tabs">
-                    {device.displays.map((s) => (
+                    {device.displays.filter(s => s.canApplyWallpaper !== false).map((s) => (
                       <button
                         key={s.id}
                         className={activeTab === s.id ? "active" : ""}
@@ -267,7 +269,7 @@ export function Devices() {
                 )}
                 <div className="display-grid">
                   {device.displays
-                    .filter((s) => !mobile || s.id === activeTab)
+                    .filter((s) => !mobile || s.canApplyWallpaper === false || s.id === activeTab)
                     .map((display, i) => {
                       const current = findPicture(display.current);
                       const desired = display.desired
@@ -288,7 +290,7 @@ export function Devices() {
                           </div>
                           <div
                             className={
-                              mobile ? "phone-wallpaper" : "monitor-wallpaper"
+                              mobile && display.canApplyWallpaper !== false ? "phone-wallpaper" : "monitor-wallpaper"
                             }
                           >
                             {current ? (
@@ -299,7 +301,7 @@ export function Devices() {
                                 <span>이미지 정보 없음</span>
                               </div>
                             )}
-                            {mobile && (
+                            {mobile && display.target === "Lock" && (
                               <span className="lock-clock">09:41</span>
                             )}
                           </div>

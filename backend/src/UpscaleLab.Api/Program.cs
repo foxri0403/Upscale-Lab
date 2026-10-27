@@ -119,6 +119,7 @@ builder.Services.AddHostedService<ExpiredAccountWorker>();
 builder.Services.AddScoped<IDeviceService, DeviceService>();
 builder.Services.AddScoped<IDeviceControlService, DeviceControlService>();
 builder.Services.AddScoped<IDeviceEvents, DeviceEvents>();
+builder.Services.AddSingleton<DeviceChangeFeed>();
 builder.Services.AddScoped<IWallpaperService, WallpaperService>();
 builder.Services.AddScoped<IUserSettingService, UserSettingService>();
 builder.Services.AddScoped<IImageService, ImageService>();

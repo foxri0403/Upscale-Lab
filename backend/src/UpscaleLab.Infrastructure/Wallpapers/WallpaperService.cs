@@ -1,4 +1,7 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using UpscaleLab.Application.Common;
 using UpscaleLab.Application.Storage;
@@ -82,7 +85,23 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
                 "image/png", x.LayerOrder, x.LayerType.ToString(), x.Depth, x.PositionX, x.PositionY,
                 x.Rotation, x.Scale, x.MovementX, x.MovementY)));
         }
-        var asset = new WallpaperAsset { UserId = userId, SourceProjectId = request.OriginProjectId ?? project.Id,
+        var origin = request.OriginProjectId ?? project.Id;
+        var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new {
+            Project = project.Id, Origin = origin, Title = request.Title.Trim(), request.Mode, width, height, sources
+        }))));
+        if (request.ReuseExisting)
+        {
+            var prior = await db.WallpaperAssets.AsNoTracking().Where(x => x.UserId == userId && !x.IsArchived &&
+                x.SourceProjectId == origin && x.Mode == request.Mode && x.Title == request.Title.Trim())
+                .OrderByDescending(x => x.CreatedAt).Select(x => new { x.Id, x.ManifestJson, x.Title, x.Mode, x.IsPublic, x.CreatedAt, x.SourceProjectId }).ToListAsync(ct);
+            foreach (var candidate in prior)
+            {
+                using var content = JsonDocument.Parse(candidate.ManifestJson);
+                if (content.RootElement.TryGetProperty("_sourceFingerprint", out var saved) && saved.GetString() == fingerprint)
+                    return new(candidate.Id, candidate.Title, candidate.Mode, candidate.IsPublic, candidate.CreatedAt, candidate.SourceProjectId);
+            }
+        }
+        var asset = new WallpaperAsset { UserId = userId, SourceProjectId = origin,
             Title = request.Title.Trim(), Mode = request.Mode };
         var copied = new List<string>();
         try
@@ -95,7 +114,9 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
                 copied.Add(key);
                 files.Add(source with { Source = key });
             }
-            asset.ManifestJson = JsonSerializer.Serialize(new WallpaperManifest(1, asset.Id, asset.Mode, width, height, files));
+            var stored = JsonSerializer.SerializeToNode(new WallpaperManifest(1, asset.Id, asset.Mode, width, height, files))!.AsObject();
+            stored["_sourceFingerprint"] = fingerprint;
+            asset.ManifestJson = stored.ToJsonString();
             db.WallpaperAssets.Add(asset);
             await db.SaveChangesAsync(ct);
             return Map(asset);

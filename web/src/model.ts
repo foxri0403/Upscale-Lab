@@ -26,6 +26,7 @@ export type Picture = {
   downloads?: number;
   projectId?: string;
   assetId?: string;
+  sourceProjectId?: string;
   background?: string;
   foregrounds?: string[];
   jobId?: string;

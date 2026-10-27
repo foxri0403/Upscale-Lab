@@ -50,6 +50,7 @@ import { Downloads } from "./Downloads";
 import { cloud, request, post, type Asset } from "./api";
 import {
   fetchLibrary,
+  fetchDevices,
   assetPicture,
   createAsset,
   preferencesKey,
@@ -62,6 +63,7 @@ import {
   selectableTags,
 } from "./image-tags";
 import { TagSelector } from "./TagSelector";
+import { watchDeviceUpdates } from "./device-updates";
 import { ImageCard } from "./ImageCard";
 import { isImageShared, sharingTargets } from "./image-sharing";
 
@@ -79,6 +81,7 @@ type DemoContext = {
     displayId: string,
   ) => Promise<void>;
   refresh: () => Promise<void>;
+  refreshDevices: () => Promise<void>;
   saveCloud: (picture: Picture) => Promise<Asset>;
   loading: boolean;
 };
@@ -112,8 +115,11 @@ export function Workspace({
   const [loadError, setLoadError] = useState("");
   const mounted = useRef(true);
   const epoch = useRef(0);
-  const snapshots = useRef(new Map<string, Asset>());
+  const snapshots = useRef(new Map<string, Promise<Asset>>());
   const sharing = useRef(false);
+  const deviceEpoch = useRef(0);
+  const refreshDevicesInFlight = useRef<Promise<void> | null>(null);
+  const devicesDirty = useRef(false);
   const [shared, setShared] = useState<SharedPicture[]>(() =>
     cloud ? [] : read("upscale.demo.shared.v1", []),
   );
@@ -153,6 +159,7 @@ export function Workspace({
   async function refresh() {
     if (!cloud) return;
     const ticket = ++epoch.current;
+    const devicesAtStart = deviceEpoch.current;
     try {
       const result = await fetchLibrary(session.id);
       if (!mounted.current || ticket !== epoch.current) return;
@@ -172,6 +179,10 @@ export function Workspace({
             }
           : p;
       });
+      if (devicesAtStart !== deviceEpoch.current) {
+        result.library.devices = current.current.devices;
+        result.library.commands = current.current.commands;
+      }
       current.current = result.library;
       setLibrary(result.library);
       setShared(
@@ -181,6 +192,7 @@ export function Workspace({
         })),
       );
       setLoadError("");
+      void refreshDevices().catch(() => {});
     } catch (e) {
       if (mounted.current && ticket === epoch.current)
         setLoadError((e as Error).message);
@@ -188,18 +200,36 @@ export function Workspace({
       if (mounted.current && ticket === epoch.current) setLoading(false);
     }
   }
+  function refreshDevices(): Promise<void> {
+    if (!cloud || !mounted.current) return Promise.resolve();
+    devicesDirty.current = true;
+    if (refreshDevicesInFlight.current) return refreshDevicesInFlight.current;
+    const work = (async () => {
+      while (devicesDirty.current && mounted.current) {
+        devicesDirty.current = false;
+        const patch = await fetchDevices([...(current.current.assets || []), ...current.current.images]);
+        if (!mounted.current) return;
+        deviceEpoch.current++;
+        current.current = { ...current.current, ...patch }; setLibrary(current.current);
+      }
+    })();
+    refreshDevicesInFlight.current = work;
+    void work.then(() => { refreshDevicesInFlight.current = null; }, () => { refreshDevicesInFlight.current = null; });
+    return work;
+  }
   useEffect(() => {
     mounted.current = true;
     void refresh();
-    const interval = cloud
-      ? setInterval(() => {
-          if (!document.hidden && location.pathname === "/app/devices")
-            void refresh();
-        }, 30000)
-      : null;
+    const stop = cloud ? watchDeviceUpdates(
+      (after, signal) => request(`/api/devices/updates${after ? `?after=${encodeURIComponent(after)}` : ""}`, { signal }),
+      refreshDevices,
+    ) : () => {};
+    const focus = () => { if (!document.hidden) void refreshDevices().catch(() => {}); };
+    window.addEventListener("focus", focus);
+    document.addEventListener("visibilitychange", focus);
     return () => {
       mounted.current = false;
-      if (interval) clearInterval(interval);
+      stop(); window.removeEventListener("focus", focus); document.removeEventListener("visibilitychange", focus);
     };
   }, []);
   async function saveCloud(picture: Picture) {
@@ -218,9 +248,10 @@ export function Workspace({
     ]);
     const existing = snapshots.current.get(signature);
     if (existing) return existing;
-    const asset = await createAsset(picture);
-    snapshots.current.set(signature, asset);
-    return asset;
+    const pending = createAsset(picture);
+    snapshots.current.set(signature, pending);
+    try { return await pending; }
+    catch (error) { snapshots.current.delete(signature); throw error; }
   }
   // Cross-tab updates stay scoped to the authenticated local account.
   useEffect(() => {
@@ -327,7 +358,11 @@ export function Workspace({
           assetId: asset.id,
           target: display.target,
         });
-        await refresh();
+        const preview = await assetPicture(asset);
+        const previous = current.current.assets || [];
+        current.current = { ...current.current, assets: [...previous.filter(p => p.assetId !== asset.id), preview] };
+        setLibrary(current.current);
+        await refreshDevices();
         toast(
           "적용 요청을 전송했습니다. 연결 앱이 처리하면 상태가 갱신됩니다.",
         );
@@ -375,6 +410,7 @@ export function Workspace({
         publish,
         apply,
         refresh,
+        refreshDevices,
         saveCloud,
         loading,
       }}

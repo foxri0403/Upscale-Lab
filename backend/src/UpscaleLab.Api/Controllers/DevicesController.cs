@@ -2,14 +2,21 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using UpscaleLab.Api.Authentication;
 using UpscaleLab.Application.Devices;
+using UpscaleLab.Api.Hubs;
 
 namespace UpscaleLab.Api.Controllers;
 
 [ApiController]
 [Authorize]
 [Route("api/devices")]
-public sealed class DevicesController(IDeviceService deviceService, IDeviceControlService control) : ControllerBase
+public sealed class DevicesController(IDeviceService deviceService, IDeviceControlService control, DeviceChangeFeed changes) : ControllerBase
 {
+    [Authorize(Policy = "AccountSession")]
+    [HttpGet("updates")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> Updates(Guid? after, CancellationToken ct) =>
+        Ok(new { cursor = await changes.WaitAsync(User.GetRequiredUserId(), null, after, ct) });
+
     [Authorize(Policy = "AccountSession")]
     [HttpPost("{id:guid}/agent-token")]
     public async Task<ActionResult<AgentTokenResponse>> RotateToken(Guid id, CancellationToken ct) =>

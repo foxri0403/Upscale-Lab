@@ -6,7 +6,7 @@ using UpscaleLab.Infrastructure.Database;
 
 namespace UpscaleLab.Infrastructure.Devices;
 
-public sealed class DeviceService(ApplicationDbContext dbContext) : IDeviceService
+public sealed class DeviceService(ApplicationDbContext dbContext, IDeviceEvents? events = null) : IDeviceService
 {
     public async Task<IReadOnlyList<DeviceResponse>> GetAllAsync(Guid userId, CancellationToken cancellationToken)
     {
@@ -33,6 +33,7 @@ public sealed class DeviceService(ApplicationDbContext dbContext) : IDeviceServi
         Apply(device, request);
         dbContext.Devices.Add(device);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (events != null) await events.ChangedAsync(userId, device.Id, cancellationToken);
         return Map(device);
     }
 
@@ -45,6 +46,7 @@ public sealed class DeviceService(ApplicationDbContext dbContext) : IDeviceServi
         var device = await FindOwnedAsync(userId, deviceId, cancellationToken);
         Apply(device, request);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (events != null) await events.ChangedAsync(userId, device.Id, cancellationToken);
         return Map(device);
     }
 
@@ -53,6 +55,7 @@ public sealed class DeviceService(ApplicationDbContext dbContext) : IDeviceServi
         var device = await FindOwnedAsync(userId, deviceId, cancellationToken);
         dbContext.Devices.Remove(device);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (events != null) await events.ChangedAsync(userId, device.Id, cancellationToken, notifyAgent: true);
     }
 
     private async Task<Device> FindOwnedAsync(Guid userId, Guid deviceId, CancellationToken cancellationToken)

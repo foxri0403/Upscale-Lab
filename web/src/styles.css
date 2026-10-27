@@ -3093,3 +3093,25 @@ td:last-child {
     transform: none !important;
   }
 }
+
+/* Card width follows the connected physical displays, independently of viewport/sidebar size. */
+.devices-page { container-type: inline-size; }
+.devices-page .device-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); align-items: start; }
+.devices-page .device-card { grid-column: span 4; }
+.devices-page .device-two-screens { grid-column: span 8; }
+.devices-page .device-many-screens { grid-column: 1 / -1; }
+.devices-page .display-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+.devices-page .device-card-header { flex-wrap: wrap; }
+.devices-page .device-card-header > div { flex: 1; min-width: 140px; }
+.devices-page .device-card-header h2 { overflow-wrap: anywhere; }
+.devices-page .mobile-device .display-card { display: block; max-width: none; width: 100%; }
+.devices-page .mobile-device .display-resolution { margin: 14px 0; }
+.devices-page .mobile-device .wallpaper-state { margin: 14px 0; }
+.devices-page .mobile-device .display-card > .button { height: auto; }
+@container (max-width: 1050px) {
+  .devices-page .device-card { grid-column: span 6; }
+  .devices-page .device-two-screens, .devices-page .device-many-screens { grid-column: 1 / -1; }
+}
+@container (max-width: 700px) {
+  .devices-page .device-card { grid-column: 1 / -1; }
+}
