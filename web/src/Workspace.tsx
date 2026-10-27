@@ -30,7 +30,6 @@ import {
   write,
   sampleLibrary,
   community,
-  uploadImage,
   uuid,
   type Library,
   type Picture,
@@ -52,7 +51,6 @@ import { Devices } from "./Devices";
 import { cloud, request, post, type Asset } from "./api";
 import {
   fetchLibrary,
-  uploadProject,
   assetPicture,
   createAsset,
   preferencesKey,
@@ -66,6 +64,7 @@ import {
 } from "./image-tags";
 import { TagSelector } from "./TagSelector";
 import { ImageCard } from "./ImageCard";
+import { isImageShared, sharingTargets } from "./image-sharing";
 
 type SharedPicture = Picture & { ownerId: string };
 type DemoContext = {
@@ -74,7 +73,7 @@ type DemoContext = {
   update: (fn: (value: Library) => Library) => boolean;
   toast: (message: string) => void;
   shared: SharedPicture[];
-  publish: (picture: Picture, enabled: boolean) => Promise<void>;
+  publish: (picture: Picture, enabled: boolean) => Promise<boolean>;
   apply: (
     picture: Picture,
     deviceId: string,
@@ -115,6 +114,7 @@ export function Workspace({
   const mounted = useRef(true);
   const epoch = useRef(0);
   const snapshots = useRef(new Map<string, Asset>());
+  const sharing = useRef(false);
   const [shared, setShared] = useState<SharedPicture[]>(() =>
     cloud ? [] : read("upscale.demo.shared.v1", []),
   );
@@ -201,8 +201,15 @@ export function Workspace({
     };
   }, []);
   async function saveCloud(picture: Picture) {
+    const publishedAsset = picture.assetId || picture.sharedAssetIds?.[0];
+    if (publishedAsset && isImageShared(picture)) return {
+      id: publishedAsset, title: picture.name,
+      mode: picture.kind === "Live 2D" ? "Live2D" : "Static",
+      isPublic: true, createdAt: picture.created,
+    };
     const signature = JSON.stringify([
       picture.id,
+      picture.name,
       picture.src,
       picture.jobId,
       picture.edit,
@@ -229,36 +236,37 @@ export function Workspace({
     return () => window.removeEventListener("storage", sync);
   }, [key]);
   async function publish(picture: Picture, enabled: boolean) {
+    if (sharing.current) return false;
+    sharing.current = true;
     try {
       if (cloud) {
-        if (picture.galleryPostId) {
-          if (enabled) throw new Error("기존 게시물은 이미 공개되어 있습니다.");
-          await request(`/api/gallery/${picture.galleryPostId}`, {
-            method: "DELETE",
+        const latest = current.current.images.find((p) => p.id === picture.id) || picture;
+        if (enabled) {
+          if (isImageShared(latest)) return true;
+          const asset = picture.assetId ? { id: picture.assetId } : await saveCloud(picture);
+          await request(`/api/wallpapers/${asset.id}/sharing`, {
+            method: "PUT", body: JSON.stringify({ isPublic: true }),
           });
-          await refresh();
-          toast(
-            "공유 게시물을 삭제했습니다. 보관함의 원본 이미지는 유지됩니다.",
-          );
-          return;
+        } else {
+          const targets = sharingTargets(latest);
+          for (const galleryId of targets.galleryIds)
+            await request(`/api/gallery/${galleryId}`, { method: "DELETE" });
+          for (const assetId of targets.assetIds)
+            await request(`/api/wallpapers/${assetId}/sharing`, {
+              method: "PUT", body: JSON.stringify({ isPublic: false }),
+            });
         }
-        const asset = picture.assetId
-          ? { id: picture.assetId }
-          : await saveCloud(picture);
-        await request(`/api/wallpapers/${asset.id}/sharing`, {
-          method: "PUT",
-          body: JSON.stringify({ isPublic: enabled }),
-        });
         await refresh();
         toast(
           enabled
             ? "탐색에 공유했습니다."
             : "공유를 취소했습니다. 저장된 이미지는 유지됩니다.",
         );
-        return;
+        return true;
       }
       const id = `shared-${session.id}-${picture.id}`;
-      let next = read<SharedPicture[]>("upscale.demo.shared.v1", []).filter(
+      const previousShared = read<SharedPicture[]>("upscale.demo.shared.v1", []);
+      let next = previousShared.filter(
         (p) => p.id !== id,
       );
       if (enabled)
@@ -276,21 +284,28 @@ export function Workspace({
         ];
       write("upscale.demo.shared.v1", next);
       setShared(next);
-      update((value) => ({
+      const saved = update((value) => ({
         ...value,
         images: value.images.map((p) =>
           p.id === picture.id
-            ? { ...p, sharedId: enabled ? id : undefined }
+            ? { ...p, sharedId: enabled ? id : undefined,
+                galleryPostId: undefined, galleryPostIds: [], sharedAssetIds: [] }
             : p,
         ),
       }));
-      toast(
-        enabled
-          ? "공유를 켰습니다. 이 브라우저의 탐색에서 확인하세요."
-          : "공유를 취소했습니다. 보관함 이미지는 유지됩니다.",
-      );
+      if (!saved) {
+        write("upscale.demo.shared.v1", previousShared);
+        setShared(previousShared);
+      } else toast(enabled
+        ? "공유를 켰습니다. 이 브라우저의 탐색에서 확인하세요."
+        : "공유를 취소했습니다. 보관함 이미지는 유지됩니다.");
+      return saved;
     } catch (e) {
+      if (cloud) await refresh();
       toast((e as Error).message);
+      return false;
+    } finally {
+      sharing.current = false;
     }
   }
   async function apply(picture: Picture, deviceId: string, displayId: string) {
@@ -534,8 +549,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const [deleting, setDeleting] = useState<Picture | null>(null);
   const [unsharing, setUnsharing] = useState<Picture | null>(null);
   const [importing, setImporting] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
+  const [renaming, setRenaming] = useState(false);
   const all = explore
     ? cloud
       ? shared
@@ -571,25 +585,6 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           ? (b.downloads || 0) - (a.downloads || 0)
           : b.created.localeCompare(a.created),
     );
-  async function add(files: FileList | null) {
-    if (!files?.length) return;
-    setUploading(true);
-    try {
-      const added: Picture[] = [];
-      for (const file of Array.from(files))
-        added.push(cloud ? await uploadProject(file) : await uploadImage(file));
-      if (cloud) {
-        await refresh();
-        toast(`${added.length}개의 이미지를 업로드했습니다.`);
-      } else if (update((v) => ({ ...v, images: [...added, ...v.images] })))
-        toast(`${added.length}개의 이미지를 추가했습니다.`);
-    } catch (e) {
-      toast((e as Error).message);
-    } finally {
-      setUploading(false);
-      if (input.current) input.current.value = "";
-    }
-  }
   async function importPicture(p: Picture, open: boolean) {
     if (importing) return;
     if (cloud) {
@@ -623,6 +618,9 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       ...p,
       id: crypto.randomUUID(),
       sharedId: undefined,
+      galleryPostId: undefined,
+      galleryPostIds: [],
+      sharedAssetIds: [],
       created: new Date().toISOString(),
     };
     if (update((v) => ({ ...v, images: [copy, ...v.images] }))) {
@@ -677,21 +675,12 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
         {!explore && (
           <button
             className="button primary"
-            disabled={uploading}
-            onClick={() => input.current?.click()}
+            onClick={() => navigate("/app/studio?new=1")}
           >
-            {uploading ? <Busy /> : <Plus size={21} />} 이미지 추가
+            <Plus size={21} /> 이미지 추가
           </button>
         )}
       </div>
-      <input
-        ref={input}
-        type="file"
-        className="visually-hidden"
-        accept="image/jpeg,image/png,image/webp"
-        multiple
-        onChange={(e) => add(e.target.files)}
-      />
       <div className="gallery-toolbar">
         <label className="search-field">
           <Search size={21} />
@@ -746,7 +735,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
               if (query || !allTagsSelected(selectedTags)) {
                 setQuery("");
                 setSelectedTags([...selectableTags]);
-              } else input.current?.click();
+              } else navigate("/app/studio?new=1");
             }}
           >
             {query || !allTagsSelected(selectedTags)
@@ -761,14 +750,15 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
               key={p.id}
               picture={p}
               explore={explore}
-              cloud={cloud}
               open={() =>
                 explore ? setPreview(p) : navigate(`/app/studio?id=${p.id}`)
               }
               rename={() => {
+                if (isImageShared(p)) return;
                 setEditing(p);
                 setName(p.name);
               }}
+              edit={() => navigate(`/app/studio?id=${p.id}`)}
               remove={() => setDeleting(p)}
             />
           ))}
@@ -777,19 +767,35 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       {editing && (
         <Modal title="이미지 이름 변경" close={() => setEditing(null)}>
           <form
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
-              if (!name.trim()) return;
-              if (
-                update((v) => ({
-                  ...v,
-                  images: v.images.map((p) =>
-                    p.id === editing.id ? { ...p, name: name.trim() } : p,
-                  ),
-                }))
-              ) {
+              if (!name.trim() || renaming) return;
+              const latest = library.images.find((p) => p.id === editing.id);
+              if (!latest || isImageShared(latest)) {
+                toast("공유를 끈 뒤 이름을 변경해 주세요.");
+                return;
+              }
+              setRenaming(true);
+              try {
+                if (cloud) {
+                  await request(latest.assetId
+                    ? `/api/wallpapers/${latest.assetId}`
+                    : `/api/projects/${latest.projectId}`, {
+                    method: "PATCH", body: JSON.stringify({ title: name.trim() }),
+                  });
+                  await refresh();
+                } else if (!update((v) => ({
+                    ...v,
+                    images: v.images.map((p) =>
+                      p.id === editing.id ? { ...p, name: name.trim() } : p,
+                    ),
+                  }))) return;
                 setEditing(null);
                 toast("이름을 변경했습니다.");
+              } catch (error) {
+                toast((error as Error).message);
+              } finally {
+                setRenaming(false);
               }
             }}
           >
@@ -797,12 +803,15 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
               이름
               <input
                 value={name}
-                maxLength={60}
+                maxLength={160}
                 required
+                disabled={renaming}
                 onChange={(e) => setName(e.target.value)}
               />
             </label>
-            <button className="button primary full">변경하기</button>
+            <button className="button primary full" disabled={renaming}>
+              {renaming ? <Busy /> : "변경하기"}
+            </button>
           </form>
         </Modal>
       )}

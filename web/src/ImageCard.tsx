@@ -13,20 +13,22 @@ import {
 import { PictureView } from "./ui";
 import { imageTags, tagSummary } from "./image-tags";
 import type { Picture } from "./model";
+import { isImageShared } from "./image-sharing";
+import { ImageSharingToggle } from "./ImageSharingToggle";
 
 export function ImageCard({
   picture,
   explore,
-  cloud,
   open,
   rename,
+  edit,
   remove,
 }: {
   picture: Picture;
   explore: boolean;
-  cloud: boolean;
   open: () => void;
   rename: () => void;
+  edit: () => void;
   remove: () => void;
 }) {
   const [decoded, setDecoded] = useState<{
@@ -44,7 +46,7 @@ export function ImageCard({
       : failedSource === source
         ? "해상도 정보 없음"
         : "해상도 확인 중…";
-  const shared = !!(picture.sharedId || picture.galleryPostId);
+  const shared = isImageShared(picture);
   return (
     <article className="image-card">
       <button
@@ -126,13 +128,13 @@ export function ImageCard({
                 </button>
               ) : (
                 <>
+                  <div className="image-sharing-row">
+                    <span>공유 {shared ? "ON" : "OFF"}</span>
+                    <ImageSharingToggle picture={picture} label={`${picture.name} 공유`} />
+                  </div>
                   <button
-                    disabled={cloud}
-                    title={
-                      cloud
-                        ? "프로젝트 이름 변경 API는 아직 제공되지 않습니다."
-                        : undefined
-                    }
+                    disabled={shared}
+                    title={shared ? "공유를 끈 뒤 변경할 수 있습니다." : undefined}
                     onClick={(e) => {
                       e.currentTarget
                         .closest("details")
@@ -141,6 +143,16 @@ export function ImageCard({
                     }}
                   >
                     <Pencil size={15} /> 이름 변경
+                  </button>
+                  <button
+                    disabled={shared}
+                    title={shared ? "공유를 끈 뒤 변경할 수 있습니다." : undefined}
+                    onClick={(e) => {
+                      e.currentTarget.closest("details")?.removeAttribute("open");
+                      edit();
+                    }}
+                  >
+                    <Layers3 size={15} /> 사진 설정
                   </button>
                   <button
                     className="danger-text"

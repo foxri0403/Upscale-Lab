@@ -236,6 +236,7 @@ export type Asset = {
   mode: string;
   isPublic: boolean;
   createdAt: string;
+  sourceProjectId?: string | null;
 };
 export type Manifest = {
   assetId: string;

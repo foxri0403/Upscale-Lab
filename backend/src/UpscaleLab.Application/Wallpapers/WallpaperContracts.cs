@@ -4,9 +4,12 @@ using UpscaleLab.Domain.Enums;
 namespace UpscaleLab.Application.Wallpapers;
 
 public sealed record CreateWallpaperRequest(Guid ProjectId,
-    [param: Required, MaxLength(160)] string Title, WallpaperMode Mode, Guid? ProcessingJobId = null);
+    [param: Required, MaxLength(160)] string Title, WallpaperMode Mode, Guid? ProcessingJobId = null,
+    Guid? OriginProjectId = null);
+public sealed record RenameWallpaperRequest([param: Required, MaxLength(160)] string Title);
 public sealed record ShareWallpaperRequest(bool IsPublic);
-public sealed record WallpaperSummary(Guid Id, string Title, WallpaperMode Mode, bool IsPublic, DateTime CreatedAt);
+public sealed record WallpaperSummary(Guid Id, string Title, WallpaperMode Mode, bool IsPublic, DateTime CreatedAt,
+    Guid? SourceProjectId = null);
 // Stored manifests use object keys; network manifests replace keys with fresh URLs.
 public sealed record WallpaperFile(string Source, string ContentType, int Order, string Role,
     double Depth = 0, double X = 0, double Y = 0, double Rotation = 0, double Scale = 1,
@@ -16,6 +19,7 @@ public sealed record WallpaperManifest(int SchemaVersion, Guid AssetId, Wallpape
 
 public interface IWallpaperService
 {
+    Task RenameAsync(Guid userId, Guid assetId, RenameWallpaperRequest request, CancellationToken ct);
     Task<WallpaperSummary> CreateAsync(Guid userId, CreateWallpaperRequest request, CancellationToken ct);
     Task<WallpaperSummary> ImportAsync(Guid userId, Guid assetId, CancellationToken ct);
     Task<IReadOnlyList<WallpaperSummary>> ListAsync(Guid? userId, bool shared, CancellationToken ct);

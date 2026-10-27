@@ -3,6 +3,8 @@ using UpscaleLab.Domain.Enums;
 
 namespace UpscaleLab.Application.Projects;
 
+public sealed record RenameProjectRequest([param: Required, MaxLength(160)] string Title);
+
 public sealed record CreateProjectCommand(
     Stream Content,
     [param: Required, MaxLength(255)] string FileName,

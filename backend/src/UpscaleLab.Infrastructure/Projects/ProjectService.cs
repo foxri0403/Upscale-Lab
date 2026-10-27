@@ -12,6 +12,20 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
 {
     private static readonly TimeSpan DownloadLifetime = TimeSpan.FromMinutes(15);
 
+    public async Task RenameAsync(Guid userId, Guid projectId, RenameProjectRequest request, CancellationToken ct)
+    {
+        var project = await dbContext.LiveLayerProjects.SingleOrDefaultAsync(
+            x => x.Id == projectId && x.UserId == userId, ct)
+            ?? throw new NotFoundException("프로젝트를 찾을 수 없습니다.");
+        if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Length > 160)
+            throw new ValidationException("이미지 이름은 1~160자로 입력해 주세요.");
+        if (await dbContext.GalleryPosts.AnyAsync(x => x.ProjectId == projectId && x.IsPublic, ct) ||
+            await dbContext.WallpaperAssets.AnyAsync(x => x.SourceProjectId == projectId && x.IsPublic && !x.IsArchived, ct))
+            throw new ConflictException("공유를 끈 뒤 이미지 이름을 변경해 주세요.");
+        project.Title = request.Title.Trim();
+        await dbContext.SaveChangesAsync(ct);
+    }
+
     public async Task<ProjectDetailResponse> CreateAsync(
         Guid userId,
         CreateProjectCommand command,

@@ -18,6 +18,8 @@ export type Picture = {
   edit?: Edit;
   sharedId?: string;
   galleryPostId?: string;
+  galleryPostIds?: string[];
+  sharedAssetIds?: string[];
   ownerId?: string;
   tags?: string[];
   creator?: string;

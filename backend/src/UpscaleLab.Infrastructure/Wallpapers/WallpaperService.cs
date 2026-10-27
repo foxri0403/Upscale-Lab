@@ -52,6 +52,9 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             .Include(x => x.ProcessingJobs)
             .SingleOrDefaultAsync(x => x.Id == request.ProjectId && x.UserId == userId, ct)
             ?? throw new NotFoundException("프로젝트를 찾을 수 없습니다.");
+        if (request.OriginProjectId.HasValue && !await db.LiveLayerProjects.AnyAsync(
+            x => x.Id == request.OriginProjectId && x.UserId == userId, ct))
+            throw new NotFoundException("원본 프로젝트를 찾을 수 없습니다.");
         var width = project.OriginalImage.OriginalWidth;
         var height = project.OriginalImage.OriginalHeight;
         var sources = new List<WallpaperFile>();
@@ -79,7 +82,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
                 "image/png", x.LayerOrder, x.LayerType.ToString(), x.Depth, x.PositionX, x.PositionY,
                 x.Rotation, x.Scale, x.MovementX, x.MovementY)));
         }
-        var asset = new WallpaperAsset { UserId = userId, SourceProjectId = project.Id,
+        var asset = new WallpaperAsset { UserId = userId, SourceProjectId = request.OriginProjectId ?? project.Id,
             Title = request.Title.Trim(), Mode = request.Mode };
         var copied = new List<string>();
         try
@@ -109,7 +112,8 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         if (!shared && !userId.HasValue) throw new UnauthorizedException("로그인이 필요합니다.");
         return await db.WallpaperAssets.AsNoTracking().Where(x => !x.IsArchived && (shared ? x.IsPublic : x.UserId == userId))
             .OrderByDescending(x => x.CreatedAt).Take(100)
-            .Select(x => new WallpaperSummary(x.Id, x.Title, x.Mode, x.IsPublic, x.CreatedAt)).ToListAsync(ct);
+            .Select(x => new WallpaperSummary(x.Id, x.Title, x.Mode, x.IsPublic, x.CreatedAt,
+                shared ? null : x.SourceProjectId)).ToListAsync(ct);
     }
 
     public async Task<WallpaperManifest> GetManifestAsync(Guid? userId, Guid assetId, bool agentAccess, CancellationToken ct)
@@ -131,6 +135,16 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         await db.SaveChangesAsync(ct);
     }
 
+    public async Task RenameAsync(Guid userId, Guid assetId, RenameWallpaperRequest request, CancellationToken ct)
+    {
+        var asset = await Owned(userId, assetId, ct);
+        if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Length > 160)
+            throw new ValidationException("이미지 이름은 1~160자로 입력해 주세요.");
+        if (asset.IsPublic) throw new ConflictException("공유를 끈 뒤 이미지 이름을 변경해 주세요.");
+        asset.Title = request.Title.Trim();
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task ArchiveAsync(Guid userId, Guid assetId, CancellationToken ct)
     {
         var asset = await Owned(userId, assetId, ct);
@@ -141,5 +155,6 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
     private async Task<WallpaperAsset> Owned(Guid userId, Guid assetId, CancellationToken ct) =>
         await db.WallpaperAssets.SingleOrDefaultAsync(x => x.Id == assetId && x.UserId == userId && !x.IsArchived, ct)
         ?? throw new NotFoundException("배경화면을 찾을 수 없습니다.");
-    private static WallpaperSummary Map(WallpaperAsset x) => new(x.Id, x.Title, x.Mode, x.IsPublic, x.CreatedAt);
+    private static WallpaperSummary Map(WallpaperAsset x) =>
+        new(x.Id, x.Title, x.Mode, x.IsPublic, x.CreatedAt, x.SourceProjectId);
 }

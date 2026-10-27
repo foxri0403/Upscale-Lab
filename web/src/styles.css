@@ -778,10 +778,10 @@ small {
 }
 .form-options {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 12px 24px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   margin: 10px 0 24px;
 }
 .check-label {
@@ -1427,6 +1427,61 @@ small {
 .device-more > div button:hover {
   background: #f7f8fc;
 }
+.image-sharing-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 10px 7px;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.7857143rem;
+  white-space: nowrap;
+}
+.card-menu .switch {
+  width: 43px;
+  height: 25px;
+  padding: 3px;
+  border-radius: 30px;
+  display: block;
+}
+.card-menu .switch:hover {
+  background: #c2cce0;
+}
+.card-menu .switch.on:hover {
+  background: var(--primary);
+}
+.photo-settings {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  min-width: 0;
+}
+.photo-settings:disabled {
+  opacity: 0.6;
+}
+.studio-upload {
+  max-width: 1150px;
+  margin: auto;
+}
+.studio-upload-zone {
+  min-height: 350px;
+  padding: 50px 24px;
+  border: 2px dashed #ccd4e8;
+  background: white;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  color: var(--muted);
+}
+.studio-upload-zone > svg { color: var(--primary); }
+.studio-upload-zone h2 { font-size: 1.1428571rem; color: var(--ink); margin: 20px 0 8px; }
+.studio-upload-zone p { margin: 0 0 22px; font-size: 0.8571429rem; }
+.studio-upload-zone small { margin-top: 14px; font-size: 0.7142857rem; }
+.studio-recent-images { margin-top: 32px; }
+.studio-recent-images h2 { font-size: 1rem; }
 .explore-page .image-grid {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 18px;

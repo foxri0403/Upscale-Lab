@@ -26,6 +26,7 @@ import {
   type GalleryPost,
 } from "./explore-feed";
 import { unspecifiedTag } from "./image-tags";
+import { isImageShared, projectSharing } from "./image-sharing";
 
 const manifests = new Map<string, { picture: Picture; until: number }>();
 export const preferencesKey = (userId: string) =>
@@ -181,21 +182,23 @@ export async function fetchLibrary(
   // Project previews and immutable saved wallpapers are distinct server resources.
   const projectsWithMetadata = projects.map((project) => {
     const picture = projectPicture(project);
-    const published = gallery.find(
+    const publications = gallery.filter(
       (post) =>
         post.userId === userId &&
         post.projectId === project.id &&
         post.isPublic,
     );
-    if (!published) return picture;
+    const published = publications[0];
+    if (!published) return projectSharing(picture, assets);
     const metadata = galleryPicture(published);
-    return {
+    return projectSharing({
       ...picture,
       genre: metadata.genre,
       tags: metadata.tags,
       galleryPostId: published.id,
+      galleryPostIds: publications.map((post) => post.id),
       sharedId: published.id,
-    };
+    }, assets);
   });
   const images = [...projectsWithMetadata, ...ownPictures].map((p) => ({
     ...p,
@@ -324,7 +327,7 @@ export async function createAsset(picture: Picture): Promise<Asset> {
     !rendered && picture.background && picture.foregrounds?.length
       ? "Live2D"
       : "Static";
-  if (mode === "Live2D") {
+  if (mode === "Live2D" && !isImageShared(picture)) {
     const layers = await request<ApiLayer[]>(
       `/api/projects/${projectId}/layers`,
     );
@@ -347,6 +350,7 @@ export async function createAsset(picture: Picture): Promise<Asset> {
     title: picture.name,
     mode,
     processingJobId: !rendered && mode === "Static" ? picture.jobId : undefined,
+    originProjectId: picture.projectId,
   });
 }
 export async function processProject(

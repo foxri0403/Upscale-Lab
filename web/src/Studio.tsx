@@ -29,6 +29,9 @@ import {
 import { Modal, Notice, Busy, Empty, Link, navigate } from "./ui";
 import { cloud, request, type Job } from "./api";
 import { detailPicture, processProject } from "./cloud-store";
+import { StudioUpload } from "./StudioUpload";
+import { ImageSharingToggle } from "./ImageSharingToggle";
+import { isImageShared } from "./image-sharing";
 
 const tools: {
   id: Tool;
@@ -73,14 +76,13 @@ export function Studio({ route }: { route: string }) {
     update,
     toast,
     session,
-    shared,
-    publish,
     apply,
     saveCloud,
     refresh,
   } = useDemo();
-  const id = new URLSearchParams(route.split("?")[1]).get("id");
-  const picture = id
+  const parameters = new URLSearchParams(route.split("?")[1]);
+  const id = parameters.get("id");
+  const picture = parameters.get("new") === "1" ? undefined : id
     ? library.images.find((p) => p.id === id)
     : library.images.find((p) => p.id === "fox") || library.images[0];
   const [tool, setTool] = useState<Tool>("live");
@@ -94,13 +96,11 @@ export function Studio({ route }: { route: string }) {
   const [target, setTarget] = useState("pc/monitor1");
   const [copied, setCopied] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
-  const [cloudAsset, setCloudAsset] = useState("");
   useEffect(() => {
     if (!id && picture)
       navigate(`/app/studio?id=${encodeURIComponent(picture.id)}`, true);
   }, [id, picture?.id]);
   useEffect(() => {
-    setCloudAsset("");
     setJob(null);
   }, [picture?.id]);
   useEffect(() => {
@@ -139,6 +139,7 @@ export function Studio({ route }: { route: string }) {
     : ["/images/fox-foreground.png"];
   const dirty =
     JSON.stringify(edit) !== JSON.stringify(picture?.edit || defaultEdit);
+  const published = isImageShared(picture);
   const options = library.devices.flatMap((d) =>
     d.displays
       .filter((s) => s.connected)
@@ -149,22 +150,17 @@ export function Studio({ route }: { route: string }) {
     : options[0]?.id || "";
   const active = tools.find((t) => t.id === tool)!;
   function change<K extends keyof Edit>(key: K, value: Edit[K]) {
+    if (published) return;
     setEdit((e) => ({ ...e, [key]: value }));
   }
   async function save() {
-    if (!picture) return false;
+    if (!picture || published) return false;
     if (cloud) {
       setBusy(true);
       try {
         const asset = await saveCloud({ ...picture, edit });
-        setCloudAsset(asset.id);
-        update((v) => ({
-          ...v,
-          images: v.images.map((p) =>
-            p.id === picture.id ? { ...p, edit: { ...edit } } : p,
-          ),
-        }));
         await refresh();
+        navigate(`/app/studio?id=asset:${encodeURIComponent(asset.id)}`, true);
         toast("새 배경화면 버전을 서버 보관함에 저장했습니다.");
         return true;
       } catch (e) {
@@ -184,7 +180,7 @@ export function Studio({ route }: { route: string }) {
     return success;
   }
   async function startProcessing() {
-    if (!picture) return;
+    if (!picture || published) return;
     setBusy(true);
     try {
       const value = await processProject(
@@ -279,7 +275,7 @@ export function Studio({ route }: { route: string }) {
     }
   }
   if (!picture)
-    return (
+    return id ? (
       <Empty
         text={id ? "이미지를 찾을 수 없어요" : "편집할 이미지를 추가해 주세요"}
       >
@@ -287,17 +283,10 @@ export function Studio({ route }: { route: string }) {
           내 이미지로 이동
         </Link>
       </Empty>
-    );
+    ) : <StudioUpload />;
   const sharedId = cloud
-    ? picture.galleryPostId || cloudAsset || picture.assetId || ""
+    ? picture.sharedId || picture.galleryPostId || picture.assetId || ""
     : `shared-${session.id}-${picture.id}`;
-  const published = shared.some((p) =>
-    cloud
-      ? picture.galleryPostId
-        ? p.galleryPostId === sharedId
-        : p.assetId === sharedId
-      : p.id === sharedId,
-  );
   const cropRatio =
     edit.crop === "wide"
       ? "16/9"
@@ -316,7 +305,7 @@ export function Studio({ route }: { route: string }) {
           </div>
           <span className={`save-state ${dirty ? "unsaved" : ""}`}>
             <i />
-            {dirty ? "저장하지 않은 변경" : "저장됨"}
+            {published ? "공유 중 · 편집 잠금" : dirty ? "저장하지 않은 변경" : "저장됨"}
           </span>
         </div>
         <div className="tool-tabs" role="tablist" aria-label="이미지 편집 도구">
@@ -438,10 +427,12 @@ export function Studio({ route }: { route: string }) {
         </div>
       </section>
       <aside className="feature-panel">
+        {published && <Notice>공유 중인 이미지입니다. 이미지 설정에서 공유를 끄면 이름과 사진 설정을 변경할 수 있어요.</Notice>}
         <div className="feature-panel-heading">
           <h2>{active.name}</h2>
           <p>{active.description}</p>
         </div>
+        <fieldset className="photo-settings" disabled={published || busy}>
         {cloud && (tool === "upscale" || tool === "layers") && (
           <div className="cloud-processing">
             <button
@@ -613,6 +604,7 @@ export function Studio({ route }: { route: string }) {
         >
           <RotateCcw size={14} /> 편집 초기화
         </button>
+        </fieldset>
         <div className="apply-target">
           <h3>적용 기기</h3>
           <label className="device-select">
@@ -657,7 +649,7 @@ export function Studio({ route }: { route: string }) {
           </div>
           <button
             className="button secondary full"
-            disabled={busy}
+            disabled={busy || published}
             onClick={() => void save()}
           >
             <Save size={17} /> 보관함에 저장
@@ -683,50 +675,9 @@ export function Studio({ route }: { route: string }) {
                   : "이 브라우저의 탐색 화면에 표시됩니다."}
               </p>
             </div>
-            <button
-              className={`switch ${published ? "on" : ""}`}
-              role="switch"
-              aria-label="탐색 공유"
-              aria-checked={published}
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  if (cloud) {
-                    if (published && picture.galleryPostId) {
-                      if (
-                        !window.confirm(
-                          "기존 모바일 공유 게시물과 댓글·좋아요를 삭제할까요? 보관함의 원본은 유지됩니다.",
-                        )
-                      )
-                        return;
-                      await publish(picture, false);
-                      return;
-                    }
-                    const asset = published
-                      ? { id: sharedId }
-                      : await saveCloud({ ...picture, edit });
-                    setCloudAsset(asset.id);
-                    await publish(
-                      {
-                        ...picture,
-                        edit,
-                        galleryPostId: undefined,
-                        assetId: asset.id,
-                      },
-                      !published,
-                    );
-                  } else await publish({ ...picture, edit }, !published);
-                } catch (e) {
-                  toast((e as Error).message);
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              <span />
-            </button>
+            <ImageSharingToggle picture={picture} disabled={busy || (dirty && !published)} />
           </div>
+          {dirty && !published && <Notice>변경 사항을 보관함에 저장한 뒤 공유를 켜 주세요.</Notice>}
           {published && (
             <div className="copy-field">
               <input
@@ -754,7 +705,7 @@ export function Studio({ route }: { route: string }) {
           )}
           <Notice>
             {cloud
-              ? "공유한 버전은 고정됩니다. 원본 프로젝트를 편집해도 이미 공유한 버전은 바뀌지 않습니다."
+              ? "공유를 켜면 이름과 사진 설정이 잠깁니다. 공유를 끈 뒤 변경할 수 있습니다."
               : "브라우저 안에서 공유 흐름을 확인하는 데모입니다. 다른 기기나 외부 사용자에게는 전달되지 않습니다."}
           </Notice>
         </Modal>

@@ -66,6 +66,13 @@ public sealed class ProjectsController(
         return NoContent();
     }
 
+    [HttpPatch("{projectId:guid}")]
+    public async Task<IActionResult> Rename(Guid projectId, RenameProjectRequest request, CancellationToken ct)
+    {
+        await projectService.RenameAsync(User.GetRequiredUserId(), projectId, request, ct);
+        return NoContent();
+    }
+
     [HttpPost("{projectId:guid}/process")]
     public async Task<ActionResult<ProcessingStatusResponse>> Process(
         Guid projectId,

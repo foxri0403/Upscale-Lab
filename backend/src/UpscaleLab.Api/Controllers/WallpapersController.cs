@@ -45,6 +45,13 @@ public sealed class WallpapersController(IWallpaperService wallpapers) : Control
         return NoContent();
     }
 
+    [HttpPatch("{id:guid}")]
+    public async Task<IActionResult> Rename(Guid id, RenameWallpaperRequest request, CancellationToken ct)
+    {
+        await wallpapers.RenameAsync(User.GetRequiredUserId(), id, request, ct);
+        return NoContent();
+    }
+
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Archive(Guid id, CancellationToken ct)
     {

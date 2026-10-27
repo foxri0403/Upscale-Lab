@@ -28,5 +28,7 @@ public sealed class ApiContractTests
         Assert.Contains("/api/projects/{projectId}/jobs/{jobId}/download-url", api.Paths.Keys);
         Assert.Contains("DeviceState", api.Components.Schemas.Keys);
         Assert.Contains("WallpaperManifest", api.Components.Schemas.Keys);
+        Assert.Contains(OperationType.Patch, api.Paths["/api/projects/{projectId}"].Operations.Keys);
+        Assert.Contains(OperationType.Patch, api.Paths["/api/wallpapers/{id}"].Operations.Keys);
     }
 }
