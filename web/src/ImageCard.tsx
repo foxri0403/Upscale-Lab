@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   Check,
-  Download,
   Layers3,
   MoreVertical,
   Pencil,
@@ -55,7 +54,7 @@ export function ImageCard({
         className="image-card-cover"
         aria-label={`${picture.name} ${explore ? "상세 보기" : "편집하기"}`}
         aria-pressed={explore ? selected : undefined}
-        aria-controls={explore ? "explore-details" : undefined}
+        aria-controls={explore && selected ? "explore-details" : undefined}
         onClick={open}
       >
         <PictureView
@@ -74,12 +73,6 @@ export function ImageCard({
               });
           }}
         />
-        {explore && (
-          <span className="download-count">
-            <Download size={12} />
-            {picture.downloads || 0}
-          </span>
-        )}
       </button>
       <div className="image-card-body">
         <button className="image-title" onClick={open} title={picture.name}>
@@ -95,7 +88,7 @@ export function ImageCard({
         {explore && <span className="creator">{picture.creator}</span>}
         <ImageFeatureBadges picture={picture} />
         <div className="card-actions">
-          {shared && (
+          {!explore && shared && (
             <span className="mobile-shared-badge" aria-label="공유된 이미지">
               공유
               <span>

@@ -1488,20 +1488,6 @@ small {
   display: block;
   margin-top: 4px;
 }
-.download-count {
-  position: absolute;
-  bottom: 8px;
-  right: 9px;
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  border-radius: 4px;
-  background: #0005;
-  backdrop-filter: blur(8px);
-  color: white;
-  padding: 3px 6px;
-  font-size: 0.6428571rem;
-}
 .empty {
   min-height: 330px;
   display: flex;
@@ -3124,7 +3110,6 @@ td:last-child {
 .explore-page .tag-selector { min-width: 175px; flex: 1 1 195px; }
 .explore-page .select-field { min-height: 47px; }
 .explore-page .page-heading { flex-wrap: wrap; align-items: flex-start; }
-.explore-details-toggle { font-size: 0.7857143rem; padding: 9px 12px; min-height: 40px; }
 .image-card.image-card-selected { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
 .card-meta { flex-wrap: wrap; gap: 5px; }
 .explore-details {
@@ -3158,9 +3143,6 @@ td:last-child {
 .explore-details-tags span { font-size: 0.7142857rem; color: #65738d; border: 1px solid var(--line); background: #f8f9fd; padding: 4px 9px; border-radius: 6px; }
 .explore-details-actions { display: grid; gap: 9px; padding: 15px; border-top: 1px solid var(--line); flex-shrink: 0; }
 .explore-details-actions .button { font-size: 0.7857143rem; padding-inline: 8px; white-space: normal; }
-.explore-details-empty { display: flex; flex: 1; min-height: 0; align-items: center; justify-content: center; flex-direction: column; text-align: center; padding: 20px; gap: 14px; color: var(--muted); font-size: 0.7857143rem; }
-.explore-details-empty > svg { color: #a0aabe; }
-.explore-details-empty p { font-size: 0.7142857rem; }
 @media (min-width: 1750px) {
   .explore-page { --details-top: 102px; --details-bottom: 32px; }
 }

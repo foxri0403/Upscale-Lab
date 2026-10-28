@@ -189,7 +189,7 @@ export async function importGalleryPicture(picture: Picture): Promise<Picture> {
     response = await fetch(url, { signal: AbortSignal.timeout(30000) });
   } catch {
     throw new Error(
-      "원본 이미지를 바로 가져올 수 없습니다. ‘원본 이미지 열기’에서 파일을 내려받은 뒤 ‘이미지 추가’로 등록해 주세요.",
+      "공유 원본 이미지를 가져올 수 없습니다. 잠시 후 다시 시도해 주세요.",
     );
   }
   if (!response.ok) throw new Error("공유 원본 이미지에 접근할 수 없습니다.");

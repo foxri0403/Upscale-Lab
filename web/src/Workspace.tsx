@@ -20,8 +20,6 @@ import {
   Plus,
   ArrowDownUp,
   X,
-  PanelRightOpen,
-  PanelRightClose,
   Check,
 } from "lucide-react";
 import { type Session } from "./auth";
@@ -554,7 +552,7 @@ export function Workspace({
 }
 
 export function Gallery({ explore = false }: { explore?: boolean }) {
-  const { library, session, update, toast, shared, publish, refresh } =
+  const { library, update, toast, shared, refresh } =
     useDemo();
   const [query, setQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>(() => [
@@ -562,20 +560,21 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   ]);
   const [sort, setSort] = useState("recent");
   const [preview, setPreview] = useState<Picture | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(() => read("upscale.explore.details", true));
-  const detailsToggle = useRef<HTMLButtonElement>(null);
-  function changeDetails(open: boolean) {
-    setDetailsOpen(open);
-    try { write("upscale.explore.details", open); } catch { /* Optional view preference. */ }
+  const previewTrigger = useRef<HTMLElement | null>(null);
+  function openDetails(picture: Picture) {
+    const active = document.activeElement;
+    previewTrigger.current = active instanceof HTMLElement
+      ? active.closest(".image-card")?.querySelector<HTMLButtonElement>(".image-card-cover") || active
+      : null;
+    setPreview(picture);
   }
   function closeDetails() {
-    changeDetails(false);
-    detailsToggle.current?.focus();
+    setPreview(null);
+    previewTrigger.current?.focus();
   }
   const [editing, setEditing] = useState<Picture | null>(null);
   const [name, setName] = useState("");
   const [deleting, setDeleting] = useState<Picture | null>(null);
-  const [unsharing, setUnsharing] = useState<Picture | null>(null);
   const [importing, setImporting] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const all = explore
@@ -583,24 +582,8 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       ? shared
       : [...shared, ...community]
     : library.images;
-  const openedLink = useRef("");
-  useEffect(() => {
-    const requested = new URLSearchParams(location.search).get("shared");
-    if (explore && requested && openedLink.current !== requested) {
-      const p = all.find(
-        (p) =>
-          p.sharedId === requested ||
-          p.galleryPostId === requested ||
-          p.id === requested ||
-          p.assetId === requested,
-      );
-      if (p) {
-        setPreview(p);
-        changeDetails(true);
-        openedLink.current = requested;
-      }
-    }
-  }, [explore, shared]);
+  const selectedPicture = preview ? all.find(p => p.id === preview.id) || null : null;
+  const detailsOpen = !!selectedPicture;
   const images = all
     .filter(
       (p) =>
@@ -710,12 +693,6 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
             <Plus size={21} /> 이미지 추가
           </button>
         )}
-        {explore && <button ref={detailsToggle} className="button secondary explore-details-toggle"
-          aria-expanded={detailsOpen} aria-controls="explore-details"
-          onClick={() => changeDetails(!detailsOpen)}>
-          {detailsOpen ? <PanelRightClose size={19} /> : <PanelRightOpen size={19} />}
-          이미지 상세 {detailsOpen ? "끄기" : "켜기"}
-        </button>}
       </div>
       <div className="gallery-toolbar">
         <label className="search-field">
@@ -788,7 +765,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
               explore={explore}
               selected={explore && detailsOpen && preview?.id === p.id}
               open={() => {
-                if (explore) { setPreview(p); changeDetails(true); }
+                if (explore) openDetails(p);
                 else navigate(`/app/studio?id=${p.id}`);
               }}
               rename={() => {
@@ -803,12 +780,11 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
         </div>
       )}
       </div>
-      {explore && detailsOpen && <ExploreDetails
-        picture={preview ? all.find(p => p.id === preview.id) || null : null}
-        importing={importing} own={!!preview?.ownerId && preview.ownerId === session.id}
+      {explore && selectedPicture && <ExploreDetails
+        picture={selectedPicture}
+        importing={importing}
         local={!cloud} close={closeDetails}
-        save={open => { if (preview) void importPicture(preview, open); }}
-        unshare={() => { setUnsharing(preview); setPreview(null); }}
+        save={open => { void importPicture(selectedPicture, open); }}
       />}
       {editing && (
         <Modal title="이미지 이름 변경" close={() => setEditing(null)}>
@@ -884,36 +860,6 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
               }}
             >
               삭제
-            </button>
-          </div>
-        </Modal>
-      )}
-      {unsharing && (
-        <Modal title="공유를 취소할까요?" close={() => setUnsharing(null)}>
-          <p>
-            {unsharing.galleryPostId
-              ? "기존 모바일 공유 게시물과 해당 게시물의 댓글·좋아요를 삭제합니다. 보관함의 원본 이미지는 유지됩니다."
-              : "탐색에서 이 배경화면을 숨깁니다. 보관함의 이미지는 유지됩니다."}
-          </p>
-          <div className="modal-actions">
-            <button
-              className="button secondary"
-              onClick={() => setUnsharing(null)}
-            >
-              취소
-            </button>
-            <button
-              className="button danger"
-              onClick={() => {
-                const p = unsharing;
-                const ownId = cloud
-                  ? p.id
-                  : p.id.replace(`shared-${session.id}-`, "");
-                void publish({ ...p, id: ownId }, false);
-                setUnsharing(null);
-              }}
-            >
-              공유 취소
             </button>
           </div>
         </Modal>
