@@ -87,7 +87,7 @@ export function ImageCard({
         </p>
         {explore && <span className="creator">{picture.creator}</span>}
         <ImageFeatureBadges picture={picture} />
-        <div className="card-actions">
+        {!explore && <div className="card-actions">
           {!explore && shared && (
             <span className="mobile-shared-badge" aria-label="공유된 이미지">
               공유
@@ -153,7 +153,7 @@ export function ImageCard({
               )}
             </div>
           </details>
-        </div>
+        </div>}
       </div>
     </article>
   );

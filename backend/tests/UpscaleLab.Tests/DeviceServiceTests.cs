@@ -11,6 +11,19 @@ namespace UpscaleLab.Tests;
 public sealed class DeviceServiceTests
 {
     [Fact]
+    public async Task GetAll_UsesRegistrationTimeRatherThanHeartbeatOrName()
+    {
+        await using var db = CreateDbContext(); var user = Guid.NewGuid();
+        var first = WorkflowData.Device(user);
+        var second = WorkflowData.Device(user); second.DeviceName = "AAA";
+        db.Devices.Add(first); await db.SaveChangesAsync();
+        await Task.Delay(20);
+        db.Devices.Add(second); await db.SaveChangesAsync();
+        first.DeviceName = "Recently updated"; await db.SaveChangesAsync();
+        var result = await new DeviceService(db).GetAllAsync(user, default);
+        Assert.Equal(new[] { first.Id, second.Id }, result.Select(x => x.Id));
+    }
+    [Fact]
     public async Task Update_DoesNotAllowAnotherUsersDevice()
     {
         await using var dbContext = CreateDbContext();

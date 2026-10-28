@@ -102,7 +102,7 @@ export async function fetchDevices(pictures: Picture[]) {
     Promise.all(devices.map(d => request<CloudState>(`/api/devices/${d.id}/state`))),
     Promise.all(devices.map(d => request<CloudCommand[]>(`/api/devices/${d.id}/commands`))),
   ]);
-  return mapDeviceLibrary(states, commands, pictures.filter(p => p.assetId).map(p => ({ id: p.assetId!, title: p.name })));
+  return mapDeviceLibrary(states, commands, pictures.filter(p => p.assetId).map(p => ({ id: p.assetId!, title: p.name })), devices);
 }
 export async function fetchLibrary(
   userId: string,
@@ -131,7 +131,7 @@ export async function fetchLibrary(
     preferencesKey(userId),
     {},
   );
-  const { devices: mappedDevices, commands: mappedCommands } = mapDeviceLibrary(states, commands, assets);
+  const { devices: mappedDevices, commands: mappedCommands } = mapDeviceLibrary(states, commands, assets, devices);
   // Project previews and immutable saved wallpapers are distinct server resources.
   const projectsWithMetadata = projects.map((project) => {
     const picture = projectPicture(project);

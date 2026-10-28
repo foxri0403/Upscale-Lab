@@ -1,8 +1,11 @@
-import type { CloudState, CloudCommand } from "./api";
+import type { CloudDevice, CloudState, CloudCommand } from "./api";
 import type { Device, Command } from "./model";
-export function mapDeviceLibrary(states: CloudState[], commands: CloudCommand[][], assets: { id: string; title: string }[]) {
+import { registeredDevices } from "./device-layout.ts";
+export function mapDeviceLibrary(states: CloudState[], commands: CloudCommand[][], assets: { id: string; title: string }[], registrations: CloudDevice[] = []) {
+  const created = new Map(registrations.map(device => [device.id, device.createdAt]));
   const mappedDevices: Device[] = states.map((s) => ({
     id: s.id,
+    created: created.get(s.id),
     name: s.name,
     platform: s.platform,
     osVersion: s.osVersion,
@@ -12,7 +15,9 @@ export function mapDeviceLibrary(states: CloudState[], commands: CloudCommand[][
     physicalDisplayCount: s.displays.filter(d => d.isConnected).length,
     online: s.recentlySeen,
     displays: s.displays.flatMap((d) => {
-      const assignments = d.wallpapers.length
+      const assignments: CloudState["displays"][number]["wallpapers"] = s.platform === "Android" && d.canApplyWallpaper !== false
+        ? (["Lock", "Home"] as const).map(target => d.wallpapers.find(w => w.target === target) || { target, observation: "Unknown" })
+        : d.wallpapers.length
         ? d.wallpapers
         : [
             {
@@ -71,5 +76,5 @@ export function mapDeviceLibrary(states: CloudState[], commands: CloudCommand[][
         }) as Command,
     ),
   );
-  return { devices: mappedDevices, commands: mappedCommands };
+  return { devices: registeredDevices(mappedDevices), commands: mappedCommands };
 }

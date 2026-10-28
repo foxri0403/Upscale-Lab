@@ -12,7 +12,6 @@ import {
   Search,
   SquarePen,
   PanelsTopLeft,
-  Settings,
   Download,
   ChevronDown,
   LogOut,
@@ -38,7 +37,6 @@ import {
   Brand,
   Link,
   Modal,
-  Notice,
   Empty,
   Busy,
   navigate,
@@ -67,6 +65,7 @@ import { ExploreDetails } from "./ExploreDetails";
 import { ApplyWallpaperDialog } from "./ApplyWallpaperDialog";
 import { isOwnExplorePicture, ownedExplorePicture, wallpaperTargets } from "./explore-actions";
 import { isImageShared, sharingTargets } from "./image-sharing";
+import { AccountSettings, AccountAvatar, profileSession, type AccountProfile } from "./AccountSettings";
 
 type SharedPicture = Picture & { ownerId: string };
 type DemoContext = {
@@ -98,7 +97,7 @@ const navigation = [
   { slug: "devices", name: "기기 관리", icon: PanelsTopLeft },
 ];
 export function Workspace({
-  session,
+  session: initialSession,
   route,
   logout,
 }: {
@@ -106,6 +105,16 @@ export function Workspace({
   route: string;
   logout: () => void;
 }) {
+  const [session, setSession] = useState(initialSession);
+  useEffect(() => {
+    if (!cloud) return;
+    let active = true;
+    const refresh = () => { void request<AccountProfile>("/api/account").then(p => { if (active) setSession(profileSession(p)); }).catch(() => {}); };
+    refresh();
+    const timer = window.setInterval(refresh, 10 * 60 * 1000);
+    window.addEventListener("focus", refresh);
+    return () => { active = false; clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, []);
   const key = `upscale.demo.library.v1.${session.id}`;
   const [library, setLibrary] = useState<Library>(() =>
     cloud
@@ -443,14 +452,9 @@ export function Workspace({
           <Brand to="/app/images" />
           <span className="header-section">{page?.name || "Upscale Lab"}</span>
           <div className="header-right">
-            <span className="local-indicator">
-              {cloud ? "클라우드 연결" : "로컬 미리보기"}
-            </span>
             <details className="account-menu">
               <summary>
-                <span className="avatar">
-                  <UserRound size={22} />
-                </span>
+                <AccountAvatar session={session} />
                 <span>내 계정</span>
                 <ChevronDown size={16} />
               </summary>
@@ -458,7 +462,7 @@ export function Workspace({
                 <strong>{session.name}</strong>
                 <small>{session.email}</small>
                 <button onClick={() => setDialog("settings")}>
-                  <Settings size={16} /> 계정 정보
+                  <UserRound size={16} /> 계정 정보
                 </button>
                 <button onClick={logout}>
                   <LogOut size={16} /> 로그아웃
@@ -486,9 +490,6 @@ export function Workspace({
             ))}
           </nav>
           <div className="sidebar-bottom">
-            <button className="nav-link" onClick={() => setDialog("settings")}>
-              <Settings size={22} /> 설정
-            </button>
             <button className="nav-link" onClick={() => setDialog("downloads")}>
               <Download size={22} /> 연결 앱 다운로드
             </button>
@@ -533,23 +534,7 @@ export function Workspace({
           </div>
         )}
         {dialog === "settings" && (
-          <Modal title="계정 설정" close={() => setDialog(null)}>
-            <div className="account-info">
-              <span className="avatar large">
-                <UserRound size={32} />
-              </span>
-              <h3>{session.name}</h3>
-              <p>{session.email}</p>
-            </div>
-            <Notice>
-              {cloud
-                ? "클라우드 서버에 연결된 계정입니다. 사용자별 이미지와 기기는 서버에서 접근 권한을 확인합니다."
-                : "이 웹 화면은 로컬 테스트 모드입니다. 계정·이미지·샘플 기기는 이 브라우저에만 저장됩니다."}
-            </Notice>
-            <button className="button secondary full" onClick={logout}>
-              <LogOut size={17} /> 로그아웃
-            </button>
-          </Modal>
+          <AccountSettings session={session} updated={setSession} close={() => setDialog(null)} logout={logout} />
         )}
         {dialog === "downloads" && (
           <Modal title="연결 앱 다운로드" close={() => setDialog(null)}>
@@ -596,6 +581,15 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       : [...shared, ...community]
     : library.images;
   const selectedPicture = preview ? all.find(p => p.id === preview.id) || null : null;
+  useEffect(() => {
+    if (!selectedPicture) return;
+    const frame = requestAnimationFrame(() => {
+      const panel = document.getElementById("explore-details");
+      if (panel && (panel.getBoundingClientRect().top < 70 || panel.getBoundingClientRect().top > innerHeight - 120))
+        panel.scrollIntoView({ block: "start" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selectedPicture?.id]);
   const detailsOpen = !!selectedPicture;
   const ownedPictures = [...library.images, ...(library.assets || [])];
   async function ensureOwnPicture(picture: Picture): Promise<Picture> {

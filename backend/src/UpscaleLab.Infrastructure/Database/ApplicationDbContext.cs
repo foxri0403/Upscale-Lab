@@ -7,6 +7,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 {
     public DbSet<User> Users => Set<User>();
     public DbSet<AuthSession> AuthSessions => Set<AuthSession>();
+    public DbSet<AccountCleanupTask> AccountCleanupTasks => Set<AccountCleanupTask>();
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<Image> Images => Set<Image>();
     public DbSet<OptimizedImage> OptimizedImages => Set<OptimizedImage>();
@@ -27,6 +28,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         base.OnModelCreating(modelBuilder);
 
         ConfigureUser(modelBuilder);
+        AccountModelConfiguration.Configure(modelBuilder);
         var session = modelBuilder.Entity<AuthSession>();
         session.ToTable("auth_sessions");
         session.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();

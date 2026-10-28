@@ -15,13 +15,13 @@ import { sampleImages, type Device, type Picture } from "./model";
 import { Modal, Notice, Empty, PictureView } from "./ui";
 import { cloud, post, request } from "./api";
 import { Downloads } from "./Downloads";
+import { deviceDisplays, registeredDevices } from "./device-layout";
 
 export function Devices() {
   const { library, session, update, toast, apply, refresh, refreshDevices } = useDemo();
   const [connecting, setConnecting] = useState(false);
   const [platform, setPlatform] = useState<"Windows" | "Android">("Windows");
   const [deviceName, setDeviceName] = useState("");
-  const [phoneTab, setPhoneTab] = useState<Record<string, string>>({});
   const [target, setTarget] = useState<{
     device: Device;
     displayId: string;
@@ -74,6 +74,7 @@ export function Devices() {
     if (cloud) return;
     const device: Device = {
       id: crypto.randomUUID(),
+      created: new Date().toISOString(),
       name: deviceName.trim(),
       platform,
       online: true,
@@ -193,9 +194,8 @@ export function Devices() {
         </Empty>
       ) : (
         <div className="device-grid">
-          {library.devices.map((device) => {
+          {registeredDevices(library.devices).map((device) => {
             const mobile = device.platform === "Android";
-            const activeTab = phoneTab[device.id] || device.displays[0]?.id;
             const screens = device.physicalDisplayCount ?? (mobile ? Math.min(1, device.displays.filter(d => d.connected).length)
               : new Set(device.displays.filter(d => d.connected).map(d => d.nativeId ?? d.id)).size);
             return (
@@ -246,21 +246,6 @@ export function Devices() {
                 </div>
                 {[device.manufacturer, device.model, device.architecture].some(Boolean) &&
                   <p className="device-hardware">{[device.manufacturer, device.model, device.architecture].filter(Boolean).join(" · ")}</p>}
-                {mobile && (
-                  <div className="phone-tabs">
-                    {device.displays.filter(s => s.canApplyWallpaper !== false).map((s) => (
-                      <button
-                        key={s.id}
-                        className={activeTab === s.id ? "active" : ""}
-                        onClick={() =>
-                          setPhoneTab((v) => ({ ...v, [device.id]: s.id }))
-                        }
-                      >
-                        {s.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
                 {!device.displays.length && (
                   <Notice>
                     연결 앱의 첫 보고를 기다리고 있습니다. 연결 키와 동일한 계정
@@ -268,8 +253,7 @@ export function Devices() {
                   </Notice>
                 )}
                 <div className="display-grid">
-                  {device.displays
-                    .filter((s) => !mobile || s.canApplyWallpaper === false || s.id === activeTab)
+                  {deviceDisplays(device)
                     .map((display, i) => {
                       const current = findPicture(display.current);
                       const desired = display.desired
@@ -297,11 +281,11 @@ export function Devices() {
                               <PictureView picture={current} />
                             ) : (
                               <div className="unknown-wallpaper">
-                                <Monitor size={30} />
+                                {mobile && display.canApplyWallpaper !== false ? <Smartphone size={30} /> : <Monitor size={30} />}
                                 <span>이미지 정보 없음</span>
                               </div>
                             )}
-                            {mobile && display.target === "Lock" && (
+                            {mobile && current && display.target === "Lock" && (
                               <span className="lock-clock">09:41</span>
                             )}
                           </div>

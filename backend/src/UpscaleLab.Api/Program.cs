@@ -1,4 +1,5 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using System.Text.Json.Serialization;
 using Amazon;
 using Amazon.CognitoIdentityProvider;
@@ -113,6 +114,18 @@ builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IEmailVerificationProvider, CognitoEmailVerificationProvider>();
 builder.Services.AddScoped<IPasswordRecoveryProvider, CognitoEmailVerificationProvider>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IAccountService, AccountService>();
+builder.Services.AddScoped<IAccountCleanupService, AccountCleanupService>();
+builder.Services.AddScoped<IAccountIdentityRemover, CognitoAccountIdentityRemover>();
+builder.Services.AddHostedService<AccountCleanupWorker>();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("account-sensitive", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirst("sub")?.Value ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+});
 builder.Services.AddScoped<IActiveSessionValidator, ActiveSessionValidator>();
 builder.Services.AddScoped<IUnverifiedAccountCleaner, CognitoAccountCleaner>();
 builder.Services.AddHostedService<ExpiredAccountWorker>();
@@ -193,6 +206,7 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseCors("ClientPolicy");
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapHealthChecks("/health");

@@ -92,6 +92,7 @@ async function parse<T>(response: Response): Promise<T> {
           403: "이 계정에 권한이 없습니다.",
           404: "요청한 항목을 찾을 수 없습니다.",
           409: "현재 상태에서는 처리할 수 없습니다.",
+          429: "요청이 많습니다. 잠시 후 다시 시도해 주세요.",
           503: "처리 서비스가 아직 준비되지 않았습니다.",
         } as Record<number, string>
       )[response.status] ||
@@ -248,6 +249,7 @@ export type Manifest = {
 };
 export type CloudDevice = {
   id: string;
+  createdAt?: string;
   deviceName: string;
   platform: "Windows" | "Android";
 };

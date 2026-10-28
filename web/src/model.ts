@@ -53,6 +53,7 @@ export type Display = {
 };
 export type Device = {
   id: string;
+  created?: string;
   name: string;
   platform: "Windows" | "Android";
   osVersion?: string;

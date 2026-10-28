@@ -5,6 +5,8 @@ public sealed class User : BaseEntity
     public string Email { get; set; } = string.Empty;
     public string Username { get; set; } = string.Empty;
     public string PasswordHash { get; set; } = string.Empty;
+    public string? ProfileImageObjectKey { get; set; }
+    public DateTime? DeletionRequestedAt { get; set; }
     public bool IsEmailVerified { get; set; }
     public DateTime? EmailVerifiedAt { get; set; }
     public DateTime? EmailVerificationSentAt { get; set; }

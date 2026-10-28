@@ -145,7 +145,7 @@ public sealed class AuthService(
         var email = NormalizeEmail(request.Email);
         var username = await dbContext.Users
             .AsNoTracking()
-            .Where(x => x.Email == email && x.IsEmailVerified)
+            .Where(x => x.Email == email && x.IsEmailVerified && x.DeletionRequestedAt == null)
             .Select(x => x.Username)
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -159,7 +159,7 @@ public sealed class AuthService(
         var email = NormalizeEmail(request.Email);
         var userExists = await dbContext.Users
             .AsNoTracking()
-            .AnyAsync(x => x.Email == email && x.IsEmailVerified, cancellationToken);
+            .AnyAsync(x => x.Email == email && x.IsEmailVerified && x.DeletionRequestedAt == null, cancellationToken);
 
         if (!userExists)
         {
@@ -180,7 +180,7 @@ public sealed class AuthService(
 
         var email = NormalizeEmail(request.Email);
         var user = await dbContext.Users.SingleOrDefaultAsync(
-            x => x.Email == email && x.IsEmailVerified,
+            x => x.Email == email && x.IsEmailVerified && x.DeletionRequestedAt == null,
             cancellationToken);
 
         if (user is null)
@@ -195,6 +195,8 @@ public sealed class AuthService(
             cancellationToken);
 
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);
+        foreach (var session in await dbContext.AuthSessions.Where(x => x.UserId == user.Id && x.RevokedAt == null).ToListAsync(cancellationToken))
+            session.RevokedAt = Now;
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
@@ -229,12 +231,13 @@ public sealed class AuthService(
     {
         var user = await dbContext.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId, cancellationToken)
             ?? throw new NotFoundException("사용자를 찾을 수 없습니다.");
-
+        if (user.DeletionRequestedAt != null) throw new UnauthorizedException("삭제 요청된 계정입니다.");
         return MapUser(user);
     }
 
     private async Task<AuthResponse> CreateResponseAsync(User user, CancellationToken cancellationToken)
     {
+        if (user.DeletionRequestedAt != null) throw new UnauthorizedException("삭제 요청된 계정입니다.");
         var refreshToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         var refreshExpiry = Now.AddDays(90);
         var session = new AuthSession

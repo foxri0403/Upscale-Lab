@@ -5,8 +5,9 @@ export type Account = {
   name: string;
   salt: string;
   hash: string;
+  avatarUrl?: string;
 };
-export type Session = Pick<Account, "id" | "email" | "name">;
+export type Session = Pick<Account, "id" | "email" | "name" | "avatarUrl">;
 const ACCOUNTS = "upscale.demo.accounts.v1";
 const SESSION = "upscale.demo.session.v1";
 // Browser-local demo only. These are NOT API credentials or JWTs.
@@ -89,7 +90,7 @@ export async function signIn(
   );
   if (!account || (await passwordHash(password, account.salt)) !== account.hash)
     throw new Error("이메일 또는 비밀번호를 확인해 주세요.");
-  const session = { id: account.id, email: account.email, name: account.name };
+  const session = { id: account.id, email: account.email, name: account.name, avatarUrl: account.avatarUrl };
   localStorage.removeItem(SESSION);
   sessionStorage.removeItem(SESSION);
   (remember ? localStorage : sessionStorage).setItem(
@@ -116,4 +117,28 @@ export function getSession(): Session | null {
 export function signOut() {
   localStorage.removeItem(SESSION);
   sessionStorage.removeItem(SESSION);
+}
+
+export async function updateDemoAccount(session: Session, change: { name?: string; avatarUrl?: string; password?: string; remove?: boolean }, currentPassword?: string): Promise<Session> {
+  const accounts = read<Account[]>(ACCOUNTS, []);
+  const account = accounts.find(a => a.id === session.id);
+  if (!account) throw new Error("계정을 찾을 수 없습니다.");
+  if (currentPassword !== undefined && await passwordHash(currentPassword, account.salt) !== account.hash)
+    throw new Error("현재 비밀번호가 올바르지 않습니다.");
+  if (change.name !== undefined) {
+    const name = change.name.trim();
+    if (name.length < 2 || name.length > 50 || /[@\p{Cc}]/u.test(name)) throw new Error("아이디는 @를 제외한 2~50자로 입력해 주세요.");
+    if (accounts.some(a => a.id !== session.id && a.name.toLowerCase() === name.toLowerCase())) throw new Error("이미 사용 중인 아이디입니다.");
+    account.name = name;
+  }
+  if ("avatarUrl" in change) account.avatarUrl = change.avatarUrl;
+  if (change.password) { account.salt = crypto.randomUUID(); account.hash = await passwordHash(change.password, account.salt); }
+  write(ACCOUNTS, change.remove ? accounts.filter(a => a.id !== session.id) : accounts);
+  const next = { id: account.id, email: account.email, name: account.name, avatarUrl: account.avatarUrl };
+  if (change.remove) {
+    localStorage.removeItem(`upscale.demo.library.v1.${session.id}`);
+    write("upscale.demo.shared.v1", read<{ownerId: string}[]>("upscale.demo.shared.v1", []).filter(p => p.ownerId !== session.id));
+    signOut();
+  } else (localStorage.getItem(SESSION) ? localStorage : sessionStorage).setItem(SESSION, JSON.stringify(next));
+  return next;
 }

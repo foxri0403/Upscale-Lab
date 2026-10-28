@@ -3196,3 +3196,40 @@ td:last-child {
 .studio-layout.studio-editor .studio-document-name input { max-width: 100%; }
 .studio-layout.studio-editor .studio-settings-scroll { overflow-y: auto; scrollbar-gutter: stable; }
 .explore-details-content { scrollbar-gutter: stable; }
+
+/* Details participate in page scrolling; the panel has no nested scrollbar. */
+.avatar { overflow: hidden; flex-shrink: 0; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.account-settings { display: grid; gap: 20px; }
+.account-profile-row { display: flex; align-items: center; gap: 14px; }
+.account-profile-row p { color: var(--muted); margin: 5px 0 0; overflow-wrap: anywhere; }
+.account-settings fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin: 0; min-width: 0; display: grid; gap: 12px; }
+.account-settings legend { padding: 0 6px; font-weight: 700; }
+.account-settings label:not(.button) { display: grid; gap: 7px; font-size: 0.9rem; }
+.account-settings input:not([type="checkbox"]):not([type="file"]) { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.account-settings p { margin: 0; line-height: 1.6; }
+.account-settings .account-delete-check { display: flex !important; align-items: center; }
+.account-settings .account-danger { border-color: #efb7bf; }
+.account-photo-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.account-photo-actions label { position: relative; overflow: hidden; }
+.account-photo-actions input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+.explore-page .explore-details { position: static; height: auto; max-height: none; scroll-margin-top: 90px; }
+.explore-details-content { overflow: visible; flex: none; scrollbar-gutter: auto; }
+.devices-page .device-grid { align-items: stretch; }
+.devices-page .device-card { display: flex; flex-direction: column; height: 100%; }
+.devices-page .display-grid { flex: 1; align-items: stretch; }
+.devices-page .mobile-device .display-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.devices-page .mobile-device .display-card, .devices-page .pc-device .display-card { display: flex; flex-direction: column; }
+.devices-page .display-card > .button:not(.wallpaper-remove) { margin-top: auto; }
+.devices-page .display-card > .wallpaper-remove { margin-top: 6px; }
+.devices-page .mobile-device .display-label { grid-template-columns: minmax(0, 1fr) auto; }
+.devices-page .mobile-device .display-name { grid-column: 1; grid-row: 1; }
+.devices-page .mobile-device .device-connection { grid-column: 2; grid-row: 1; }
+.devices-page .mobile-device .display-wallpaper-title { grid-column: 1 / -1; text-align: left; }
+.devices-page .mobile-device .phone-wallpaper { width: min(100%, 120px); height: auto; aspect-ratio: 1 / 2; flex-shrink: 0; }
+.phone-wallpaper > .unknown-wallpaper { width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 10px; text-align: center; background: #e9edf5; }
+.phone-wallpaper .unknown-wallpaper span { font-size: 0.7857143rem; word-break: keep-all; }
+.devices-page .mobile-device .display-grid { padding-bottom: 15px; }
+@media (max-width: 800px) {
+  .explore-page .explore-details { position: absolute; inset: 0 0 auto auto; height: auto; }
+}
