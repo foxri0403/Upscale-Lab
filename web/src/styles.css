@@ -3209,6 +3209,7 @@ td:last-child {
 .account-settings input:not([type="checkbox"]):not([type="file"]) { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
 .account-settings p { margin: 0; line-height: 1.6; }
 .account-settings .account-delete-check { display: flex !important; align-items: center; }
+.account-settings input[type="checkbox"] { width: 16px; height: 16px; flex: 0 0 16px; padding: 0; }
 .account-settings .account-danger { border-color: #efb7bf; }
 .account-photo-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .account-photo-actions label { position: relative; overflow: hidden; }
