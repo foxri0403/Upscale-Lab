@@ -7,13 +7,15 @@ export type Edit = {
   crop: string;
   scale: number;
   foreground: boolean;
+  liveEnabled?: boolean;
 };
 export type Picture = {
   id: string;
   name: string;
   src: string;
   genre: Genre;
-  kind?: "Live 2D" | "업스케일";
+  kind?: "Live 2D" | "배경 분리" | "업스케일";
+  features?: string[];
   created: string;
   edit?: Edit;
   sharedId?: string;

@@ -1482,22 +1482,11 @@ small {
 .studio-upload-zone small { margin-top: 14px; font-size: 0.7142857rem; }
 .studio-recent-images { margin-top: 32px; }
 .studio-recent-images h2 { font-size: 1rem; }
-.explore-page .image-grid {
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 18px;
-}
-.explore-page .image-card-body {
-  min-height: 100px;
-  padding: 13px 74px 16px 14px;
-}
 .creator {
   font-size: 0.7142857rem;
   color: #929bb0;
   display: block;
   margin-top: 4px;
-}
-.explore-page .card-meta {
-  margin-top: 7px;
 }
 .download-count {
   position: absolute;
@@ -2635,10 +2624,6 @@ td:last-child {
   .select-field {
     min-width: 128px;
   }
-  .explore-page .image-grid {
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 13px;
-  }
   .device-grid {
     grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr);
     gap: 15px;
@@ -3114,4 +3099,107 @@ td:last-child {
 }
 @container (max-width: 700px) {
   .devices-page .device-card { grid-column: 1 / -1; }
+}
+/* Use the library's card width even while the Explore inspector is open. */
+.explore-page {
+  container-type: inline-size;
+  --gallery-columns: 4;
+  --gallery-gap: 15px;
+  --gallery-card-width: calc((100cqw - (var(--gallery-columns) - 1) * var(--gallery-gap)) / var(--gallery-columns));
+  --details-top: 98px;
+  --details-bottom: 36px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--gallery-gap);
+  align-items: start;
+}
+.explore-details-open { grid-template-columns: minmax(0, 1fr) auto; }
+.gallery-content { min-width: 0; }
+.explore-page .image-grid {
+  grid-template-columns: repeat(auto-fill, minmax(0, min(100%, calc(var(--gallery-card-width) - 0.1px))));
+  gap: var(--gallery-gap);
+}
+.explore-page .gallery-toolbar { height: auto; flex-wrap: wrap; }
+.explore-page .search-field { min-height: 47px; flex: 1 1 230px; }
+.explore-page .tag-selector { min-width: 175px; flex: 1 1 195px; }
+.explore-page .select-field { min-height: 47px; }
+.explore-page .page-heading { flex-wrap: wrap; align-items: flex-start; }
+.explore-details-toggle { font-size: 0.7857143rem; padding: 9px 12px; min-height: 40px; }
+.image-card.image-card-selected { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.card-meta { flex-wrap: wrap; gap: 5px; }
+.explore-details {
+  width: var(--gallery-card-width);
+  min-width: 0;
+  position: sticky;
+  top: var(--details-top);
+  height: calc(100dvh - var(--details-top) - var(--details-bottom));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  overflow: hidden;
+}
+.explore-details-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 13px 16px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.explore-details-heading h2 { font-size: 1rem; margin: 0; }
+.explore-details-content { flex: 1; min-height: 0; padding: 16px; overflow-y: auto; overscroll-behavior: contain; }
+.explore-details-preview { border-radius: 8px; overflow: hidden; background: #f4f6fb; }
+.explore-details-preview .picture-view { aspect-ratio: 3/2; }
+.explore-details-preview img { object-fit: contain; }
+.explore-details-content h3 { font-size: 1.1428571rem; margin: 16px 0 10px; overflow-wrap: anywhere; }
+.explore-details-creator { display: flex; align-items: center; gap: 8px; font-size: 0.7857143rem; overflow-wrap: anywhere; }
+.explore-details-creator svg { flex-shrink: 0; color: var(--muted); }
+.explore-details-date { color: var(--muted); font-size: 0.7142857rem; margin-top: 5px; }
+.explore-details-section { margin-top: 20px; padding-top: 17px; border-top: 1px solid var(--line); }
+.explore-details-section h4 { margin: 0 0 9px; font-size: 0.8571429rem; }
+.explore-details .image-information > div { grid-template-columns: auto minmax(0, 1fr); gap: 10px; padding: 9px 0; border: 0; font-size: 0.7142857rem; }
+.explore-details .image-information dd { text-align: right; }
+.explore-details-tags { display: flex; flex-wrap: wrap; gap: 7px; }
+.explore-details-tags span { font-size: 0.7142857rem; color: #65738d; border: 1px solid var(--line); background: #f8f9fd; padding: 4px 9px; border-radius: 6px; }
+.explore-details-actions { display: grid; gap: 9px; padding: 15px; border-top: 1px solid var(--line); flex-shrink: 0; }
+.explore-details-actions .button { font-size: 0.7857143rem; padding-inline: 8px; white-space: normal; }
+.explore-details-empty { display: flex; flex: 1; min-height: 0; align-items: center; justify-content: center; flex-direction: column; text-align: center; padding: 20px; gap: 14px; color: var(--muted); font-size: 0.7857143rem; }
+.explore-details-empty > svg { color: #a0aabe; }
+.explore-details-empty p { font-size: 0.7142857rem; }
+@media (min-width: 1750px) {
+  .explore-page { --details-top: 102px; --details-bottom: 32px; }
+}
+@media (max-width: 1250px) {
+  .explore-page { --gallery-gap: 12px; --details-top: 95px; --details-bottom: 25px; }
+}
+@media (min-width: 801px) and (max-width: 1050px) {
+  .explore-details { width: 280px; }
+}
+@media (max-width: 1050px) {
+  .explore-page { --gallery-columns: 3; --details-top: 92px; --details-bottom: 22px; }
+}
+@media (max-width: 800px) {
+  .explore-page { --gallery-columns: 3; }
+  .explore-details-open { grid-template-columns: minmax(0, 1fr); }
+  .explore-details { position: fixed; inset: 82px 12px 12px auto; height: auto; width: min(390px, calc(100vw - 24px)); z-index: 40; box-shadow: 0 10px 35px #17203320; }
+}
+@media (max-width: 540px) {
+  .explore-page { --gallery-columns: 2; }
+}
+
+/* The new-image screen fits the viewport without a vertical page scrollbar. */
+.app-main:has(.studio-upload) { height: calc(100dvh - 70px); min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.studio-upload { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: clamp(10px, 2vh, 22px); }
+.studio-upload .page-heading { margin-bottom: 0; flex-shrink: 0; }
+.studio-upload-zone { flex: 1; min-height: 0; padding: clamp(10px, 3vh, 42px) 18px; }
+.studio-upload-zone > svg { flex-shrink: 0; width: clamp(24px, 5vh, 46px); height: clamp(24px, 5vh, 46px); }
+.studio-upload-zone h2 { margin-top: clamp(8px, 2vh, 20px); }
+.studio-upload-zone p { margin-bottom: clamp(10px, 2vh, 22px); }
+.studio-upload-zone small { margin-top: clamp(6px, 1.4vh, 14px); }
+.studio-upload .studio-recent-images { margin-top: 0; flex-shrink: 0; }
+.studio-upload .filmstrip { margin-top: 10px; }
+.studio-upload .filmstrip button { flex: 0 0 clamp(100px, 11vw, 160px); }
+.studio-upload .filmstrip img { height: clamp(60px, 10vh, 100px); aspect-ratio: auto; }
+@media (max-height: 650px) {
+  .studio-upload .studio-recent-images { display: none; }
+}
+@media (max-height: 520px) {
+  .studio-upload-zone small { display: none; }
+  .studio-upload-zone h2 { font-size: 1rem; margin-top: 6px; }
+  .studio-upload .page-heading p { display: none; }
 }

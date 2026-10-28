@@ -20,6 +20,8 @@ import {
   Plus,
   ArrowDownUp,
   X,
+  PanelRightOpen,
+  PanelRightClose,
   Check,
 } from "lucide-react";
 import { type Session } from "./auth";
@@ -42,7 +44,6 @@ import {
   Empty,
   Busy,
   navigate,
-  PictureView,
 } from "./ui";
 import { Studio } from "./Studio";
 import { Devices } from "./Devices";
@@ -58,13 +59,13 @@ import {
 } from "./cloud-store";
 import {
   allTagsSelected,
-  imageTags,
   matchesSelectedTags,
   selectableTags,
 } from "./image-tags";
 import { TagSelector } from "./TagSelector";
 import { watchDeviceUpdates } from "./device-updates";
 import { ImageCard } from "./ImageCard";
+import { ExploreDetails } from "./ExploreDetails";
 import { isImageShared, sharingTargets } from "./image-sharing";
 
 type SharedPicture = Picture & { ownerId: string };
@@ -561,6 +562,16 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   ]);
   const [sort, setSort] = useState("recent");
   const [preview, setPreview] = useState<Picture | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(() => read("upscale.explore.details", true));
+  const detailsToggle = useRef<HTMLButtonElement>(null);
+  function changeDetails(open: boolean) {
+    setDetailsOpen(open);
+    try { write("upscale.explore.details", open); } catch { /* Optional view preference. */ }
+  }
+  function closeDetails() {
+    changeDetails(false);
+    detailsToggle.current?.focus();
+  }
   const [editing, setEditing] = useState<Picture | null>(null);
   const [name, setName] = useState("");
   const [deleting, setDeleting] = useState<Picture | null>(null);
@@ -585,6 +596,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       );
       if (p) {
         setPreview(p);
+        changeDetails(true);
         openedLink.current = requested;
       }
     }
@@ -610,7 +622,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
         if (p.galleryPostId) {
           const saved = await importGalleryPicture(p);
           await refresh();
-          setPreview(null);
+          setPreview(current => current?.id === p.id ? null : current);
           toast("내 이미지에 원본을 가져왔습니다.");
           if (open) navigate(`/app/studio?id=${saved.id}`);
           return;
@@ -621,7 +633,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
         );
         const saved = await assetPicture(imported);
         await refresh();
-        setPreview(null);
+        setPreview(current => current?.id === p.id ? null : current);
         toast("내 이미지에 가져왔습니다.");
         if (open) navigate(`/app/studio?id=${saved.id}`);
       } catch (e) {
@@ -641,7 +653,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       created: new Date().toISOString(),
     };
     if (update((v) => ({ ...v, images: [copy, ...v.images] }))) {
-      setPreview(null);
+      setPreview(current => current?.id === p.id ? null : current);
       toast("내 이미지에 저장했습니다.");
       if (open) navigate(`/app/studio?id=${copy.id}`);
     }
@@ -674,7 +686,8 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     }
   }
   return (
-    <section className={`gallery-page ${explore ? "explore-page" : ""}`}>
+    <section className={`gallery-page ${explore ? `explore-page ${detailsOpen ? "explore-details-open" : ""}` : ""}`}>
+      <div className="gallery-content">
       <div className="page-heading">
         <div>
           <h1>
@@ -697,6 +710,12 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
             <Plus size={21} /> 이미지 추가
           </button>
         )}
+        {explore && <button ref={detailsToggle} className="button secondary explore-details-toggle"
+          aria-expanded={detailsOpen} aria-controls="explore-details"
+          onClick={() => changeDetails(!detailsOpen)}>
+          {detailsOpen ? <PanelRightClose size={19} /> : <PanelRightOpen size={19} />}
+          이미지 상세 {detailsOpen ? "끄기" : "켜기"}
+        </button>}
       </div>
       <div className="gallery-toolbar">
         <label className="search-field">
@@ -767,9 +786,11 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
               key={p.id}
               picture={p}
               explore={explore}
-              open={() =>
-                explore ? setPreview(p) : navigate(`/app/studio?id=${p.id}`)
-              }
+              selected={explore && detailsOpen && preview?.id === p.id}
+              open={() => {
+                if (explore) { setPreview(p); changeDetails(true); }
+                else navigate(`/app/studio?id=${p.id}`);
+              }}
               rename={() => {
                 if (isImageShared(p)) return;
                 setEditing(p);
@@ -781,6 +802,14 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           ))}
         </div>
       )}
+      </div>
+      {explore && detailsOpen && <ExploreDetails
+        picture={preview ? all.find(p => p.id === preview.id) || null : null}
+        importing={importing} own={!!preview?.ownerId && preview.ownerId === session.id}
+        local={!cloud} close={closeDetails}
+        save={open => { if (preview) void importPicture(preview, open); }}
+        unshare={() => { setUnsharing(preview); setPreview(null); }}
+      />}
       {editing && (
         <Modal title="이미지 이름 변경" close={() => setEditing(null)}>
           <form
@@ -857,62 +886,6 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
               삭제
             </button>
           </div>
-        </Modal>
-      )}
-      {preview && (
-        <Modal title={preview.name} close={() => setPreview(null)} wide>
-          <div className="detail-preview">
-            <PictureView picture={preview} />
-          </div>
-          <div className="detail-meta">
-            <span>by {preview.creator}</span>
-            <span>
-              {imageTags(preview).join(" · ") || "장르 없음"}{" "}
-              {preview.kind && `· ${preview.kind}`}
-            </span>
-          </div>
-          <div className="modal-actions">
-            <button
-              className="button secondary"
-              disabled={importing}
-              onClick={() => importPicture(preview, false)}
-            >
-              <Plus size={17} /> 내 이미지에 저장
-            </button>
-            <button
-              className="button primary"
-              disabled={importing}
-              onClick={() => importPicture(preview, true)}
-            >
-              <SquarePen size={17} /> 작업실에서 열기
-            </button>
-          </div>
-          {"ownerId" in preview && preview.ownerId === session.id && (
-            <button
-              className="text-button danger-text unpublish"
-              onClick={() => {
-                setUnsharing(preview);
-                setPreview(null);
-              }}
-            >
-              이 게시물 공유 취소
-            </button>
-          )}
-          <Notice>
-            {cloud
-              ? "공유된 버전을 내 보관함에 복사합니다."
-              : "로컬 샘플 갤러리입니다. 공개 범위는 현재 브라우저로 한정됩니다."}
-          </Notice>
-          {cloud && preview.galleryPostId && (
-            <a
-              className="button secondary full"
-              href={preview.src}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              원본 이미지 열기
-            </a>
-          )}
         </Modal>
       )}
       {unsharing && (

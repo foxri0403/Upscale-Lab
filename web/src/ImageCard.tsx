@@ -2,7 +2,6 @@ import { useState } from "react";
 import {
   Check,
   Download,
-  Expand,
   Layers3,
   MoreVertical,
   Pencil,
@@ -15,10 +14,12 @@ import { imageTags, tagSummary } from "./image-tags";
 import type { Picture } from "./model";
 import { isImageShared } from "./image-sharing";
 import { ImageSharingToggle } from "./ImageSharingToggle";
+import { ImageFeatureBadges } from "./ImageFeatureBadges";
 
 export function ImageCard({
   picture,
   explore,
+  selected = false,
   open,
   rename,
   edit,
@@ -26,6 +27,7 @@ export function ImageCard({
 }: {
   picture: Picture;
   explore: boolean;
+  selected?: boolean;
   open: () => void;
   rename: () => void;
   edit: () => void;
@@ -48,10 +50,12 @@ export function ImageCard({
         : "해상도 확인 중…";
   const shared = isImageShared(picture);
   return (
-    <article className="image-card">
+    <article className={`image-card ${selected ? "image-card-selected" : ""}`}>
       <button
         className="image-card-cover"
         aria-label={`${picture.name} ${explore ? "상세 보기" : "편집하기"}`}
+        aria-pressed={explore ? selected : undefined}
+        aria-controls={explore ? "explore-details" : undefined}
         onClick={open}
       >
         <PictureView
@@ -89,20 +93,7 @@ export function ImageCard({
           {resolution}
         </p>
         {explore && <span className="creator">{picture.creator}</span>}
-        {picture.kind && (
-          <div className="card-meta">
-            <span
-              className={`type-badge ${picture.kind === "Live 2D" ? "live" : ""}`}
-            >
-              {picture.kind === "Live 2D" ? (
-                <Layers3 size={14} />
-              ) : (
-                <Expand size={14} />
-              )}{" "}
-              {picture.kind}
-            </span>
-          </div>
-        )}
+        <ImageFeatureBadges picture={picture} />
         <div className="card-actions">
           {shared && (
             <span className="mobile-shared-badge" aria-label="공유된 이미지">
