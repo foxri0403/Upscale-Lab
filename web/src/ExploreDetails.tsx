@@ -1,17 +1,20 @@
 import { useState } from "react";
-import { Plus, SquarePen, UserRound, X } from "lucide-react";
+import { Monitor, Plus, SquarePen, UserRound, X } from "lucide-react";
 import type { Picture } from "./model";
 import { imageTags } from "./image-tags";
 import { imageFileFormat, imageResolution } from "./image-information";
 import { ImageFeatureBadges } from "./ImageFeatureBadges";
 import { Busy, Notice, PictureView } from "./ui";
 
-export function ExploreDetails({ picture, importing, local, close, save }: {
+export function ExploreDetails({ picture, importing, own, local, close, save, openStudio, apply }: {
   picture: Picture;
   importing: boolean;
+  own: boolean;
   local: boolean;
   close: () => void;
-  save: (open: boolean) => void;
+  save: () => void;
+  openStudio: () => void;
+  apply: () => void;
 }) {
   const [measured, setMeasured] = useState<{ source: string; resolution: string | null } | null>(null);
   const source = picture.background || picture.src;
@@ -61,11 +64,12 @@ export function ExploreDetails({ picture, importing, local, close, save }: {
           {local && <Notice>로컬 샘플 갤러리입니다. 공개 범위는 현재 브라우저로 한정됩니다.</Notice>}
         </div>
         <div className="explore-details-actions">
-          <button className="button primary full" disabled={importing} onClick={() => save(false)}>
+          {!own && <button className="button primary full" disabled={importing} onClick={save}>
             {importing ? <Busy /> : <Plus size={18} />} 내 이미지에 저장
-          </button>
-          <button className="button secondary full" disabled={importing} onClick={() => save(true)}>
-            <SquarePen size={18} /> 작업실에서 열기
+          </button>}
+          <button className="button secondary full" disabled={importing} onClick={own ? openStudio : apply}>
+            {own ? <SquarePen size={18} /> : <Monitor size={18} />}
+            {own ? "작업실에서 열기" : "연결된 기기에 적용"}
           </button>
         </div>
     </aside>

@@ -64,6 +64,8 @@ import { TagSelector } from "./TagSelector";
 import { watchDeviceUpdates } from "./device-updates";
 import { ImageCard } from "./ImageCard";
 import { ExploreDetails } from "./ExploreDetails";
+import { ApplyWallpaperDialog } from "./ApplyWallpaperDialog";
+import { isOwnExplorePicture, ownedExplorePicture, wallpaperTargets } from "./explore-actions";
 import { isImageShared, sharingTargets } from "./image-sharing";
 
 type SharedPicture = Picture & { ownerId: string };
@@ -78,7 +80,8 @@ type DemoContext = {
     picture: Picture,
     deviceId: string,
     displayId: string,
-  ) => Promise<void>;
+    options?: { useExistingAsset?: boolean },
+  ) => Promise<boolean>;
   refresh: () => Promise<void>;
   refreshDevices: () => Promise<void>;
   saveCloud: (picture: Picture) => Promise<Asset>;
@@ -340,23 +343,29 @@ export function Workspace({
       sharing.current = false;
     }
   }
-  async function apply(picture: Picture, deviceId: string, displayId: string) {
+  async function apply(picture: Picture, deviceId: string, displayId: string, options?: { useExistingAsset?: boolean }) {
     const device = current.current.devices.find((d) => d.id === deviceId);
-    if (!device) return;
+    if (!device) return false;
     const display = device.displays.find((d) => d.id === displayId);
-    if (!display || !display.connected) {
+    if (!display || !display.connected || (options?.useExistingAsset && (!device.online || display.canApplyWallpaper === false))) {
       toast("연결된 화면을 선택해 주세요.");
-      return;
+      return false;
     }
     if (cloud) {
+      let sent = false;
       try {
-        const asset = await saveCloud(picture);
+        const asset: Asset = options?.useExistingAsset && picture.assetId ? {
+          id: picture.assetId, title: picture.name,
+          mode: picture.background && picture.foregrounds?.length ? "Live2D" : "Static",
+          isPublic: !!picture.sharedId, createdAt: picture.created,
+        } : await saveCloud(picture);
         await post(`/api/devices/${deviceId}/commands`, {
           requestId: uuid(),
           displayId: display.nativeId,
           assetId: asset.id,
           target: display.target,
         });
+        sent = true;
         const preview = await assetPicture(asset);
         const previous = current.current.assets || [];
         current.current = { ...current.current, assets: [...previous.filter(p => p.assetId !== asset.id), preview] };
@@ -365,10 +374,11 @@ export function Workspace({
         toast(
           "적용 요청을 전송했습니다. 연결 앱이 처리하면 상태가 갱신됩니다.",
         );
+        return true;
       } catch (e) {
-        toast((e as Error).message);
+        toast(sent ? "적용 요청을 전송했습니다. 기기 상태는 다시 연결되면 갱신됩니다." : (e as Error).message);
+        return sent;
       }
-      return;
     }
     const command: Command = {
       id: crypto.randomUUID(),
@@ -379,8 +389,7 @@ export function Workspace({
       created: new Date().toISOString(),
     };
     const snapshot = { ...picture, id: uuid() };
-    if (
-      update((v) => ({
+    const applied = update((v) => ({
         ...v,
         assets: [...(v.assets || []), snapshot],
         commands: [command, ...v.commands].slice(0, 100),
@@ -394,9 +403,10 @@ export function Workspace({
               }
             : d,
         ),
-      }))
-    )
+      }));
+    if (applied)
       toast("샘플 적용 요청을 저장했습니다. 기기 관리에서 상태를 확인하세요.");
+    return applied;
   }
   return (
     <Demo.Provider
@@ -552,7 +562,7 @@ export function Workspace({
 }
 
 export function Gallery({ explore = false }: { explore?: boolean }) {
-  const { library, update, toast, shared, refresh } =
+  const { library, session, update, toast, shared, refresh, apply } =
     useDemo();
   const [query, setQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>(() => [
@@ -576,6 +586,9 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const [name, setName] = useState("");
   const [deleting, setDeleting] = useState<Picture | null>(null);
   const [importing, setImporting] = useState(false);
+  const [applyingPicture, setApplyingPicture] = useState<Picture | null>(null);
+  const applying = useRef(false);
+  const importedPictures = useRef(new Map<string, Promise<Picture>>());
   const [renaming, setRenaming] = useState(false);
   const all = explore
     ? cloud
@@ -584,6 +597,32 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     : library.images;
   const selectedPicture = preview ? all.find(p => p.id === preview.id) || null : null;
   const detailsOpen = !!selectedPicture;
+  const ownedPictures = [...library.images, ...(library.assets || [])];
+  async function ensureOwnPicture(picture: Picture): Promise<Picture> {
+    const owned = ownedExplorePicture(picture, session.id, ownedPictures);
+    if (owned) return owned;
+    const cached = importedPictures.current.get(picture.id);
+    if (cached) return cached;
+    const pending = (async () => {
+      if (cloud) {
+        const saved = picture.assetId && isOwnExplorePicture(picture, session.id, ownedPictures)
+          ? { ...picture, id: `asset:${picture.assetId}` }
+          : picture.galleryPostId ? await importGalleryPicture(picture)
+          : await assetPicture(await post<Asset>(`/api/wallpapers/${picture.assetId}/import`, {}));
+        await refresh();
+        return saved;
+      }
+      const copy: Picture = { ...picture, id: uuid(), ownerId: session.id,
+        sharedId: undefined, galleryPostId: undefined, galleryPostIds: [], sharedAssetIds: [],
+        created: new Date().toISOString() };
+      if (!update(value => ({ ...value, images: [copy, ...value.images] })))
+        throw new Error("이미지를 저장하지 못했습니다. 브라우저 저장 공간을 확인해 주세요.");
+      return copy;
+    })();
+    importedPictures.current.set(picture.id, pending);
+    try { return await pending; }
+    catch (error) { importedPictures.current.delete(picture.id); throw error; }
+  }
   const images = all
     .filter(
       (p) =>
@@ -599,47 +638,26 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     );
   async function importPicture(p: Picture, open: boolean) {
     if (importing) return;
-    if (cloud) {
-      setImporting(true);
-      try {
-        if (p.galleryPostId) {
-          const saved = await importGalleryPicture(p);
-          await refresh();
-          setPreview(current => current?.id === p.id ? null : current);
-          toast("내 이미지에 원본을 가져왔습니다.");
-          if (open) navigate(`/app/studio?id=${saved.id}`);
-          return;
-        }
-        const imported = await post<Asset>(
-          `/api/wallpapers/${p.assetId}/import`,
-          {},
-        );
-        const saved = await assetPicture(imported);
-        await refresh();
-        setPreview(current => current?.id === p.id ? null : current);
-        toast("내 이미지에 가져왔습니다.");
-        if (open) navigate(`/app/studio?id=${saved.id}`);
-      } catch (e) {
-        toast((e as Error).message);
-      } finally {
-        setImporting(false);
-      }
-      return;
-    }
-    const copy: Picture = {
-      ...p,
-      id: crypto.randomUUID(),
-      sharedId: undefined,
-      galleryPostId: undefined,
-      galleryPostIds: [],
-      sharedAssetIds: [],
-      created: new Date().toISOString(),
-    };
-    if (update((v) => ({ ...v, images: [copy, ...v.images] }))) {
+    setImporting(true);
+    try {
+      const saved = await ensureOwnPicture(p);
       setPreview(current => current?.id === p.id ? null : current);
-      toast("내 이미지에 저장했습니다.");
-      if (open) navigate(`/app/studio?id=${copy.id}`);
-    }
+      if (open) navigate(`/app/studio?id=${encodeURIComponent(saved.id)}`);
+      else toast("내 이미지에 저장했습니다.");
+    } catch (error) { toast((error as Error).message); }
+    finally { setImporting(false); }
+  }
+  async function applyExplorePicture(deviceId: string, displayId: string) {
+    if (!applyingPicture || applying.current) return;
+    applying.current = true;
+    setImporting(true);
+    try {
+      if (!wallpaperTargets(library.devices).some(target => target.deviceId === deviceId && target.displayId === displayId))
+        throw new Error("연결된 화면을 선택해 주세요.");
+      const saved = await ensureOwnPicture(applyingPicture);
+      if (await apply(saved, deviceId, displayId, { useExistingAsset: true })) setApplyingPicture(null);
+    } catch (error) { toast((error as Error).message); }
+    finally { applying.current = false; setImporting(false); }
   }
   async function removePicture(picture: Picture) {
     if (cloud) {
@@ -783,9 +801,15 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       {explore && selectedPicture && <ExploreDetails
         picture={selectedPicture}
         importing={importing}
+        own={isOwnExplorePicture(selectedPicture, session.id, ownedPictures)}
         local={!cloud} close={closeDetails}
-        save={open => { void importPicture(selectedPicture, open); }}
+        save={() => { void importPicture(selectedPicture, false); }}
+        openStudio={() => { void importPicture(selectedPicture, true); }}
+        apply={() => setApplyingPicture(selectedPicture)}
       />}
+      {applyingPicture && <ApplyWallpaperDialog picture={applyingPicture} devices={library.devices}
+        busy={importing} close={() => setApplyingPicture(null)}
+        confirm={(deviceId, displayId) => { void applyExplorePicture(deviceId, displayId); }} />}
       {editing && (
         <Modal title="이미지 이름 변경" close={() => setEditing(null)}>
           <form
