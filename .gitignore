@@ -71,6 +71,7 @@ key.properties
 gpu-worker/input/
 gpu-worker/output/
 gpu-worker/models/
+gpu-worker-runpod/layers/models/
 gpu-worker/main_backup.py
 
 # Web frontend dependencies and build output

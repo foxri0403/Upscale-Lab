@@ -11,8 +11,7 @@ internal static class Program
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         if (args.Contains("--inventory"))
         {
-            var json = JsonSerializer.Serialize(new { platform = "Windows", manufacturer = DisplayInventory.Hardware("SystemManufacturer"),
-                model = DisplayInventory.Hardware("SystemProductName"), displays = DisplayInventory.Read() }, AgentApi.Json);
+            var json = JsonSerializer.Serialize(new { platform = "Windows", displays = DisplayInventory.Read() }, AgentApi.Json);
             var index = Array.IndexOf(args, "--inventory");
             if (index + 1 < args.Length) File.WriteAllText(args[index + 1], json); else Console.WriteLine(json);
             return;

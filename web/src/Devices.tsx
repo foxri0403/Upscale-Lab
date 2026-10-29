@@ -2,7 +2,6 @@ import { useState, type FormEvent } from "react";
 import {
   Monitor,
   Smartphone,
-  Plus,
   ChevronDown,
   Check,
   RefreshCw,
@@ -11,17 +10,17 @@ import {
   Clock3,
 } from "lucide-react";
 import { useDemo } from "./Workspace";
-import { sampleImages, type Device, type Picture } from "./model";
+import { sampleImages, uuid, type Device, type Picture } from "./model";
 import { Modal, Notice, Empty, PictureView } from "./ui";
 import { cloud, post, request } from "./api";
 import { Downloads } from "./Downloads";
+import { deviceDisplays, registeredDevices } from "./device-layout";
 
 export function Devices() {
   const { library, session, update, toast, apply, refresh, refreshDevices } = useDemo();
   const [connecting, setConnecting] = useState(false);
   const [platform, setPlatform] = useState<"Windows" | "Android">("Windows");
   const [deviceName, setDeviceName] = useState("");
-  const [phoneTab, setPhoneTab] = useState<Record<string, string>>({});
   const [target, setTarget] = useState<{
     device: Device;
     displayId: string;
@@ -31,20 +30,22 @@ export function Devices() {
   const [agentToken, setAgentToken] = useState("");
   const [issuedId, setIssuedId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState<string | null>(null);
+  const [clearing, setClearing] = useState<{ device: Device; displayId: string; requestId: string } | null>(null);
   const allPictures = [
     ...(library.assets || []),
     ...library.images,
     ...(!cloud ? sampleImages() : []),
   ];
   const findPicture = (id: string) => allPictures.find((p) => p.id === id);
-  function sync(device: Device) {
+  async function sync(device: Device) {
     if (cloud) {
-      void refreshDevices().then(() => toast("기기 상태를 새로 불러왔습니다.")).catch(e => toast(e.message));
+      setRefreshing(device.id);
+      try { await refreshDevices(); toast("기기 상태를 새로 불러왔습니다."); }
+      catch (error) { toast((error as Error).message); }
+      finally { setRefreshing(null); }
       return;
     }
-    const pending = library.commands.filter(
-      (c) => c.device === device.name && c.status === "대기",
-    );
     if (
       update((v) => ({
         ...v,
@@ -54,15 +55,12 @@ export function Devices() {
                 ...d,
                 online: true,
                 displays: d.displays.map((s) =>
-                  s.desired
+                  s.removing ? { ...s, current: "", desired: undefined, removing: false, observation: "Cleared" } : s.desired
                     ? { ...s, current: s.desired, desired: undefined }
                     : s,
                 ),
               }
             : d,
-        ),
-        commands: v.commands.map((c) =>
-          pending.some((p) => p.id === c.id) ? { ...c, status: "완료" } : c,
         ),
       }))
     )
@@ -74,6 +72,7 @@ export function Devices() {
     if (cloud) return;
     const device: Device = {
       id: crypto.randomUUID(),
+      created: new Date().toISOString(),
       name: deviceName.trim(),
       platform,
       online: true,
@@ -159,6 +158,25 @@ export function Devices() {
     setTarget({ device, displayId });
     setSelected(library.images[0]?.id || "");
   }
+  async function clearWallpaper() {
+    if (!clearing || busy) return;
+    const display = clearing.device.displays.find(s => s.id === clearing.displayId);
+    if (!display) return;
+    setBusy(true);
+    try {
+      if (cloud) {
+        await post(`/api/devices/${clearing.device.id}/wallpapers/clear`, {
+          requestId: clearing.requestId, displayId: display.nativeId,
+          target: display.target || (clearing.device.platform === "Windows" ? "Desktop" : "Home"),
+        });
+        await refreshDevices();
+      } else update(value => ({ ...value,
+        devices: value.devices.map(d => d.id === clearing.device.id ? { ...d, displays: d.displays.map(s => s.id === display.id ? { ...s, desired: undefined, removing: true } : s) } : d),
+      }));
+      setClearing(null); toast(cloud ? "기기에 배경화면 삭제 요청을 보냈습니다." : "샘플 배경화면 삭제 요청을 저장했습니다.");
+    } catch (error) { toast((error as Error).message); }
+    finally { setBusy(false); }
+  }
   return (
     <section className="devices-page">
       <div className="page-heading">
@@ -169,33 +187,21 @@ export function Devices() {
           </h1>
           <p>내 기기의 배경화면을 한곳에서 관리하세요.</p>
         </div>
-        <button className="button primary" onClick={() => setConnecting(true)}>
-          <Plus size={20} /> 기기 연결
-        </button>
       </div>
       <div className="account-device-note">
         <Link2 size={15} />
         <span>
           {session.name} 계정에 연결된 {cloud ? "기기" : "샘플 기기"}
         </span>
-        <span className="subtle">
-          같은 계정으로 로그인한 연결 앱에서 사용합니다.
-        </span>
       </div>
       {!library.devices.length ? (
-        <Empty text="연결된 기기가 없어요">
-          <button
-            className="button primary"
-            onClick={() => setConnecting(true)}
-          >
-            {cloud ? "기기 연결" : "샘플 기기 연결"}
-          </button>
-        </Empty>
+        <Empty text="연결된 기기가 없어요" />
       ) : (
         <div className="device-grid">
-          {library.devices.map((device) => {
+          {registeredDevices(library.devices).map((device) => {
             const mobile = device.platform === "Android";
-            const activeTab = phoneTab[device.id] || device.displays[0]?.id;
+            const connection = device.connection ?? (device.online ? "connected" : "disconnected");
+            const displayConnection = device.displays.some(display => display.connected) ? connection : "disconnected";
             const screens = device.physicalDisplayCount ?? (mobile ? Math.min(1, device.displays.filter(d => d.connected).length)
               : new Set(device.displays.filter(d => d.connected).map(d => d.nativeId ?? d.id)).size);
             return (
@@ -205,7 +211,7 @@ export function Devices() {
               >
                 <div className="device-card-header">
                   <span className="device-icon">
-                    {mobile ? <Smartphone size={27} /> : <Monitor size={29} />}
+                    {mobile ? <Smartphone size={28} /> : <Monitor size={28} />}
                   </span>
                   <div>
                     <h2>{device.name}</h2>
@@ -216,12 +222,10 @@ export function Devices() {
                       {` · 화면 ${screens}개`}
                     </p>
                   </div>
-                  <span
-                    className={`connection-state ${device.online ? "online" : ""}`}
-                  >
-                    <i />
-                    {device.online ? "최근 연결" : "연결 대기"}
-                  </span>
+                  <button className="icon-button device-refresh" disabled={!!refreshing}
+                    aria-label={`${device.name} 상태 새로고침`} title="상태 새로고침" onClick={() => void sync(device)}>
+                    <RefreshCw size={15} className={refreshing === device.id ? "spin" : ""} />
+                  </button>
                   <details className="device-more">
                     <summary aria-label={`${device.name} 관리`}>
                       <ChevronDown size={17} />
@@ -244,32 +248,21 @@ export function Devices() {
                     </div>
                   </details>
                 </div>
-                {[device.manufacturer, device.model, device.architecture].some(Boolean) &&
-                  <p className="device-hardware">{[device.manufacturer, device.model, device.architecture].filter(Boolean).join(" · ")}</p>}
-                {mobile && (
-                  <div className="phone-tabs">
-                    {device.displays.filter(s => s.canApplyWallpaper !== false).map((s) => (
-                      <button
-                        key={s.id}
-                        className={activeTab === s.id ? "active" : ""}
-                        onClick={() =>
-                          setPhoneTab((v) => ({ ...v, [device.id]: s.id }))
-                        }
-                      >
-                        {s.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
                 {!device.displays.length && (
                   <Notice>
+                    <span className={`device-connection device-connection-${connection}`}>{connection === "connected" ? "연결됨" : connection === "connecting" ? "연결중" : "연결안됨"}</span>{" "}
                     연결 앱의 첫 보고를 기다리고 있습니다. 연결 키와 동일한 계정
                     로그인이 필요합니다.
                   </Notice>
                 )}
-                <div className="display-grid">
-                  {device.displays
-                    .filter((s) => !mobile || s.canApplyWallpaper === false || s.id === activeTab)
+                <div className={`device-displays ${mobile ? "mobile-display-group" : ""}`}>
+                  {mobile && device.displays.length > 0 && (
+                    <span className={`device-connection device-connection-${displayConnection} mobile-device-connection`}>
+                      {displayConnection === "connected" ? "연결됨" : displayConnection === "connecting" ? "연결중" : "미연결"}
+                    </span>
+                  )}
+                  <div className="display-grid">
+                  {deviceDisplays(device)
                     .map((display, i) => {
                       const current = findPicture(display.current);
                       const desired = display.desired
@@ -278,46 +271,50 @@ export function Devices() {
                       return (
                         <div className="display-card" key={display.id}>
                           <div className="display-label">
-                            <h3>{display.name}</h3>
-                            {!mobile && (display.isPrimary ?? i === 0) && <span>주 화면</span>}
-                            <span
+                            <div className="display-name">
+                              <h3>{display.name}</h3>
+                              {!mobile && (display.isPrimary ?? i === 0) && <span className="primary-display">주 화면</span>}
+                            </div>
+                            {!mobile && <span
                               className={
-                                display.connected ? "connected-text" : "muted"
+                                `device-connection device-connection-${display.connected ? connection : "disconnected"}`
                               }
                             >
-                              {display.connected ? "연결됨" : "연결 끊김"}
-                            </span>
+                              {!display.connected || connection === "disconnected" ? "연결안됨" : connection === "connecting" ? "연결중" : "연결됨"}
+                            </span>}
                           </div>
-                          <div
-                            className={
-                              mobile && display.canApplyWallpaper !== false ? "phone-wallpaper" : "monitor-wallpaper"
-                            }
-                          >
-                            {current ? (
-                              <PictureView picture={current} />
-                            ) : (
-                              <div className="unknown-wallpaper">
-                                <Monitor size={30} />
-                                <span>이미지 정보 없음</span>
-                              </div>
-                            )}
-                            {mobile && display.target === "Lock" && (
-                              <span className="lock-clock">09:41</span>
-                            )}
+                          <div className="display-preview">
+                            <div
+                              className={
+                                mobile && display.canApplyWallpaper !== false ? "phone-wallpaper" : "monitor-wallpaper"
+                              }
+                            >
+                              {current ? (
+                                <PictureView picture={current} />
+                              ) : (
+                                <div className="unknown-wallpaper">
+                                  {mobile && display.canApplyWallpaper !== false ? <Smartphone size={30} /> : <Monitor size={30} />}
+                                  <span>{display.observation === "Cleared" ? "기본 바탕화면" : "이미지 정보 없음"}</span>
+                                </div>
+                              )}
+                              {mobile && current && display.target === "Lock" && (
+                                <span className="lock-clock">09:41</span>
+                              )}
+                            </div>
                           </div>
                           <p className="display-resolution">
                             {display.resolution}
                             {display.refreshRateHz != null && ` · ${Number(display.refreshRateHz.toFixed(2))} Hz`}
                           </p>
-                          <div className="wallpaper-state">
-                            <span>현재 배경화면</span>
-                            <strong>{current?.name || (display.observation === "External" ? "기기에서 변경된 배경화면" : "확인된 이미지 없음")}</strong>
-                          </div>
+                          <p className="display-wallpaper-title" title={current?.name || "기본 바탕화면"}>
+                            {current?.name || "기본 바탕화면"}
+                          </p>
                           {desired && (
                             <div className="pending-wallpaper">
                               <Clock3 size={14} /> 적용 대기: {desired.name}
                             </div>
                           )}
+                          {display.removing && <div className="pending-wallpaper"><Clock3 size={14} /> 배경화면 삭제 대기</div>}
                           <button
                             className="button secondary full"
                             disabled={
@@ -327,86 +324,21 @@ export function Devices() {
                           >
                             {display.canApplyWallpaper === false ? "정보 조회 전용 화면" : "배경화면 변경"}
                           </button>
+                          <button className="button secondary full wallpaper-remove" disabled={busy || !display.connected || display.canApplyWallpaper === false || (cloud && !device.supportsWallpaperRemoval)}
+                            title={cloud && !device.supportsWallpaperRemoval ? "연결 앱을 최신 버전으로 업데이트해 주세요." : undefined}
+                            onClick={() => setClearing({ device, displayId: display.id, requestId: uuid() })}>
+                            배경화면 삭제
+                          </button>
                         </div>
                       );
                     })}
-                </div>
-                <div className="device-card-footer">
-                  <span>
-                    <i className="sample-dot" />{" "}
-                    {cloud ? "계정에 연결됨" : "샘플 기기"}
-                  </span>
-                  <button className="text-button" onClick={() => sync(device)}>
-                    <RefreshCw size={14} />{" "}
-                    {cloud ? "상태 새로고침" : "샘플 동기화"}
-                  </button>
+                  </div>
                 </div>
               </article>
             );
           })}
         </div>
       )}
-      <section className="history-panel">
-        <div className="history-heading">
-          <h2>최근 적용 내역</h2>
-          <span>최근 {library.commands.length}건</span>
-        </div>
-        {library.commands.length ? (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>기기</th>
-                  <th>화면</th>
-                  <th>배경화면</th>
-                  <th>상태</th>
-                  <th>{cloud ? "요청 시간*" : "요청 시간"}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {library.commands.slice(0, 20).map((command) => (
-                  <tr key={command.id}>
-                    <td>{command.device}</td>
-                    <td>{command.display}</td>
-                    <td>{command.picture}</td>
-                    <td>
-                      <span
-                        title={command.detail}
-                        className={`status-badge ${command.status === "완료" ? "done" : command.status === "실패" ? "failed" : "pending"}`}
-                      >
-                        {command.status === "완료" ? (
-                          <Check size={13} />
-                        ) : (
-                          <Clock3 size={13} />
-                        )}{" "}
-                        {command.status === "완료"
-                          ? "적용 완료"
-                          : command.status === "실패"
-                            ? "적용 실패"
-                            : command.detail === "NeedsUserAction"
-                              ? "기기 확인 필요"
-                              : "적용 대기"}
-                      </span>
-                    </td>
-                    <td>
-                      {command.created
-                        ? new Date(command.created).toLocaleString("ko-KR", {
-                            month: "2-digit",
-                            day: "2-digit",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="no-history">아직 배경화면 적용 내역이 없어요.</p>
-        )}
-      </section>
       {connecting && (
         <Modal
           title={agentToken ? "기기 연결 키" : "기기 연결"}
@@ -538,6 +470,13 @@ export function Devices() {
           )}
         </Modal>
       )}
+      {clearing && <Modal title="배경화면을 삭제할까요?" close={() => { if (!busy) setClearing(null); }}>
+        <p>‘{clearing.device.name}’의 {clearing.device.displays.find(s => s.id === clearing.displayId)?.name}을 기본 배경화면으로 전환합니다.</p>
+        <div className="modal-actions">
+          <button className="button secondary" disabled={busy} onClick={() => setClearing(null)}>취소</button>
+          <button className="button danger" disabled={busy} onClick={() => void clearWallpaper()}>배경화면 삭제</button>
+        </div>
+      </Modal>}
       {removing && (
         <Modal title="기기 연결을 해제할까요?" close={() => setRemoving(null)}>
           <p>

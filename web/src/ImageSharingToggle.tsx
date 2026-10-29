@@ -3,7 +3,7 @@ import { useDemo } from "./Workspace";
 import { isImageShared } from "./image-sharing";
 import type { Picture } from "./model";
 
-export function ImageSharingToggle({ picture, label = "탐색 공유", disabled = false }: {
+export function ImageSharingToggle({ picture, label = "탐색 업로드", disabled = false }: {
   picture: Picture;
   label?: string;
   disabled?: boolean;

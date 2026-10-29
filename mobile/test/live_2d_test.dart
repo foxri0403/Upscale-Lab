@@ -10,6 +10,8 @@ import 'package:live_layer/models/image_editor.dart';
 import 'package:live_layer/models/image_ratio.dart';
 import 'package:live_layer/models/local_image.dart';
 import 'package:live_layer/services/live_2d_service.dart';
+import 'package:live_layer/services/api_client.dart';
+import 'package:live_layer/models/live_layer_models.dart';
 import 'package:live_layer/services/local_image_store.dart';
 import 'package:live_layer/services/wallpaper_service.dart';
 import 'package:live_layer/unified_home.dart';
@@ -69,11 +71,18 @@ void main() {
       switch (call.method) {
         case 'getActiveLive2DTarget':
           return activeFlags;
+        case 'setLive2DMotion':
+          return null;
         case 'activateLive2DDraft':
           expect((call.arguments as Map)['showSettings'], isTrue);
-          if (failActivation) throw PlatformException(code: 'live2d_failed', message: '연결 실패');
-          final confirmed = await (pendingActivation?.future ?? Future.value(confirmActivation));
-          if (confirmed) activeFlags = pickedFlags ?? (activeFlags == 0 ? 3 : activeFlags);
+          if (failActivation) {
+            throw PlatformException(code: 'live2d_failed', message: '연결 실패');
+          }
+          final confirmed = await (pendingActivation?.future ??
+              Future.value(confirmActivation));
+          if (confirmed) {
+            activeFlags = pickedFlags ?? (activeFlags == 0 ? 3 : activeFlags);
+          }
           return confirmed;
         case 'cloneLive2DDraft':
           return {
@@ -185,7 +194,8 @@ void main() {
       'model unavailable shows actionable retry and never accepts a fake split',
       (tester) async {
     failSplit = true;
-    await open(tester, Live2DPage(sourcePath: source));
+    await open(
+        tester, Live2DPage(apiClient: CloudTestApi(), sourcePath: source));
     expect(find.text('모델 다운로드 후 다시 시도해 주세요.'), findsOneWidget);
     expect(find.byKey(const ValueKey('activate-live2d')), findsNothing);
     failSplit = false;
@@ -211,7 +221,8 @@ void main() {
 
   testWidgets('leaving a split preview discards its temporary layers',
       (tester) async {
-    await open(tester, Live2DPage(sourcePath: source));
+    await open(
+        tester, Live2DPage(apiClient: CloudTestApi(), sourcePath: source));
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(selected, isNull);
@@ -237,6 +248,7 @@ void main() {
         const StandardMethodCodec().encodeSuccessEnvelope([50.0, -50.0]),
         (_) {});
     await tester.pump();
+    await tester.pumpAndSettle(const Duration(milliseconds: 16));
     final foreground = tester
         .widget<Transform>(
             find.byKey(const ValueKey('live2d-moving-foreground')))
@@ -267,7 +279,9 @@ void main() {
                       options = await Navigator.of(context)
                           .push<ImageRegistrationOptions>(MaterialPageRoute(
                               builder: (_) => ImageFeaturePage(
-                                  filePath: source, title: 'test')));
+                                  apiClient: CloudTestApi(),
+                                  filePath: source,
+                                  title: 'test')));
                     })))));
     await tester.tap(find.text('register'));
     await settleFiles(tester);
@@ -301,8 +315,10 @@ void main() {
               onPressed: () async {
                 options = await Navigator.of(context)
                     .push<ImageRegistrationOptions>(MaterialPageRoute(
-                        builder: (_) =>
-                            ImageFeaturePage(filePath: source, title: 'edit')));
+                        builder: (_) => ImageFeaturePage(
+                            apiClient: CloudTestApi(),
+                            filePath: source,
+                            title: 'edit')));
               },
               child: const Text('register')));
     })));
@@ -312,7 +328,7 @@ void main() {
       final button = find.byKey(ValueKey('registration-tool-$name'));
       await tester.ensureVisible(button);
       await tester.tap(button);
-      await tester.pumpAndSettle();
+      await settleFiles(tester);
     }
 
     RegistrationImageCanvas canvas() => tester
@@ -330,8 +346,12 @@ void main() {
     expect(cropAspect(initialCrop), closeTo(16 / 9, .00001));
     await tool('parallax');
     await settleFiles(tester);
+    expect(
+        calls.singleWhere((c) => c.method == 'splitLive2D').arguments,
+        containsPair('sourcePath',
+            source)); // Import the cloud result for the untouched source once.
     expect(calls.singleWhere((c) => c.method == 'splitLive2D').arguments,
-        {'sourcePath': source}); // Split the untouched source once.
+        containsPair('backgroundUrl', 'https://test.invalid/Background'));
     final aspect = tester.widget<AspectRatio>(
         find.byKey(const ValueKey('registration-preview-aspect')));
     expect(aspect.aspectRatio, closeTo(16 / 9, .00001));
@@ -425,6 +445,7 @@ void main() {
                 result = await Navigator.of(context).push<ImageEditorResult>(
                     MaterialPageRoute(
                         builder: (_) => ImageEditorPage(
+                            apiClient: CloudTestApi(),
                             filePath: source,
                             initialRatio: const ImageRatioSettings(
                                 automatic: false, preset: CropPreset.square))));
@@ -472,8 +493,7 @@ void main() {
     await Live2DService.discard(result!.live2D);
   });
 
-  testWidgets(
-      'legacy Live 2D completes activation and returns editable layers',
+  testWidgets('legacy Live 2D completes activation and returns editable layers',
       (tester) async {
     tester.view.physicalSize = const Size(320, 640);
     tester.view.devicePixelRatio = 1;
@@ -484,6 +504,7 @@ void main() {
         MediaQuery(
             data: const MediaQueryData(textScaler: TextScaler.linear(1.6)),
             child: Live2DPage(
+                apiClient: CloudTestApi(),
                 sourcePath: source,
                 crop: const Rect.fromLTWH(.25, 0, .5, 1),
                 filter: PhotoFilter.sepia)));
@@ -506,6 +527,7 @@ void main() {
     await open(
         tester,
         ImageFeaturePage(
+            apiClient: CloudTestApi(),
             filePath: source,
             title: 'existing',
             loadLive2D: () async => Live2DDraft(
@@ -558,19 +580,32 @@ void main() {
   }
 
   for (final confirmed in [true, false]) {
-    testWidgets('existing home selection can reopen Android and change to both ($confirmed)', (tester) async {
+    testWidgets(
+        'existing home selection can reopen Android and change to both ($confirmed)',
+        (tester) async {
       activeFlags = 1;
       pickedFlags = 3;
       confirmActivation = confirmed;
       ImageRegistrationOptions? saved;
-      const store = LocalImageStore(scope: 'server\naccount-1', ownerId: 'account-1');
-      await open(tester, ImageFeaturePage(filePath: source, title: 'change destination',
-          loadLive2D: () async => Live2DDraft(id: 'owned-draft', backgroundPath: source,
-              foregroundPath: source, width: 32, height: 48),
-          onSave: (options) async {
-            saved = options;
-            await store.registerWallpaper('image-1', target: options.wallpaperTarget!);
-          }));
+      const store =
+          LocalImageStore(scope: 'server\naccount-1', ownerId: 'account-1');
+      await open(
+          tester,
+          ImageFeaturePage(
+              apiClient: CloudTestApi(),
+              filePath: source,
+              title: 'change destination',
+              loadLive2D: () async => Live2DDraft(
+                  id: 'owned-draft',
+                  backgroundPath: source,
+                  foregroundPath: source,
+                  width: 32,
+                  height: 48),
+              onSave: (options) async {
+                saved = options;
+                await store.registerWallpaper('image-1',
+                    target: options.wallpaperTarget!);
+              }));
       final live = find.byKey(const ValueKey('registration-tool-parallax'));
       await tester.ensureVisible(live);
       await tester.tap(live);
@@ -578,24 +613,37 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('activate-live2d')));
       await settleFiles(tester);
       expect(find.byType(ImageFeaturePage), findsOneWidget);
-      final activation = calls.singleWhere((call) => call.method == 'activateLive2DDraft');
-      expect(activation.arguments, {'draftId': 'owned-draft', 'showSettings': true});
+      final activation =
+          calls.singleWhere((call) => call.method == 'activateLive2DDraft');
+      expect(activation.arguments,
+          {'draftId': 'owned-draft', 'showSettings': true});
       expect(activeFlags, confirmed ? 3 : 1);
       // The cancellation snackbar temporarily covers the bottom action bar.
       await tester.pump(const Duration(seconds: 5));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('register-wallpaper')));
       await settleFiles(tester);
-      expect(saved!.wallpaperTarget, confirmed ? WallpaperTarget.both : WallpaperTarget.home);
-      expect(calls.where((call) => call.method == 'activateLive2DDraft'), hasLength(1));
-      expect(calls.singleWhere((call) => call.method == 'applyLocalWallpaper').arguments,
-          {'scope': 'server\naccount-1', 'ownerId': 'account-1', 'id': 'image-1',
-            'target': confirmed ? 'both' : 'home'});
+      expect(saved!.wallpaperTarget,
+          confirmed ? WallpaperTarget.both : WallpaperTarget.home);
+      expect(calls.where((call) => call.method == 'activateLive2DDraft'),
+          hasLength(1));
+      expect(
+          calls
+              .singleWhere((call) => call.method == 'applyLocalWallpaper')
+              .arguments,
+          {
+            'scope': 'server\naccount-1',
+            'ownerId': 'account-1',
+            'id': 'image-1',
+            'target': confirmed ? 'both' : 'home'
+          });
     });
   }
 
   for (final shared in [false, true]) {
-    testWidgets('saved preview can reopen destination settings while shared=$shared', (tester) async {
+    testWidgets(
+        'saved preview can reopen destination settings while shared=$shared',
+        (tester) async {
       activeFlags = 1;
       pickedFlags = 3;
       await savedPreview(tester, shared: shared);
@@ -605,22 +653,42 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(HomeWallpaperPreviewPage), findsOneWidget);
       expect(activeFlags, 3);
-      expect(calls.singleWhere((call) => call.method == 'activateLocalLive2D').arguments,
-          {'scope': 'server\naccount-1', 'ownerId': 'account-1', 'id': 'image-1', 'showSettings': true});
-      await tester.tap(find.byKey(const ValueKey('preview-wallpaper-settings')));
+      expect(
+          calls
+              .singleWhere((call) => call.method == 'activateLocalLive2D')
+              .arguments,
+          {
+            'scope': 'server\naccount-1',
+            'ownerId': 'account-1',
+            'id': 'image-1',
+            'showSettings': true
+          });
+      await tester
+          .tap(find.byKey(const ValueKey('preview-wallpaper-settings')));
       await tester.pumpAndSettle();
-      expect((calls.singleWhere((call) => call.method == 'applyLocalWallpaper').arguments as Map)['target'], 'both');
-      expect(calls.where((call) => call.method == 'activateLocalLive2D'), hasLength(1));
-      expect(calls.where((call) => call.method == 'saveLocalImageEdits'), isEmpty);
+      expect(
+          (calls
+              .singleWhere((call) => call.method == 'applyLocalWallpaper')
+              .arguments as Map)['target'],
+          'both');
+      expect(calls.where((call) => call.method == 'activateLocalLive2D'),
+          hasLength(1));
+      expect(
+          calls.where((call) => call.method == 'saveLocalImageEdits'), isEmpty);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
     });
   }
 
-  testWidgets('Android confirmation waits in the editor and unlocks editing on return', (tester) async {
+  testWidgets(
+      'Android confirmation waits in the editor and unlocks editing on return',
+      (tester) async {
     activeFlags = 0;
     pendingActivation = Completer<bool>();
-    await open(tester, ImageFeaturePage(filePath: source, title: 'waiting'));
+    await open(
+        tester,
+        ImageFeaturePage(
+            apiClient: CloudTestApi(), filePath: source, title: 'waiting'));
     final live = find.byKey(const ValueKey('registration-tool-parallax'));
     await tester.ensureVisible(live);
     await tester.tap(live);
@@ -634,9 +702,24 @@ void main() {
       }
     });
     expect(calls.where((c) => c.method == 'activateLive2DDraft'), hasLength(1));
-    expect(tester.widget<OutlinedButton>(find.byKey(const ValueKey('save-registration'))).onPressed, isNull);
-    expect(tester.widget<FilledButton>(find.byKey(const ValueKey('register-wallpaper'))).onPressed, isNull);
-    expect(tester.widget<TextButton>(find.byKey(const ValueKey('registration-tool-filter'))).onPressed, isNull);
+    expect(
+        tester
+            .widget<OutlinedButton>(
+                find.byKey(const ValueKey('save-registration')))
+            .onPressed,
+        isNull);
+    expect(
+        tester
+            .widget<FilledButton>(
+                find.byKey(const ValueKey('register-wallpaper')))
+            .onPressed,
+        isNull);
+    expect(
+        tester
+            .widget<TextButton>(
+                find.byKey(const ValueKey('registration-tool-filter')))
+            .onPressed,
+        isNull);
     expect(selected, isNull);
     pendingActivation!.complete(true);
     await settleFiles(tester);
@@ -654,11 +737,16 @@ void main() {
   });
 
   for (final failure in ['cancel', 'error']) {
-    testWidgets('Android $failure preserves separation and permits another Apply', (tester) async {
+    testWidgets(
+        'Android $failure preserves separation and permits another Apply',
+        (tester) async {
       activeFlags = 0;
       confirmActivation = failure != 'cancel';
       failActivation = failure == 'error';
-      await open(tester, ImageFeaturePage(filePath: source, title: 'retry'));
+      await open(
+          tester,
+          ImageFeaturePage(
+              apiClient: CloudTestApi(), filePath: source, title: 'retry'));
       final live = find.byKey(const ValueKey('registration-tool-parallax'));
       await tester.ensureVisible(live);
       await tester.tap(live);
@@ -675,18 +763,22 @@ void main() {
       await settleFiles(tester);
       expect(find.text('Live 2D 적용됨 · 다른 편집을 계속할 수 있습니다.'), findsOneWidget);
       expect(calls.where((c) => c.method == 'splitLive2D'), hasLength(1));
-      expect(calls.where((c) => c.method == 'activateLive2DDraft'), hasLength(2));
+      expect(
+          calls.where((c) => c.method == 'activateLive2DDraft'), hasLength(2));
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
     });
   }
 
   for (final flags in [1, 2, 3]) {
-    testWidgets('saved Live 2D reuses Android target $flags after reopening the app', (tester) async {
+    testWidgets(
+        'saved Live 2D reuses Android target $flags after reopening the app',
+        (tester) async {
       activeFlags = flags;
       for (var launch = 0; launch < 2; launch++) {
         await savedPreview(tester);
-        await tester.tap(find.byKey(const ValueKey('preview-wallpaper-settings')));
+        await tester
+            .tap(find.byKey(const ValueKey('preview-wallpaper-settings')));
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('wallpaper-home')), findsNothing);
         expect(find.byType(AlertDialog), findsNothing);
@@ -697,20 +789,40 @@ void main() {
       expect(applies, hasLength(2));
       expect(applies.map((c) => (c.arguments as Map)['target']),
           everyElement(WallpaperTarget.values[flags - 1].name));
-      expect(calls.where((c) => c.method == 'activateLocalLive2D' || c.method == 'activateLive2DDraft'), isEmpty);
+      expect(
+          calls.where((c) =>
+              c.method == 'activateLocalLive2D' ||
+              c.method == 'activateLive2DDraft'),
+          isEmpty);
     });
   }
 
-  testWidgets('registration never opens Android when the live connection was removed', (tester) async {
+  testWidgets(
+      'registration never opens Android when the live connection was removed',
+      (tester) async {
     activeFlags = 0;
-    await open(tester, ImageFeaturePage(filePath: source, title: 'disconnected',
-        loadLive2D: () async => Live2DDraft(id: 'saved', backgroundPath: source,
-            foregroundPath: source, width: 32, height: 48)));
+    await open(
+        tester,
+        ImageFeaturePage(
+            apiClient: CloudTestApi(),
+            filePath: source,
+            title: 'disconnected',
+            loadLive2D: () async => Live2DDraft(
+                id: 'saved',
+                backgroundPath: source,
+                foregroundPath: source,
+                width: 32,
+                height: 48)));
     await tester.tap(find.byKey(const ValueKey('register-wallpaper')));
     await settleFiles(tester);
-    expect(find.text('Live 2D 적용에서 Android 배경화면 설정을 먼저 완료해 주세요.'), findsOneWidget);
+    expect(
+        find.text('Live 2D 적용에서 Android 배경화면 설정을 먼저 완료해 주세요.'), findsOneWidget);
     expect(find.byType(ImageFeaturePage), findsOneWidget);
-    expect(calls.where((c) => c.method == 'activateLocalLive2D' || c.method == 'activateLive2DDraft'), isEmpty);
+    expect(
+        calls.where((c) =>
+            c.method == 'activateLocalLive2D' ||
+            c.method == 'activateLive2DDraft'),
+        isEmpty);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
   });
@@ -776,4 +888,48 @@ void main() {
       await tester.pumpAndSettle();
     });
   }
+}
+
+// Exercise each UI through the cloud boundary while the platform mock verifies import/apply.
+class CloudTestApi extends ApiClient {
+  CloudTestApi() : super(baseUrl: 'https://test.invalid');
+  @override
+  String get userId => 'account-1';
+  @override
+  Future<LiveLayerProject> createProject(
+          {required String title,
+          required String filePath,
+          required int width,
+          required int height}) async =>
+      getProject('project');
+  @override
+  Future<void> startProcessing(String id) async {}
+  @override
+  Future<void> deleteProject(String id) async {}
+  @override
+  Future<Map<String, dynamic>> waitForProcessing(String id,
+          {Duration interval = const Duration(seconds: 2),
+          int maxAttempts = 480}) async =>
+      {'resultWidth': 32, 'resultHeight': 48};
+  @override
+  Future<LiveLayerProject> getProject(String id) async => LiveLayerProject(
+          id: id,
+          title: 'test',
+          status: 'Completed',
+          originalImageUrl: '',
+          layers: [
+            for (final role in ['Background', 'Body'])
+              LiveLayer(
+                  id: role,
+                  layerType: role,
+                  imageUrl: 'https://test.invalid/$role',
+                  layerOrder: role == 'Background' ? 0 : 1,
+                  depth: 0,
+                  positionX: 0,
+                  positionY: 0,
+                  rotation: 0,
+                  scale: 1,
+                  movementX: 1,
+                  movementY: 1)
+          ]);
 }

@@ -10,6 +10,22 @@ import java.net.URI
 import java.util.UUID
 
 internal class CompanionCache(private val context: Context) {
+    fun delete(owner: String, server: String, assetId: String) {
+        UUID.fromString(owner); val asset = UUID.fromString(assetId).toString()
+        val origin = java.security.MessageDigest.getInstance("SHA-256").digest(server.toByteArray()).take(8).joinToString("") { "%02x".format(it) }
+        val parent = File(context.filesDir, "companion/$owner/$origin").canonicalFile
+        val directory = File(parent, asset)
+        check(directory.canonicalFile == directory.absoluteFile) { "잘못된 캐시 경로입니다." }
+        if (!directory.exists()) return
+        val direct = context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).getString("direct_manifest_path", null)
+        // A live wallpaper on the other Android target can still reference this shared directory.
+        if (direct != null && File(direct).canonicalFile.parentFile == directory) return
+        directory.listFiles()?.forEach { file ->
+            check(!file.isDirectory && file.canonicalFile.parentFile == directory) { "잘못된 캐시 파일입니다." }
+            check(file.delete()) { "배경화면 캐시를 삭제하지 못했습니다." }
+        }
+        check(directory.delete()) { "배경화면 캐시 폴더를 삭제하지 못했습니다." }
+    }
     fun download(owner: String, server: String, manifest: JSONObject): File {
         val asset = UUID.fromString(manifest.getString("assetId")).toString()
         UUID.fromString(owner)
@@ -26,7 +42,17 @@ internal class CompanionCache(private val context: Context) {
             if (saved?.optString("assetId") == asset && saved.optString("mode") == mode && layers != null && layers.length() == files.length() && (0 until layers.length()).all {
                 val file = File(directory, layers.getJSONObject(it).getString("fileName"))
                 file.canonicalFile.parentFile == directory.canonicalFile && file.isFile && file.length() > 0
-            }) return local
+            }) {
+                val previous = saved.toString()
+                val refreshed = WallpaperMotion.refreshSettings(saved, manifest).toString()
+                if (previous != refreshed) {
+                    File(directory, "manifest.part").writeText(refreshed)
+                    check(File(directory, "manifest.part").renameTo(local))
+                    context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit()
+                        .putLong("companion_manifest_revision", System.nanoTime()).apply()
+                }
+                return local
+            }
         }
         val layers = JSONArray(); val orders = mutableSetOf<Int>(); var total = 0L
         for (index in 0 until files.length()) {
@@ -63,6 +89,9 @@ internal class CompanionCache(private val context: Context) {
         if (mode == "Static") require(layers.length() == 1) { "정적 배경화면 파일이 올바르지 않습니다." }
         else require((0 until layers.length()).any { layers.getJSONObject(it).getString("role") == "Background" }) { "배경 레이어가 없습니다." }
         val saved = JSONObject().put("protocol", "agent-v1").put("renderer", if (mode == "Live2D") "live2d" else "static")
+            .put("motionEnabled", manifest.optBoolean("motionEnabled", true))
+            .put("mouseEnabled", manifest.opt("mouseEnabled") ?: JSONObject.NULL)
+            .put("gyroEnabled", manifest.opt("gyroEnabled") ?: JSONObject.NULL)
             .put("width", width).put("height", height).put("ownerId", owner).put("assetId", asset).put("mode", mode)
             .put("selectionRevision", System.currentTimeMillis()).put("layers", layers)
         File(directory, "manifest.part").writeText(saved.toString()); check(File(directory, "manifest.part").renameTo(local))

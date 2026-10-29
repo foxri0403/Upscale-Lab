@@ -25,14 +25,14 @@ public sealed class ImagesController(IImageService imageService) : ControllerBas
 
     [HttpPost]
     [Consumes("multipart/form-data")]
-    [RequestSizeLimit(25 * 1024 * 1024)]
+    [RequestSizeLimit(ImageFormatPolicy.MaxRequestBytes)]
     public async Task<ActionResult<ImageResponse>> Upload(
         [FromForm] UploadImageForm form,
         CancellationToken cancellationToken)
     {
-        if (form.File.Length <= 0)
+        if (form.File.Length <= 0 || form.File.Length > ImageFormatPolicy.MaxUploadBytes)
         {
-            return ValidationProblem("빈 파일은 업로드할 수 없습니다.");
+            return ValidationProblem("이미지는 0바이트 초과, 50MB 이하로 업로드해 주세요.");
         }
 
         if (!ImageFormatPolicy.TryResolveContentType(

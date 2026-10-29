@@ -8,6 +8,8 @@ namespace UpscaleLab.Infrastructure.Processing;
 
 public sealed class SeeThroughImageLayerProcessor(SeeThroughOptions options) : IImageLayerProcessor
 {
+    public bool IsConfigured => options.Enabled && Directory.Exists(options.RepositoryPath) && File.Exists(options.AdapterScriptPath) &&
+        File.Exists(Path.Combine(options.RepositoryPath, "inference", "scripts", "inference_psd.py"));
     public async Task<IReadOnlyList<ProcessedLayer>> ProcessAsync(
         LayerProcessingRequest request,
         CancellationToken cancellationToken)

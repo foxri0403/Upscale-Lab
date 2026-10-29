@@ -11,19 +11,21 @@ import android.view.Surface
 internal class TiltSensor(context: Context, private val rotation: () -> Int,
     private val changed: (Float, Float) -> Unit) : SensorEventListener {
     private val manager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val sensor = if (manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) == null) null
-        else manager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+    private val sensor = manager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
             ?: manager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+            ?: manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
     private val matrix = FloatArray(9)
     private val remapped = FloatArray(9)
     private val angles = FloatArray(3)
     private val motion = TiltMotion()
     private var lastRotation = -1
     private var started = false
+    private val rawGyro = GyroIntegration()
 
     fun start() {
         if (started) return
         motion.reset()
+        rawGyro.reset()
         changed(0f, 0f)
         sensor?.let { started = manager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
     }
@@ -37,7 +39,11 @@ internal class TiltSensor(context: Context, private val rotation: () -> Int,
     override fun onSensorChanged(event: SensorEvent) {
         if (!started) return
         val displayRotation = rotation()
-        if (displayRotation != lastRotation) { motion.reset(); lastRotation = displayRotation }
+        if (displayRotation != lastRotation) { motion.reset(); rawGyro.reset(); lastRotation = displayRotation }
+        if (event.sensor.type == Sensor.TYPE_GYROSCOPE) {
+            val (roll, pitch) = rawGyro.update(event.values[0], event.values[1], event.timestamp, displayRotation)
+            val (x, y) = motion.update(roll, pitch); changed(x, y); return
+        }
         SensorManager.getRotationMatrixFromVector(matrix, event.values)
         val axes = when (displayRotation) {
             Surface.ROTATION_90 -> SensorManager.AXIS_Y to SensorManager.AXIS_MINUS_X

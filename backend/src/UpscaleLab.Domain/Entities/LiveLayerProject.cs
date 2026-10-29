@@ -9,6 +9,7 @@ public sealed class LiveLayerProject : BaseEntity
     public string Title { get; set; } = string.Empty;
     public ProjectStatus Status { get; set; } = ProjectStatus.Uploaded;
     public string? FailureReason { get; set; }
+    public string? SavedEditJson { get; set; }
 
     public User User { get; set; } = null!;
     public Image OriginalImage { get; set; } = null!;

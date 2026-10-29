@@ -2,6 +2,9 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using ImageMagick;
+using UpscaleLab.Application.Common;
+using UpscaleLab.Application.Upscaling;
 
 namespace UpscaleLab.Infrastructure.Upscaling;
 
@@ -9,11 +12,105 @@ public sealed class RunPodUpscaleService(
     HttpClient httpClient,
     RunPodOptions options)
 {
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(options.ApiKey) &&
+        !string.IsNullOrWhiteSpace(options.EndpointId);
+
+    public async Task<RunPodUpscaleResult> UpscaleToResolutionAsync(string inputPath, int targetLongEdge,
+        string outputPath, CancellationToken cancellationToken,
+        Func<int, CancellationToken, Task>? reportProgress = null)
+    {
+        if (!IsConfigured) throw new ConfigurationException("클라우드 업스케일링 공급자가 아직 연결되지 않았습니다.");
+        if (!UpscaleResolution.IsSupported(targetLongEdge))
+            throw new ValidationException("FHD, QHD, 4K 중 목표 해상도를 선택해 주세요.");
+        var info = new MagickImageInfo(inputPath);
+        if (info.Width < 1 || info.Height < 1 || Math.Max(info.Width, info.Height) >= targetLongEdge)
+            throw new ValidationException("현재 이미지보다 높은 해상도를 선택해 주세요.");
+
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(options.TimeoutSeconds));
+        var token = deadline.Token;
+        using var original = new MagickImage(inputPath);
+        original.AutoOrient();
+        var width = checked((int)original.Width);
+        var height = checked((int)original.Height);
+        var target = UpscaleResolution.Dimensions(width, height, targetLongEdge);
+        var scale = UpscaleResolution.NativeScale(width, height, targetLongEdge);
+
+        // The existing CUDA worker accepts <=1MP inputs, <=4MP outputs and <=5MB PNGs.
+        // At most 1024x1024 output pixels also bound even uncompressed RGBA tile payloads.
+        const int overlap = 32;
+        var tileEdge = 1024 / scale;
+        var coreEdge = width <= tileEdge && height <= tileEdge ? tileEdge : tileEdge - overlap * 2;
+        var total = ((width + coreEdge - 1) / coreEdge) * ((height + coreEdge - 1) / coreEdge);
+        var completed = 0;
+        var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
+        Directory.CreateDirectory(outputDirectory);
+        var tileDirectory = Path.Combine(outputDirectory, ".tiles-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tileDirectory);
+
+        try
+        {
+            using var canvas = new MagickImage(MagickColors.Transparent,
+                checked((uint)(width * scale)), checked((uint)(height * scale)));
+            for (var y = 0; y < height; y += coreEdge)
+            for (var x = 0; x < width; x += coreEdge)
+            {
+                token.ThrowIfCancellationRequested();
+                var coreWidth = Math.Min(coreEdge, width - x);
+                var coreHeight = Math.Min(coreEdge, height - y);
+                var left = Math.Max(0, x - overlap);
+                var top = Math.Max(0, y - overlap);
+                var right = Math.Min(width, x + coreWidth + overlap);
+                var bottom = Math.Min(height, y + coreHeight + overlap);
+                var inputTile = Path.Combine(tileDirectory, $"{completed:D4}-input.png");
+                var outputTile = Path.Combine(tileDirectory, $"{completed:D4}-output.png");
+                using (var tile = new MagickImage(original))
+                {
+                    tile.Crop(new MagickGeometry(left, top, (uint)(right - left), (uint)(bottom - top)));
+                    tile.ResetPage();
+                    tile.Strip();
+                    await tile.WriteAsync(inputTile, MagickFormat.Png, token);
+                }
+
+                // Every tile must succeed on the configured remote GPU. There is no local inference fallback.
+                var result = await UpscaleAsync(inputTile, scale, outputTile, token);
+                if (result.Width != (right - left) * scale || result.Height != (bottom - top) * scale)
+                    throw new InvalidDataException("클라우드 타일 결과 해상도가 요청과 일치하지 않습니다.");
+                using (var tile = new MagickImage(outputTile))
+                {
+                    tile.Crop(new MagickGeometry((x - left) * scale, (y - top) * scale,
+                        (uint)(coreWidth * scale), (uint)(coreHeight * scale)));
+                    tile.ResetPage();
+                    canvas.Composite(tile, x * scale, y * scale, CompositeOperator.Over);
+                }
+                completed++;
+                if (reportProgress != null) await reportProgress(15 + completed * 60 / total, token);
+                File.Delete(inputTile);
+                File.Delete(outputTile);
+            }
+
+            // Real-ESRGAN's arbitrary output scale uses Lanczos after native inference too.
+            // Resize the combined image once so adjacent tiles share the same sampling grid.
+            canvas.FilterType = FilterType.Lanczos;
+            canvas.Resize(new MagickGeometry((uint)target.Width, (uint)target.Height) { IgnoreAspectRatio = true });
+            canvas.Strip();
+            await canvas.WriteAsync(outputPath, MagickFormat.Png, token);
+            return new(outputPath, target.Width, target.Height);
+        }
+        finally
+        {
+            var resolved = Path.GetFullPath(tileDirectory);
+            if (resolved.StartsWith(outputDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+                Directory.Exists(resolved)) Directory.Delete(resolved, true);
+        }
+    }
+
     public async Task<RunPodUpscaleResult> UpscaleAsync(
         string inputPath,
         int scale,
         string outputPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? targetLongEdge = null)
     {
         if (scale is not (2 or 4))
             throw new ArgumentException("Scale must be 2 or 4.");
@@ -65,6 +162,7 @@ public sealed class RunPodUpscaleService(
             {
                 operation = "upscale",
                 scale,
+                target_long_edge = targetLongEdge,
                 image_base64 = imageBase64
             }
         });

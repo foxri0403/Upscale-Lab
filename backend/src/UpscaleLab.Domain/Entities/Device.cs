@@ -4,6 +4,7 @@ namespace UpscaleLab.Domain.Entities;
 
 public sealed class Device : BaseEntity
 {
+    public bool SupportsWallpaperRemoval { get; set; }
     public Guid UserId { get; set; }
     public DevicePlatform Platform { get; set; }
     public string DeviceName { get; set; } = string.Empty;

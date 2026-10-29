@@ -5,6 +5,7 @@ using UpscaleLab.Application.Common;
 using UpscaleLab.Application.Processing;
 using UpscaleLab.Application.Projects;
 using UpscaleLab.Application.Storage;
+using UpscaleLab.Application.Upscaling;
 using UpscaleLab.Domain.Entities;
 using UpscaleLab.Domain.Enums;
 using UpscaleLab.Infrastructure.Database;
@@ -26,20 +27,40 @@ public sealed class ProjectProcessingService(
     {
         var project = await dbContext.LiveLayerProjects
             .Include(x => x.ProcessingJobs)
+            .Include(x => x.OriginalImage)
             .SingleOrDefaultAsync(x => x.Id == projectId && x.UserId == userId, cancellationToken)
             ?? throw new NotFoundException("프로젝트를 찾을 수 없습니다.");
 
         if (!Enum.IsDefined(request.Operation) || request.UpscaleFactor is not (2 or 4))
             throw new ValidationException("지원하는 작업 종류와 배율(2 또는 4)을 선택하세요.");
+        if (request.TargetLongEdge is int edge)
+        {
+            if (request.Operation != ProcessingOperation.Upscale || !UpscaleResolution.IsSupported(edge))
+                throw new ValidationException("FHD, QHD, 4K 중 업스케일 목표 해상도를 선택해 주세요.");
+            if (Math.Max(project.OriginalImage.OriginalWidth, project.OriginalImage.OriginalHeight) >= edge)
+                throw new ValidationException("현재 이미지보다 높은 해상도를 선택해 주세요.");
+            if (project.ProcessingJobs.Any(x => x.Operation == ProcessingOperation.Upscale &&
+                x.Status == ProcessingJobStatus.Completed && x.ResultObjectKey != null &&
+                Math.Max(x.ResultWidth, x.ResultHeight) >= edge))
+                throw new ConflictException("선택한 해상도 이상의 업스케일 결과가 이미 있습니다.");
+        }
         if (!processor.Supports(request.Operation))
-            throw new ConfigurationException("클라우드 업스케일링 공급자가 아직 연결되지 않았습니다.");
+            throw new ConfigurationException(request.Operation == ProcessingOperation.Layers
+                ? "배경 분리 공급자가 아직 연결되지 않았습니다." : "클라우드 업스케일링 공급자가 아직 연결되지 않았습니다.");
+        if (await dbContext.GalleryPosts.AnyAsync(x => x.ProjectId == projectId && x.IsPublic, cancellationToken) ||
+            await dbContext.WallpaperAssets.AnyAsync(x => x.SourceProjectId == projectId && x.IsPublic && !x.IsArchived, cancellationToken))
+            throw new ConflictException("업로드를 해제한 뒤 이미지를 변경해 주세요.");
 
         if (project.ProcessingJobs.Any(x => x.Status is ProcessingJobStatus.Queued or ProcessingJobStatus.Processing))
         {
             throw new ConflictException("이미 처리 중인 프로젝트입니다.");
         }
 
-        var job = new ProcessingJob { ProjectId = project.Id, Operation = request.Operation, UpscaleFactor = request.UpscaleFactor };
+        var job = new ProcessingJob { ProjectId = project.Id, Operation = request.Operation,
+            TargetLongEdge = request.TargetLongEdge,
+            UpscaleFactor = request.TargetLongEdge is int target
+                ? UpscaleResolution.NativeScale(project.OriginalImage.OriginalWidth, project.OriginalImage.OriginalHeight, target)
+                : request.UpscaleFactor };
         project.Status = ProjectStatus.Processing;
         project.FailureReason = null;
         dbContext.ProcessingJobs.Add(job);
@@ -102,12 +123,21 @@ public sealed class ProjectProcessingService(
         var job = await dbContext.ProcessingJobs
             .Include(x => x.Project).ThenInclude(x => x.OriginalImage)
             .Include(x => x.Project).ThenInclude(x => x.Layers)
+            .Include(x => x.Project).ThenInclude(x => x.ProcessingJobs)
             .SingleOrDefaultAsync(x => x.Id == jobId, cancellationToken);
         if (job is null || job.Status is ProcessingJobStatus.Completed or ProcessingJobStatus.Failed)
         {
             return;
         }
 
+        var ownerId = job.Project.UserId;
+        if (ProjectDraftState.IsDiscarded(job.Project.SavedEditJson))
+        {
+            job.Status = ProcessingJobStatus.Failed; job.CompletedAt = DateTime.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await Projects.DraftProjectCleanup.DiscardAsync(dbContext, storageService, ownerId, job.ProjectId, false, cancellationToken);
+            return;
+        }
         var workspace = Path.Combine(Path.GetTempPath(), "live-layer", job.Id.ToString("N"));
         var inputPath = Path.Combine(workspace, $"input{Path.GetExtension(job.Project.OriginalImage.FileName)}");
         var outputPath = Path.Combine(workspace, "output");
@@ -121,15 +151,31 @@ public sealed class ProjectProcessingService(
             job.StartedAt ??= DateTime.UtcNow;
             await dbContext.SaveChangesAsync(cancellationToken);
 
+            // Separation uses the latest successful image, even if a subsequent job failed.
+            var latestImage = job.Project.ProcessingJobs.Where(x => x.Status == ProcessingJobStatus.Completed && x.ResultObjectKey != null)
+                .OrderByDescending(x => x.CreatedAt).FirstOrDefault();
+            var inputKey = job.Operation == ProcessingOperation.Layers && latestImage != null
+                ? latestImage.ResultObjectKey! : job.Project.OriginalImage.OriginalObjectKey;
             await using (var input = File.Create(inputPath))
             {
-                await storageService.DownloadAsync(job.Project.OriginalImage.OriginalObjectKey, input, cancellationToken);
+                await storageService.DownloadAsync(inputKey, input, cancellationToken);
             }
 
             job.Progress = 15;
+            if (job.TargetLongEdge is int requestedEdge)
+            {
+                var originalInfo = new MagickImageInfo(inputPath);
+                if (Math.Max(originalInfo.Width, originalInfo.Height) >= requestedEdge)
+                    throw new InvalidDataException("현재 이미지보다 높은 해상도를 선택해 주세요.");
+                job.UpscaleFactor = UpscaleResolution.NativeScale((int)originalInfo.Width, (int)originalInfo.Height, requestedEdge);
+            }
             await dbContext.SaveChangesAsync(cancellationToken);
             var processed = await processor.ProcessAsync(
-                new ProjectProcessingRequest(inputPath, outputPath, job.Operation, job.UpscaleFactor, job.Id),
+                new ProjectProcessingRequest(inputPath, outputPath, job.Operation, job.UpscaleFactor, job.Id,
+                    job.TargetLongEdge, async (progress, ct) => {
+                        job.Progress = Math.Clamp(progress, 15, 75);
+                        await dbContext.SaveChangesAsync(ct);
+                    }),
                 cancellationToken);
             var hasLayers = job.Operation != ProcessingOperation.Upscale;
             var hasImage = job.Operation != ProcessingOperation.Layers;
@@ -153,14 +199,50 @@ public sealed class ProjectProcessingService(
             if (processed.ImagePath != null)
             {
                 ValidatePng(processed.ImagePath, outputPath, processed.Width, processed.Height);
-                var inputInfo = new MagickImageInfo(inputPath);
-                if (processed.Width != (long)inputInfo.Width * job.UpscaleFactor || processed.Height != (long)inputInfo.Height * job.UpscaleFactor)
-                    throw new InvalidDataException("업스케일 결과 해상도가 배율과 일치하지 않습니다.");
+                if (job.TargetLongEdge is int target)
+                {
+                    using var original = new MagickImage(inputPath);
+                    original.AutoOrient();
+                    var expected = UpscaleResolution.Dimensions((int)original.Width, (int)original.Height, target);
+                    if (processed.Width != expected.Width || processed.Height != expected.Height)
+                        throw new InvalidDataException("업스케일 결과가 선택한 해상도와 일치하지 않습니다.");
+                }
+                else
+                {
+                    var inputInfo = new MagickImageInfo(inputPath);
+                    if (processed.Width != (long)inputInfo.Width * job.UpscaleFactor || processed.Height != (long)inputInfo.Height * job.UpscaleFactor)
+                        throw new InvalidDataException("업스케일 결과 해상도가 배율과 일치하지 않습니다.");
+                }
                 var key = $"users/{job.Project.UserId:N}/projects/{job.ProjectId:N}/results/{job.Id:N}/result.png";
                 await using var resultStream = File.OpenRead(processed.ImagePath);
                 await storageService.UploadAsync(resultStream, key, "image/png", cancellationToken);
                 uploadedKeys.Add(key);
                 imageResultKey = key;
+            }
+
+            // Preserve separation and animation when the image canvas is enlarged.
+            // GPU inference supplies the full image; transparent layer geometry is resampled without flattening it.
+            if (job.Operation == ProcessingOperation.Upscale && job.Project.Layers.Count >= 2)
+            {
+                var resized = new List<ProcessedLayer>();
+                foreach (var existing in job.Project.Layers.OrderBy(x => x.LayerOrder))
+                {
+                    var path = Path.Combine(outputPath, $"preserved-{existing.Id:N}.png");
+                    await using var source = new MemoryStream();
+                    await storageService.DownloadAsync(existing.ObjectKey, source, cancellationToken);
+                    source.Position = 0;
+                    using var image = new MagickImage(source);
+                    var ratioX = processed.Width / (double)image.Width;
+                    var ratioY = processed.Height / (double)image.Height;
+                    image.FilterType = FilterType.Lanczos;
+                    image.Resize(new MagickGeometry((uint)processed.Width, (uint)processed.Height) { IgnoreAspectRatio = true });
+                    image.Write(path, MagickFormat.Png);
+                    resized.Add(new(path, existing.LayerType, existing.LayerOrder, existing.Depth,
+                        Math.Clamp(existing.PositionX * ratioX, -100000, 100000), Math.Clamp(existing.PositionY * ratioY, -100000, 100000), existing.Rotation, existing.Scale,
+                        Math.Clamp(existing.MovementX * ratioX, 0, 10000), Math.Clamp(existing.MovementY * ratioY, 0, 10000)));
+                }
+                processed = processed with { Layers = resized };
+                hasLayers = true;
             }
 
             job.Progress = 80;
@@ -243,6 +325,14 @@ public sealed class ProjectProcessingService(
         {
             try
             {
+                await Projects.DraftProjectCleanup.DiscardAsync(dbContext, storageService, ownerId, job.ProjectId, false, CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Failed to discard temporary project {ProjectId}", job.ProjectId);
+            }
+            try
+            {
                 if (Directory.Exists(workspace))
                 {
                     Directory.Delete(workspace, true);
@@ -263,7 +353,8 @@ public sealed class ProjectProcessingService(
         job.ErrorMessage,
         job.StartedAt,
         job.CompletedAt,
-        job.UpdatedAt, job.Operation, job.UpscaleFactor, job.ResultObjectKey != null, job.ResultWidth, job.ResultHeight);
+        job.UpdatedAt, job.Operation, job.UpscaleFactor, job.ResultObjectKey != null, job.ResultWidth, job.ResultHeight,
+        job.TargetLongEdge);
 
     private static void ValidatePng(string filePath, string outputPath, int width, int height)
     {

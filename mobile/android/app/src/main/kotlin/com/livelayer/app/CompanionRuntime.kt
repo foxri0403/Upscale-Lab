@@ -3,6 +3,7 @@ package com.livelayer.app
 import android.app.WallpaperManager
 import android.content.Context
 import android.os.Build
+import android.provider.Settings
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -75,7 +76,7 @@ internal object CompanionRuntime {
         val displays = runCatching { CompanionInventory(context).read(applied(state)) }.getOrDefault(JSONArray())
         return mapOf("server" to state.optString("server"), "account" to user?.optString("email"),
             "loggedIn" to (verified && user != null), "enabled" to running, "message" to message,
-            "pendingLive" to (pending != null), "manufacturer" to Build.MANUFACTURER, "model" to Build.MODEL,
+            "pendingLive" to (pending != null),
             "osVersion" to "Android ${Build.VERSION.RELEASE}", "displays" to (0 until displays.length()).map {
                 val item = displays.getJSONObject(it)
                 mapOf("name" to item.optString("name"), "width" to item.optInt("width"), "height" to item.optInt("height"),
@@ -139,7 +140,9 @@ internal object CompanionRuntime {
         val inventory = CompanionInventory(context).read(JSONObject())
         val primary = (0 until inventory.length()).map { inventory.getJSONObject(it) }.first { it.getBoolean("isPrimary") }
         val width = primary.getInt("width"); val height = primary.getInt("height")
-        val device = api.request("/api/devices", "POST", JSONObject().put("platform", "Android").put("deviceName", "${Build.MANUFACTURER} ${Build.MODEL}".take(120))
+        val deviceName = runCatching { Settings.Global.getString(context.contentResolver, "device_name") }
+            .getOrNull()?.trim()?.takeIf { it.isNotEmpty() }?.take(120) ?: "Android 기기"
+        val device = api.request("/api/devices", "POST", JSONObject().put("platform", "Android").put("deviceName", deviceName)
             .put("screenWidth", width).put("screenHeight", height).put("aspectRatio", "$width:$height").put("orientation", if (width >= height) "Landscape" else "Portrait")) as JSONObject
         id = device.getString("id")
         val token = api.request("/api/devices/$id/agent-token", "POST", JSONObject()) as JSONObject
@@ -160,7 +163,8 @@ internal object CompanionRuntime {
             .putLong("companion_valid_until", System.currentTimeMillis() + 60000).apply()
     }
     private fun requireLatest(command: JSONObject): JSONObject {
-        api.request("/api/agent/commands/${command.getString("id")}/manifest", agent = true)
+        val clear = command.optString("action", "Apply") == "Clear"
+        api.request("/api/agent/commands/${command.getString("id")}" + if (clear) "" else "/manifest", agent = true)
         val state = api.request("/api/agent/state", agent = true) as JSONObject
         val displays = state.getJSONArray("displays")
         val display = (0 until displays.length()).map { displays.getJSONObject(it) }.firstOrNull {
@@ -171,7 +175,7 @@ internal object CompanionRuntime {
         require((0 until assignments.length()).any {
             val item = assignments.getJSONObject(it)
             item.getString("target") == command.getString("target") && item.optLong("sequence") == command.getLong("sequence") &&
-                item.optString("desiredAssetId") == command.getString("assetId")
+                (if (clear) item.isNull("desiredAssetId") else item.optString("desiredAssetId") == command.getString("assetId"))
         }) { "최신 요청으로 변경되었습니다." }
         return display
     }
@@ -185,9 +189,9 @@ internal object CompanionRuntime {
             val remote = api.request("/api/agent/state", agent = true) as JSONObject
             if (inventoryDirty.getAndSet(false) || System.currentTimeMillis() >= nextHeartbeat) {
                 val body = JSONObject().put("revision", remote.getLong("inventoryRevision") + 1).put("osVersion", "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-                    .put("agentVersion", context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0.1").put("manufacturer", Build.MANUFACTURER.take(120)).put("model", Build.MODEL.take(120))
-                    .put("architecture", Build.SUPPORTED_ABIS.firstOrNull()?.take(32) ?: "").put("supportsLive2D", context.packageManager.hasSystemFeature("android.software.live_wallpaper"))
-                    .put("supportsLockScreen", true).put("displays", inventory.read(saved))
+                    .put("agentVersion", context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0.1")
+                    .put("supportsLive2D", context.packageManager.hasSystemFeature("android.software.live_wallpaper"))
+                    .put("supportsLockScreen", true).put("supportsWallpaperRemoval", true).put("displays", inventory.read(saved))
                 try { api.request("/api/agent/heartbeat", "POST", body, agent = true); nextHeartbeat = System.currentTimeMillis() + 30000 }
                 catch (error: CompanionApiError) { if (error.status != 409) throw error }
             }
@@ -201,6 +205,21 @@ internal object CompanionRuntime {
                 try {
                     val target = command.getString("target")
                     require(target in listOf("Home", "Lock")) { "지원하지 않는 배경화면 대상입니다." }
+                    if (command.optString("action", "Apply") == "Clear") {
+                        requireLatest(command)
+                        if (epoch != generation.get() || !running) return
+                        val screen = if (target == "Home") WallpaperTarget.HOME else WallpaperTarget.LOCK
+                        val oldAsset = saved.optJSONObject(target)?.optString("assetId")
+                        val manager = WallpaperManager.getInstance(context)
+                        CompanionWallpaperRemoval.clear(screen, id, saved, AndroidWallpaperPlatform(context),
+                            { manager.getWallpaperId(screen.flags) }, { didApply = true }, { saveApplied(state, it) })
+                        if (pending?.optString("target") == target) pending = null
+                        if (!oldAsset.isNullOrBlank() && listOf("Home", "Lock").none { saved.optJSONObject(it)?.optString("assetId") == oldAsset })
+                            runCatching { CompanionCache(context).delete(owner(state), state.getString("server"), oldAsset) }
+                        api.report(id, "Applied"); message = "배경화면 삭제 완료."; nextHeartbeat = 0
+                        continue
+                    }
+                    require(command.optString("action", "Apply") == "Apply") { "지원하지 않는 명령입니다." }
                     api.report(id, "Downloading")
                     val manifest = api.request("/api/agent/commands/$id/manifest", agent = true) as JSONObject
                     require(manifest.getString("assetId") == command.getString("assetId")) { "결과물 정보가 일치하지 않습니다." }

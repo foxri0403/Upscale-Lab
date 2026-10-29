@@ -29,6 +29,14 @@ internal sealed class WorkflowStore : IStorageService, IObjectCopyService
     }
     public Task DownloadAsync(string key, Stream destination, CancellationToken ct) => destination.WriteAsync(Files[key], ct).AsTask();
     public Task DeleteAsync(string key, CancellationToken ct) { Files.Remove(key); return Task.CompletedTask; }
+    public string CreateUploadUrl(
+        string objectKey,
+        string contentType,
+        TimeSpan lifetime)
+    {
+        throw new NotSupportedException(
+            "Upload URL is not required in this test.");
+    }
     public string CreateDownloadUrl(string key, TimeSpan lifetime) => $"https://storage.test/{key}?generation={++urls}";
 }
 

@@ -5,6 +5,7 @@ export type GalleryPost = {
   id: string;
   userId: string;
   username: string;
+  profileImageUrl?: string | null;
   title: string;
   imageUrl: string;
   projectId?: string | null;
@@ -28,6 +29,7 @@ export function galleryPicture(post: GalleryPost): Picture {
     genre: tags[0] as Genre,
     tags,
     creator: post.username,
+    creatorAvatar: post.profileImageUrl || undefined,
     downloads: post.downloadCount,
     created: post.createdAt,
     // A shared post's original project belongs to its author, not the viewer.

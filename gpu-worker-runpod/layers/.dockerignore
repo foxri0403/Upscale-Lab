@@ -1,0 +1,6 @@
+**/.git
+**/.cache
+**/__pycache__
+**/*.pyc
+test_*.py
+prepare_models.py

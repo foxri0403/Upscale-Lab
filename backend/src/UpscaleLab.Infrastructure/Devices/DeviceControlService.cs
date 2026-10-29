@@ -24,6 +24,7 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
         device.AgentTokenHash = Hash(token);
         device.InventoryRevision = 0;
         device.LastSeenAt = null;
+        device.SupportsWallpaperRemoval = false;
         await Save(userId, deviceId, ct, notifyAgent: true);
         return new(deviceId, token);
     }
@@ -32,6 +33,7 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
     {
         var device = await Owned(userId, deviceId, ct);
         device.AgentTokenHash = null;
+        device.SupportsWallpaperRemoval = false;
         device.LastSeenAt = null;
         foreach (var command in await db.DeviceCommands.Where(x => x.DeviceId == deviceId).ToListAsync(ct))
             if (Active(command)) command.Status = DeviceCommandStatus.Superseded;
@@ -51,6 +53,9 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
         var device = await Owned(userId, deviceId, ct);
         var assignments = await db.WallpaperAssignments.AsNoTracking()
             .Where(x => x.DeviceDisplay.DeviceId == deviceId).ToListAsync(ct);
+        var pendingRemoval = await db.DeviceCommands.AsNoTracking().Where(x => x.DeviceId == deviceId && x.Action == DeviceCommandAction.Clear &&
+            (x.Status == DeviceCommandStatus.Pending || x.Status == DeviceCommandStatus.Downloading || x.Status == DeviceCommandStatus.NeedsUserAction) && x.ExpiresAt > Now)
+            .Select(x => new { x.DeviceDisplayId, x.Target, x.Sequence }).ToListAsync(ct);
         return new(device.Id, device.Platform, device.DeviceName, device.OsVersion, device.AgentVersion,
             device.AgentTokenHash != null, device.LastSeenAt,
             device.LastSeenAt.HasValue && device.LastSeenAt.Value > Now.AddMinutes(-2),
@@ -60,8 +65,8 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
                     d.OffsetX, d.OffsetY, d.IsPrimary, d.IsConnected,
                     assignments.Where(x => x.DeviceDisplayId == d.Id).Select(x =>
                         new AssignmentResponse(x.Target, x.DesiredAssetId, x.ReportedAssetId,
-                            x.Observation, x.Sequence, x.LastReportedAt)).ToList(), d.RefreshRateHz, d.CanApplyWallpaper)).ToList(),
-            device.Manufacturer, device.Model, device.Architecture);
+                            x.Observation, x.Sequence, x.LastReportedAt, pendingRemoval.Any(c => c.DeviceDisplayId == x.DeviceDisplayId && c.Target == x.Target && c.Sequence == x.Sequence))).ToList(), d.RefreshRateHz, d.CanApplyWallpaper)).ToList(),
+            device.SupportsWallpaperRemoval);
     }
 
     public async Task<DeviceState> HeartbeatAsync(AgentIdentity agent, AgentHeartbeat request, CancellationToken ct)
@@ -71,8 +76,6 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
             throw new ConflictException("이전 기기 상태입니다. inventoryRevision보다 큰 revision을 전송하세요.");
         if (request.Revision < 1 || string.IsNullOrWhiteSpace(request.OsVersion) || request.OsVersion.Length > 120 ||
             string.IsNullOrWhiteSpace(request.AgentVersion) || request.AgentVersion.Length > 40 ||
-            (request.Manufacturer?.Length ?? 0) > 120 || (request.Model?.Length ?? 0) > 120 ||
-            (request.Architecture?.Length ?? 0) > 32 ||
             request.Displays is null || request.Displays.Count > 16 || request.Displays.Any(x => x is null) ||
             request.Displays.Select(x => x.NativeId).Distinct(StringComparer.Ordinal).Count() != request.Displays.Count ||
             request.Displays.Count(x => x.IsConnected && x.IsPrimary) > 1)
@@ -105,11 +108,13 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
 
         device.OsVersion = request.OsVersion.Trim();
         device.AgentVersion = request.AgentVersion.Trim();
-        device.Manufacturer = request.Manufacturer?.Trim() ?? "";
-        device.Model = request.Model?.Trim() ?? "";
-        device.Architecture = request.Architecture?.Trim() ?? "";
+        // Clear legacy hardware metadata when a device next reports; older agents' JSON fields are ignored.
+        device.Manufacturer = "";
+        device.Model = "";
+        device.Architecture = "";
         device.SupportsLive2D = request.SupportsLive2D;
         device.SupportsLockScreen = request.SupportsLockScreen;
+        device.SupportsWallpaperRemoval = request.SupportsWallpaperRemoval;
         device.InventoryRevision = request.Revision;
         device.LastSeenAt = Now;
         foreach (var old in device.Displays) { old.IsConnected = false; old.IsPrimary = false; }
@@ -147,7 +152,7 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
         var prior = await db.DeviceCommands.SingleOrDefaultAsync(x => x.DeviceId == deviceId && x.RequestId == request.RequestId, ct);
         if (prior != null)
         {
-            if (prior.DeviceDisplayId != request.DisplayId || prior.WallpaperAssetId != request.AssetId || prior.Target != request.Target)
+            if (prior.Action != DeviceCommandAction.Apply || prior.DeviceDisplayId != request.DisplayId || prior.WallpaperAssetId != request.AssetId || prior.Target != request.Target)
                 throw new ConflictException("동일 requestId를 다른 요청에 사용할 수 없습니다.");
             return Map(prior);
         }
@@ -174,18 +179,47 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
         return Map(next);
     }
 
-    public async Task<IReadOnlyList<DeviceCommandResponse>> GetCommandsAsync(Guid userId, Guid deviceId, bool pendingOnly, CancellationToken ct)
+    public async Task<DeviceCommandResponse> ClearAsync(Guid userId, Guid deviceId, ClearWallpaperRequest request, CancellationToken ct)
+    {
+        var device = await Owned(userId, deviceId, ct);
+        if (device.AgentTokenHash is null) throw new ConflictException("기기를 먼저 연결해 주세요.");
+        if (request.RequestId == Guid.Empty) throw new ValidationException("requestId가 필요합니다.");
+        var prior = await db.DeviceCommands.SingleOrDefaultAsync(x => x.DeviceId == deviceId && x.RequestId == request.RequestId, ct);
+        if (prior != null)
+        {
+            if (prior.Action != DeviceCommandAction.Clear || prior.DeviceDisplayId != request.DisplayId || prior.Target != request.Target)
+                throw new ConflictException("동일 requestId를 다른 요청에 사용할 수 없습니다.");
+            return Map(prior);
+        }
+        if (!device.SupportsWallpaperRemoval) throw new ConflictException("연결 앱을 최신 버전으로 업데이트한 뒤 배경화면을 삭제해 주세요.");
+        var display = device.Displays.SingleOrDefault(x => x.Id == request.DisplayId && x.IsConnected)
+            ?? throw new NotFoundException("연결된 화면을 찾을 수 없습니다.");
+        if (!display.CanApplyWallpaper) throw new ConflictException("이 화면은 정보 조회만 지원합니다.");
+        ValidateTarget(device, request.Target, device.SupportsLockScreen);
+        foreach (var old in await db.DeviceCommands.Where(x => x.DeviceId == deviceId && x.DeviceDisplayId == display.Id && x.Target == request.Target).ToListAsync(ct))
+            if (Active(old)) old.Status = DeviceCommandStatus.Superseded;
+        var command = new DeviceCommand { Device = device, DeviceDisplay = display, Action = DeviceCommandAction.Clear,
+            Target = request.Target, RequestId = request.RequestId, Sequence = ++device.CommandSequence, ExpiresAt = Now.AddDays(1) };
+        db.DeviceCommands.Add(command);
+        var assignment = await Assignment(display, request.Target, ct);
+        assignment.DesiredAssetId = null; assignment.Sequence = command.Sequence;
+        await Save(userId, deviceId, ct, notifyAgent: true);
+        return Map(command);
+    }
+
+    public async Task<IReadOnlyList<DeviceCommandResponse>> GetPendingCommandsAsync(Guid userId, Guid deviceId, CancellationToken ct)
     {
         var device = await Owned(userId, deviceId, ct);
         var query = db.DeviceCommands.Where(x => x.DeviceId == deviceId);
-        if (pendingOnly) query = query.Where(x => x.Status == DeviceCommandStatus.Pending ||
+        if (!device.SupportsWallpaperRemoval) query = query.Where(x => x.Action != DeviceCommandAction.Clear);
+        query = query.Where(x => x.Status == DeviceCommandStatus.Pending ||
             x.Status == DeviceCommandStatus.Downloading || x.Status == DeviceCommandStatus.NeedsUserAction);
         var commands = await query.OrderByDescending(x => x.Sequence).Take(100).ToListAsync(ct);
         foreach (var command in commands)
             if (Active(command) && command.ExpiresAt <= Now) command.Status = DeviceCommandStatus.Expired;
-        if (pendingOnly) device.LastSeenAt = Now;
+        device.LastSeenAt = Now;
         await db.SaveChangesAsync(ct);
-        return commands.Where(x => !pendingOnly || Active(x)).Take(100).Select(Map).ToList();
+        return commands.Where(Active).Select(Map).ToList();
     }
 
     public async Task<DeviceCommandResponse> ReportAsync(AgentIdentity agent, Guid commandId, CommandReport report, CancellationToken ct)
@@ -212,7 +246,7 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
         if (report.Status == DeviceCommandStatus.Applied)
         {
             assignment.ReportedAssetId = command.WallpaperAssetId;
-            assignment.Observation = WallpaperObservation.Managed;
+            assignment.Observation = command.Action == DeviceCommandAction.Clear ? WallpaperObservation.Cleared : WallpaperObservation.Managed;
             assignment.LastReportedAt = Now;
         }
         await Save(agent.UserId, agent.DeviceId, ct);
@@ -221,14 +255,24 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
 
     public async Task<Guid> GetCommandAssetAsync(AgentIdentity agent, Guid commandId, CancellationToken ct)
     {
+        var command = await GetCommandAsync(agent, commandId, ct);
+        if (command.Action != DeviceCommandAction.Apply || !command.AssetId.HasValue)
+            throw new ConflictException("배경화면 삭제 명령에는 이미지 파일이 없습니다.");
+        return command.AssetId.Value;
+    }
+
+    public async Task<DeviceCommandResponse> GetCommandAsync(AgentIdentity agent, Guid commandId, CancellationToken ct)
+    {
         await Linked(agent, ct);
-        var command = await db.DeviceCommands.SingleOrDefaultAsync(x => x.Id == commandId && x.DeviceId == agent.DeviceId, ct)
+        var command = await db.DeviceCommands.Include(x => x.DeviceDisplay).SingleOrDefaultAsync(x => x.Id == commandId && x.DeviceId == agent.DeviceId, ct)
             ?? throw new NotFoundException("명령을 찾을 수 없습니다.");
         if ((!Active(command) && command.Status != DeviceCommandStatus.Applied) || (Active(command) && command.ExpiresAt <= Now) ||
             !await db.WallpaperAssignments.AnyAsync(x => x.DeviceDisplayId == command.DeviceDisplayId &&
                 x.Target == command.Target && x.Sequence == command.Sequence, ct))
             throw new ConflictException("더 이상 적용할 수 없는 명령입니다.");
-        return command.WallpaperAssetId;
+        if (!command.DeviceDisplay.IsConnected || !command.DeviceDisplay.CanApplyWallpaper)
+            throw new ConflictException("적용 대상 화면을 사용할 수 없습니다.");
+        return Map(command);
     }
 
     private async Task<Device> Owned(Guid userId, Guid deviceId, CancellationToken ct) =>
@@ -270,5 +314,5 @@ public sealed class DeviceControlService(ApplicationDbContext db, TimeProvider c
 
     private DeviceCommandResponse Map(DeviceCommand c) => new(c.Id, c.DeviceId, c.DeviceDisplayId,
         c.WallpaperAssetId, c.Target, c.RequestId, c.Sequence,
-        Active(c) && c.ExpiresAt <= Now ? DeviceCommandStatus.Expired : c.Status, c.ExpiresAt, c.Error);
+        Active(c) && c.ExpiresAt <= Now ? DeviceCommandStatus.Expired : c.Status, c.ExpiresAt, c.Error, c.Action);
 }

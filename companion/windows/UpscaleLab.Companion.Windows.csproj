@@ -3,15 +3,19 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>1.0.2</Version>
+    <Version>1.2.2</Version>
     <AssemblyName>UpscaleLab.Connect</AssemblyName>
     <RootNamespace>UpscaleLab.Companion</RootNamespace>
     <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
   <ItemGroup>
+    <Using Include="System.Net.Http" />
+    <Using Include="System.IO" />
     <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.17.2" />
     <AssemblyMetadata Include="DefaultApiBaseUrl" Value="$(CompanionDefaultApiBaseUrl)" />
   </ItemGroup>

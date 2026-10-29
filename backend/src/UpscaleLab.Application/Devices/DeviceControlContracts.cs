@@ -20,22 +20,20 @@ public sealed record AgentHeartbeat(
     [param: Required, MaxLength(40)] string AgentVersion,
     bool SupportsLive2D, bool SupportsLockScreen,
     [param: Required, MaxLength(16)] IReadOnlyList<DisplayInventory> Displays,
-    [param: MaxLength(120)] string? Manufacturer = null,
-    [param: MaxLength(120)] string? Model = null,
-    [param: MaxLength(32)] string? Architecture = null);
+    bool SupportsWallpaperRemoval = false);
 public sealed record ApplyWallpaperRequest(Guid RequestId, Guid DisplayId, Guid AssetId, WallpaperTarget Target);
+public sealed record ClearWallpaperRequest(Guid RequestId, Guid DisplayId, WallpaperTarget Target);
 public sealed record CommandReport(DeviceCommandStatus Status, [param: MaxLength(1000)] string? Error = null);
 public sealed record AssignmentResponse(WallpaperTarget Target, Guid? DesiredAssetId, Guid? ReportedAssetId,
-    WallpaperObservation Observation, long Sequence, DateTime? LastReportedAt);
+    WallpaperObservation Observation, long Sequence, DateTime? LastReportedAt, bool PendingRemoval = false);
 public sealed record DisplayState(Guid Id, string NativeId, string Name, int Width, int Height, double Scale,
     int Rotation, int OffsetX, int OffsetY, bool IsPrimary, bool IsConnected, IReadOnlyList<AssignmentResponse> Wallpapers,
     double? RefreshRateHz = null, bool CanApplyWallpaper = true);
 public sealed record DeviceState(Guid Id, DevicePlatform Platform, string Name, string OsVersion, string AgentVersion,
     bool IsLinked, DateTime? LastSeenAt, bool RecentlySeen, long InventoryRevision, bool SupportsLive2D,
-    bool SupportsLockScreen, IReadOnlyList<DisplayState> Displays, string Manufacturer = "", string Model = "",
-    string Architecture = "");
-public sealed record DeviceCommandResponse(Guid Id, Guid DeviceId, Guid DisplayId, Guid AssetId, WallpaperTarget Target,
-    Guid RequestId, long Sequence, DeviceCommandStatus Status, DateTime ExpiresAt, string? Error);
+    bool SupportsLockScreen, IReadOnlyList<DisplayState> Displays, bool SupportsWallpaperRemoval = false);
+public sealed record DeviceCommandResponse(Guid Id, Guid DeviceId, Guid DisplayId, Guid? AssetId, WallpaperTarget Target,
+    Guid RequestId, long Sequence, DeviceCommandStatus Status, DateTime ExpiresAt, string? Error, DeviceCommandAction Action = DeviceCommandAction.Apply);
 
 public interface IDeviceControlService
 {
@@ -45,9 +43,11 @@ public interface IDeviceControlService
     Task<DeviceState> GetStateAsync(Guid userId, Guid deviceId, CancellationToken ct);
     Task<DeviceState> HeartbeatAsync(AgentIdentity agent, AgentHeartbeat request, CancellationToken ct);
     Task<DeviceCommandResponse> ApplyAsync(Guid userId, Guid deviceId, ApplyWallpaperRequest request, CancellationToken ct);
-    Task<IReadOnlyList<DeviceCommandResponse>> GetCommandsAsync(Guid userId, Guid deviceId, bool pendingOnly, CancellationToken ct);
+    Task<DeviceCommandResponse> ClearAsync(Guid userId, Guid deviceId, ClearWallpaperRequest request, CancellationToken ct);
+    Task<IReadOnlyList<DeviceCommandResponse>> GetPendingCommandsAsync(Guid userId, Guid deviceId, CancellationToken ct);
     Task<DeviceCommandResponse> ReportAsync(AgentIdentity agent, Guid commandId, CommandReport report, CancellationToken ct);
     Task<Guid> GetCommandAssetAsync(AgentIdentity agent, Guid commandId, CancellationToken ct);
+    Task<DeviceCommandResponse> GetCommandAsync(AgentIdentity agent, Guid commandId, CancellationToken ct);
 }
 
 public interface IDeviceEvents

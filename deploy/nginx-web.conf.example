@@ -8,7 +8,8 @@ server {
     server_name _;
     root /var/www/upscale-lab/current;
     index index.html;
-    client_max_body_size 25M;
+    # Allow multipart overhead while the API enforces a 50MiB image-file limit.
+    client_max_body_size 52M;
 
     # Keep API/SignalR/health routes on the existing running backend.
     # Preserve the current server's forwarded-proto behavior during HTTP UI testing.

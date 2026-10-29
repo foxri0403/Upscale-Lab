@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using ImageMagick;
 using UpscaleLab.Application.Common;
 using UpscaleLab.Application.Images;
 using UpscaleLab.Application.Storage;
@@ -17,7 +18,8 @@ public sealed class ImageServiceTests
         var storage = new FakeStorageService();
         var service = new ImageService(dbContext, storage);
         var userId = Guid.NewGuid();
-        await using var stream = new MemoryStream([1, 2, 3, 4]);
+        using var fixture = new MagickImage(MagickColors.Blue, 1920, 1080);
+        await using var stream = new MemoryStream(fixture.ToByteArray(MagickFormat.Png));
 
         var result = await service.UploadAsync(
             userId,
@@ -29,7 +31,7 @@ public sealed class ImageServiceTests
         Assert.Equal(1920, stored.OriginalWidth);
         Assert.Equal("wallpaper.png", stored.FileName);
         Assert.StartsWith("s3://test-bucket/", stored.OriginalUrl);
-        Assert.Equal(4, storage.LastUploadLength);
+        Assert.True(storage.LastUploadLength > 0);
         Assert.DoesNotContain(dbContext.Model.GetEntityTypes(), x => x.GetProperties().Any(p => p.Name == "Binary"));
         Assert.Equal(stored.Id, result.Id);
     }
@@ -40,7 +42,8 @@ public sealed class ImageServiceTests
         await using var dbContext = CreateDbContext();
         var service = new ImageService(dbContext, new FakeStorageService());
         var ownerId = Guid.NewGuid();
-        await using var stream = new MemoryStream([1]);
+        using var fixture = new MagickImage(MagickColors.Blue, 10, 10);
+        await using var stream = new MemoryStream(fixture.ToByteArray(MagickFormat.Jpeg));
         var image = await service.UploadAsync(
             ownerId,
             new ImageUploadCommand(stream, "image.jpg", "image/jpeg", 10, 10),
@@ -83,6 +86,14 @@ public sealed class ImageServiceTests
             await destination.WriteAsync(new byte[] { 1, 2, 3, 4 }, cancellationToken);
         }
 
+    public string CreateUploadUrl(
+        string objectKey,
+        string contentType,
+        TimeSpan lifetime)
+    {
+        throw new NotSupportedException(
+            "Upload URL is not required in this test.");
+    }
         public string CreateDownloadUrl(string objectKey, TimeSpan lifetime) =>
             $"https://example.test/{objectKey}";
     }

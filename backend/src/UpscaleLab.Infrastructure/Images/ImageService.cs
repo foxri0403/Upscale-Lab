@@ -20,7 +20,11 @@ public sealed class ImageService(ApplicationDbContext dbContext, IStorageService
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        return images.Select(Map).ToList();
+        var projects = await dbContext.LiveLayerProjects.AsNoTracking().Where(x => x.UserId == userId)
+            .Select(x => new { x.OriginalImageId, x.SavedEditJson }).ToListAsync(cancellationToken);
+        var drafts = projects.Where(x => Application.Projects.ProjectDraftState.IsDraft(x.SavedEditJson))
+            .Select(x => x.OriginalImageId).ToHashSet();
+        return images.Where(x => !drafts.Contains(x.Id)).Select(Map).ToList();
     }
 
     public async Task<ImageResponse> GetAsync(Guid userId, Guid imageId, CancellationToken cancellationToken)
@@ -34,9 +38,11 @@ public sealed class ImageService(ApplicationDbContext dbContext, IStorageService
         ImageUploadCommand command,
         CancellationToken cancellationToken)
     {
-        var safeFileName = SanitizeFileName(command.FileName);
+        var normalized = await UploadedImage.ReadAsync(command.Content, command.FileName, command.ContentType, cancellationToken);
+        await using var pixels = new MemoryStream(normalized.Bytes, false);
+        var safeFileName = SanitizeFileName(normalized.FileName);
         var objectKey = $"users/{userId:N}/originals/{Guid.NewGuid():N}/{safeFileName}";
-        var stored = await storageService.UploadAsync(command.Content, objectKey, command.ContentType, cancellationToken);
+        var stored = await storageService.UploadAsync(pixels, objectKey, normalized.ContentType, cancellationToken);
 
         try
         {
@@ -45,10 +51,10 @@ public sealed class ImageService(ApplicationDbContext dbContext, IStorageService
                 UserId = userId,
                 OriginalUrl = stored.StorageUrl,
                 OriginalObjectKey = stored.ObjectKey,
-                OriginalWidth = command.OriginalWidth,
-                OriginalHeight = command.OriginalHeight,
+                OriginalWidth = normalized.Width,
+                OriginalHeight = normalized.Height,
                 FileName = safeFileName,
-                ContentType = command.ContentType
+                ContentType = normalized.ContentType
             };
 
             dbContext.Images.Add(image);

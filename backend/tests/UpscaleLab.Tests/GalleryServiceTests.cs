@@ -345,6 +345,14 @@ public sealed class GalleryServiceTests
         public Task DeleteAsync(string objectKey, CancellationToken cancellationToken) =>
             Task.CompletedTask;
 
+    public string CreateUploadUrl(
+        string objectKey,
+        string contentType,
+        TimeSpan lifetime)
+    {
+        throw new NotSupportedException(
+            "Upload URL is not required in this test.");
+    }
         public string CreateDownloadUrl(string objectKey, TimeSpan lifetime) =>
             $"https://example.test/{objectKey}";
     }

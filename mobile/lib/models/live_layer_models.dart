@@ -38,6 +38,7 @@ class LiveLayer {
     required this.scale,
     required this.movementX,
     required this.movementY,
+    this.layerType = 'Other',
   });
 
   final String id;
@@ -50,6 +51,7 @@ class LiveLayer {
   final double scale;
   final double movementX;
   final double movementY;
+  final String layerType;
 
   factory LiveLayer.fromJson(Map<String, dynamic> json) {
     double number(String key, [double fallback = 0]) =>
@@ -57,6 +59,7 @@ class LiveLayer {
     return LiveLayer(
       id: json['id'] as String,
       imageUrl: json['imageUrl'] as String,
+      layerType: json['layerType'] as String? ?? 'Other',
       layerOrder: json['layerOrder'] as int,
       depth: number('depth'),
       positionX: number('positionX'),

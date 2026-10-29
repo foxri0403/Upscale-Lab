@@ -13,7 +13,8 @@ public sealed class DeviceService(ApplicationDbContext dbContext, IDeviceEvents?
         return await dbContext.Devices
             .AsNoTracking()
             .Where(x => x.UserId == userId)
-            .OrderByDescending(x => x.UpdatedAt)
+            .OrderBy(x => x.CreatedAt)
+            .ThenBy(x => x.Id)
             .Select(x => new DeviceResponse(
                 x.Id,
                 x.Platform,

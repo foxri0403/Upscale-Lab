@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using UpscaleLab.Domain.Entities;
+using UpscaleLab.Domain.Enums;
 
 namespace UpscaleLab.Infrastructure.Database;
 
@@ -7,6 +8,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 {
     public DbSet<User> Users => Set<User>();
     public DbSet<AuthSession> AuthSessions => Set<AuthSession>();
+    public DbSet<AccountCleanupTask> AccountCleanupTasks => Set<AccountCleanupTask>();
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<Image> Images => Set<Image>();
     public DbSet<OptimizedImage> OptimizedImages => Set<OptimizedImage>();
@@ -17,6 +19,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<LiveLayerProject> LiveLayerProjects => Set<LiveLayerProject>();
     public DbSet<ImageLayer> ImageLayers => Set<ImageLayer>();
     public DbSet<ProcessingJob> ProcessingJobs => Set<ProcessingJob>();
+    public DbSet<InpaintingJob> InpaintingJobs => Set<InpaintingJob>();
     public DbSet<DeviceDisplay> DeviceDisplays => Set<DeviceDisplay>();
     public DbSet<WallpaperAsset> WallpaperAssets => Set<WallpaperAsset>();
     public DbSet<WallpaperAssignment> WallpaperAssignments => Set<WallpaperAssignment>();
@@ -27,6 +30,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         base.OnModelCreating(modelBuilder);
 
         ConfigureUser(modelBuilder);
+        AccountModelConfiguration.Configure(modelBuilder);
         var session = modelBuilder.Entity<AuthSession>();
         session.ToTable("auth_sessions");
         session.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
@@ -41,6 +45,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         ConfigureUserSetting(modelBuilder);
         ConfigureGallery(modelBuilder);
         ConfigureLiveLayer(modelBuilder);
+        ConfigureInpainting(modelBuilder);
         ConfigureWallpaperControl(modelBuilder);
     }
 
@@ -74,6 +79,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     {
         var entity = modelBuilder.Entity<Device>();
         entity.ToTable("devices");
+        entity.Property(x => x.SupportsWallpaperRemoval).HasDefaultValue(false);
         entity.Property(x => x.Platform).HasConversion<string>().HasMaxLength(20);
         entity.Property(x => x.Orientation).HasConversion<string>().HasMaxLength(20);
         entity.Property(x => x.DeviceName).HasMaxLength(120).IsRequired();
@@ -161,6 +167,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         project.Property(x => x.Title).HasMaxLength(160).IsRequired();
         project.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
         project.Property(x => x.FailureReason).HasMaxLength(2000);
+        project.Property(x => x.SavedEditJson).HasColumnType("jsonb");
         project.HasIndex(x => new { x.UserId, x.CreatedAt });
         project.HasOne(x => x.User).WithMany(x => x.Projects).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         project.HasOne(x => x.OriginalImage).WithMany(x => x.LiveLayerProjects).HasForeignKey(x => x.OriginalImageId).OnDelete(DeleteBehavior.Restrict);
@@ -179,10 +186,47 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         job.Property(x => x.ErrorMessage).HasMaxLength(2000);
         job.Property(x => x.Operation).HasConversion<string>().HasMaxLength(30).HasDefaultValue(UpscaleLab.Domain.Enums.ProcessingOperation.Layers);
         job.Property(x => x.UpscaleFactor).HasDefaultValue(2);
+        job.Property(x => x.TargetLongEdge).IsRequired(false);
         job.Property(x => x.ResultObjectKey).HasMaxLength(1024);
         job.HasIndex(x => new { x.ProjectId, x.CreatedAt });
         job.HasIndex(x => x.ProjectId).IsUnique().HasFilter("\"Status\" IN ('Queued', 'Processing')");
         job.HasOne(x => x.Project).WithMany(x => x.ProcessingJobs).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+    }
+
+    private static void ConfigureInpainting(ModelBuilder modelBuilder)
+    {
+        var job = modelBuilder.Entity<InpaintingJob>();
+
+        job.ToTable("inpainting_jobs");
+        job.HasKey(x => x.Id);
+
+        job.Property(x => x.Status)
+            .HasConversion<string>()
+            .HasMaxLength(20);
+
+        job.Property(x => x.RunPodJobId)
+            .HasMaxLength(128);
+
+        job.Property(x => x.InputObjectKey)
+            .HasMaxLength(1024);
+
+        job.Property(x => x.MaskObjectKey)
+            .HasMaxLength(1024);
+
+        job.Property(x => x.ResultObjectKey)
+            .HasMaxLength(1024);
+
+        job.Property(x => x.ErrorMessage)
+            .HasMaxLength(2000);
+
+        job.HasIndex(x => new { x.UserId, x.CreatedAt });
+
+        job.HasIndex(x => new { x.Status, x.CreatedAt });
+
+        job.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 
     private static void ConfigureWallpaperControl(ModelBuilder builder)
@@ -200,6 +244,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         asset.Property(x => x.Title).HasMaxLength(160).IsRequired();
         asset.Property(x => x.Mode).HasConversion<string>().HasMaxLength(20);
         asset.Property(x => x.ManifestJson).HasColumnType("jsonb").IsRequired();
+        asset.Property(x => x.SavedEditJson).HasColumnType("jsonb");
+        asset.Property(x => x.ShareToken).HasMaxLength(64);
+        asset.HasIndex(x => x.ShareToken).IsUnique();
         asset.HasIndex(x => new { x.UserId, x.CreatedAt });
         asset.HasIndex(x => new { x.IsPublic, x.IsArchived, x.CreatedAt });
         asset.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
@@ -216,6 +263,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 
         var command = builder.Entity<DeviceCommand>();
         command.ToTable("device_commands");
+        command.Property(x => x.Action).HasConversion<string>().HasMaxLength(20).HasDefaultValue(DeviceCommandAction.Apply);
         command.Property(x => x.Target).HasConversion<string>().HasMaxLength(20);
         command.Property(x => x.Status).HasConversion<string>().HasMaxLength(30);
         command.Property(x => x.Error).HasMaxLength(1000);

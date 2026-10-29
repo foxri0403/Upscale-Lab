@@ -62,6 +62,7 @@ run("direct navigation to every page returns the SPA", async () => {
     "/app/explore",
     "/app/studio",
     "/app/devices",
+    "/share/missing-link",
   ]) {
     const r = await get(path);
     assert.equal(r.status, 200, path);
@@ -76,6 +77,9 @@ run("backend health stays available behind frontend routing", async () => {
 run("private API routes still reject unauthenticated requests", async () => {
   for (const path of [
     "/api/projects",
+    "/api/projects/capabilities",
+    "/api/projects/00000000-0000-0000-0000-000000000001/content",
+    "/api/wallpapers/00000000-0000-0000-0000-000000000001/content/0",
     "/api/devices",
     "/api/devices/updates",
     "/api/agent/updates",
@@ -86,6 +90,16 @@ run("private API routes still reject unauthenticated requests", async () => {
     assert.equal(r.status, 401, path);
     assert.doesNotMatch(r.headers.get("content-type") || "", /text\/html/);
   }
+});
+run("link sharing has an anonymous read route and an authenticated creation route", async () => {
+  const missing = await get(`/api/wallpapers/links/${"0".repeat(64)}`);
+  assert.equal(missing.status, 404);
+  assert.match(missing.headers.get("content-type"), /json/);
+  assert.equal((await get(`/api/wallpapers/links/${"0".repeat(64)}/content/0`)).status, 404);
+  const create = await fetch(`${base}/api/wallpapers/00000000-0000-0000-0000-000000000001/share-link`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", signal: AbortSignal.timeout(15000),
+  });
+  assert.equal(create.status, 401);
 });
 run("shared wallpaper API returns JSON, never the SPA fallback", async () => {
   const r = await get("/api/wallpapers/shared");

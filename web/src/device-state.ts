@@ -1,18 +1,22 @@
-import type { CloudState, CloudCommand } from "./api";
-import type { Device, Command } from "./model";
-export function mapDeviceLibrary(states: CloudState[], commands: CloudCommand[][], assets: { id: string; title: string }[]) {
+import type { CloudDevice, CloudState } from "./api";
+import type { Device } from "./model";
+import { registeredDevices } from "./device-layout.ts";
+export function mapDeviceLibrary(states: CloudState[], registrations: CloudDevice[] = []) {
+  const created = new Map(registrations.map(device => [device.id, device.createdAt]));
   const mappedDevices: Device[] = states.map((s) => ({
     id: s.id,
+    created: created.get(s.id),
     name: s.name,
     platform: s.platform,
     osVersion: s.osVersion,
-    manufacturer: s.manufacturer,
-    model: s.model,
-    architecture: s.architecture,
     physicalDisplayCount: s.displays.filter(d => d.isConnected).length,
     online: s.recentlySeen,
+    connection: s.isLinked && s.recentlySeen ? "connected" : s.isLinked && !s.lastSeenAt ? "connecting" : "disconnected",
+    supportsWallpaperRemoval: s.supportsWallpaperRemoval ?? false,
     displays: s.displays.flatMap((d) => {
-      const assignments = d.wallpapers.length
+      const assignments: CloudState["displays"][number]["wallpapers"] = s.platform === "Android" && d.canApplyWallpaper !== false
+        ? (["Lock", "Home"] as const).map(target => d.wallpapers.find(w => w.target === target) || { target, observation: "Unknown" })
+        : d.wallpapers.length
         ? d.wallpapers
         : [
             {
@@ -20,6 +24,7 @@ export function mapDeviceLibrary(states: CloudState[], commands: CloudCommand[][
               desiredAssetId: undefined,
               reportedAssetId: undefined,
               observation: "Unknown",
+              pendingRemoval: false,
             },
           ];
       return assignments.map((w) => ({
@@ -38,6 +43,7 @@ export function mapDeviceLibrary(states: CloudState[], commands: CloudCommand[][
         canApplyWallpaper: d.canApplyWallpaper ?? true,
         isPrimary: d.isPrimary,
         observation: w.observation,
+        removing: !!w.pendingRemoval,
         current: w.reportedAssetId ? `asset:${w.reportedAssetId}` : "",
         desired:
           w.desiredAssetId && w.desiredAssetId !== w.reportedAssetId
@@ -46,30 +52,5 @@ export function mapDeviceLibrary(states: CloudState[], commands: CloudCommand[][
       }));
     }),
   }));
-  const mappedCommands: Command[] = commands.flatMap((list, i) =>
-    list.map(
-      (c) =>
-        ({
-          id: c.id,
-          device: states[i].name,
-          display:
-            states[i].platform === "Android"
-              ? c.target === "Lock"
-                ? "잠금 화면"
-                : "홈 화면"
-              : states[i].displays.find((d) => d.id === c.displayId)?.name ||
-                "화면",
-          picture: assets.find((a) => a.id === c.assetId)?.title || "배경화면",
-          status:
-            c.status === "Applied"
-              ? "완료"
-              : ["Failed", "Expired", "Superseded"].includes(c.status)
-                ? "실패"
-                : "대기",
-          created: "",
-          detail: c.error || c.status,
-        }) as Command,
-    ),
-  );
-  return { devices: mappedDevices, commands: mappedCommands };
+  return { devices: registeredDevices(mappedDevices) };
 }

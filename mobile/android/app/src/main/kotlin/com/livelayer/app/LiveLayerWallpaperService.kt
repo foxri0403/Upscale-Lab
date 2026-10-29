@@ -17,6 +17,7 @@ import android.service.wallpaper.WallpaperService
 import android.util.Log
 import android.view.SurfaceHolder
 import android.view.WindowManager
+import android.view.Choreographer
 import org.json.JSONObject
 import java.io.File
 import kotlin.math.max
@@ -42,6 +43,11 @@ class LiveLayerWallpaperService : WallpaperService() {
         private var previewManifest: String? = null
         private var tiltX = 0f
         private var tiltY = 0f
+        private var targetTiltX = 0f
+        private var targetTiltY = 0f
+        private var lastFrameNanos = 0L
+        private var motionEnabled = true
+        private val choreographer = Choreographer.getInstance()
         private var sensitivity = 1f
         private var live2D = false
         private var agent = false
@@ -60,21 +66,33 @@ class LiveLayerWallpaperService : WallpaperService() {
         private var layers: List<Layer> = emptyList()
         private var fallback: Bitmap? = null
         private var frameScheduled = false
-        private val frame = Runnable { frameScheduled = false; draw() }
+        private val frame = object : Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
+                frameScheduled = false
+                if (!lifecycle.visible || !lifecycle.surfaceReady) return
+                val elapsed = if (lastFrameNanos == 0L) 1.0 / 60 else
+                    ((frameTimeNanos - lastFrameNanos) / 1_000_000_000.0).coerceIn(0.0, .1)
+                lastFrameNanos = frameTimeNanos
+                val amount = (1 - kotlin.math.exp(-elapsed / .065)).toFloat()
+                if (motionEnabled && authorized()) {
+                    tiltX += (targetTiltX - tiltX) * amount
+                    tiltY += (targetTiltY - tiltY) * amount
+                } else { tiltX = 0f; tiltY = 0f }
+                draw()
+                if (motionEnabled && authorized() && layers.isNotEmpty()) scheduleDraw()
+            }
+        }
         private val sensor = TiltSensor(this@LiveLayerWallpaperService, {
             if (Build.VERSION.SDK_INT >= 30) displayContext?.display?.rotation ?: 0
             else (getSystemService(WINDOW_SERVICE) as WindowManager).defaultDisplay.rotation
         }) { x, y ->
-            if (kotlin.math.abs(x - tiltX) + kotlin.math.abs(y - tiltY) > .0005f) {
-                tiltX = x; tiltY = y
-                scheduleDraw()
-            }
+            targetTiltX = x; targetTiltY = y
         }
-        private val lifecycle = WallpaperEngineLifecycle(
+        private val lifecycle: WallpaperEngineLifecycle = WallpaperEngineLifecycle(
             refresh = { loadActiveProject(surfaceHolder.surfaceFrame.width(), surfaceHolder.surfaceFrame.height()) },
-            startSensor = { if (authorized()) sensor.start() }, stopSensor = { sensor.stop() },
+            startSensor = { if (authorized() && motionEnabled) sensor.start() }, stopSensor = { sensor.stop() },
             requestFrame = { scheduleDraw() }, cancelFrames = {
-                handler.removeCallbacks(frame); frameScheduled = false
+                choreographer.removeFrameCallback(frame); frameScheduled = false; lastFrameNanos = 0L
             })
 
         override fun onCreate(holder: SurfaceHolder) {
@@ -85,8 +103,11 @@ class LiveLayerWallpaperService : WallpaperService() {
         }
 
         override fun onSharedPreferenceChanged(preferences: SharedPreferences?, key: String?) {
+            if (key == "companion_manifest_revision" && agent) {
+                loadedManifest = null; lifecycle.selectionChanged()
+            }
             if (key == "companion_valid_until" && agent) {
-                if (authorized() && lifecycle.visible) sensor.start() else { sensor.stop(); tiltX = 0f; tiltY = 0f }
+                if (authorized() && lifecycle.visible && motionEnabled) sensor.start() else { sensor.stop(); tiltX = 0f; tiltY = 0f }
                 scheduleDraw()
             }
             if ((key == "manifest_path" || key == "direct_manifest_path") && !isPreview) {
@@ -100,6 +121,11 @@ class LiveLayerWallpaperService : WallpaperService() {
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
             super.onSurfaceCreated(holder)
+            if (Build.VERSION.SDK_INT >= 30) {
+                // Hint the compositor to avoid choosing a 30Hz mode while this wallpaper moves.
+                val rate = (displayContext?.display?.refreshRate ?: 60f).coerceAtLeast(60f)
+                runCatching { holder.surface.setFrameRate(rate, android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT) }
+            }
             lifecycle.surfaceCreated()
         }
 
@@ -160,6 +186,9 @@ class LiveLayerWallpaperService : WallpaperService() {
                 canvasWidth = manifest.optInt("width", 1).toFloat().coerceAtLeast(1f)
                 canvasHeight = manifest.optInt("height", 1).toFloat().coerceAtLeast(1f)
                 live2D = manifest.optString("renderer") == "live2d"
+                motionEnabled = live2D && WallpaperMotion.usesGyro(manifest)
+                targetTiltX = 0f; targetTiltY = 0f; tiltX = 0f; tiltY = 0f
+                if (!motionEnabled) sensor.stop() else if (lifecycle.visible && authorized()) sensor.start()
                 sensitivity = manifest.optDouble("sensitivity", 1.0).toFloat().coerceIn(0f, 2f)
                 fallback = decode(File(directory, manifest.optString("originalFileName", "original.img")))
                 val items = manifest.getJSONArray("layers")
@@ -193,20 +222,22 @@ class LiveLayerWallpaperService : WallpaperService() {
         }
 
         private fun scheduleDraw() {
-            if (lifecycle.visible && lifecycle.surfaceReady && !frameScheduled) { frameScheduled = true; handler.postDelayed(frame, 33) }
+            if (lifecycle.visible && lifecycle.surfaceReady && !frameScheduled) { frameScheduled = true; choreographer.postFrameCallback(frame) }
         }
 
         private fun draw() {
             if (!lifecycle.surfaceReady || !surfaceHolder.surface.isValid) return
+            val drawingSurface = surfaceHolder.surface
             val rendered = WallpaperFrameRenderer.render(
-                acquire = { surfaceHolder.lockCanvas() },
+                acquire = { if (Build.VERSION.SDK_INT >= 26) surfaceHolder.lockHardwareCanvas()
+                    else drawingSurface.lockHardwareCanvas() },
                 draw = { canvas ->
                     canvas.drawColor(Color.BLACK)
                     if (layers.isEmpty()) fallback?.let { drawBitmap(canvas, it, 0f, 0f, 0f, 1f) }
                     else for ((index, layer) in layers.withIndex()) {
                         if (agent) {
                             val cover = max(canvas.width / canvasWidth, canvas.height / canvasHeight)
-                            val moving = authorized() && !layer.background
+                            val moving = motionEnabled && authorized() && !layer.background
                             val x = if (moving) -tiltX.coerceIn(-1f, 1f) * layer.movementX else 0f
                             val y = if (moving) tiltY.coerceIn(-1f, 1f) * layer.movementY else 0f
                             canvas.save()
@@ -218,7 +249,7 @@ class LiveLayerWallpaperService : WallpaperService() {
                             continue
                         }
                         // Live 2D anchors the background. Only the second layer moves.
-                        val moving = !live2D || index > 0
+                        val moving = motionEnabled && (!live2D || index > 0)
                         val amplitudeX = if (live2D) canvas.width * .035f else layer.movementX * 4f
                         val amplitudeY = if (live2D) canvas.height * .035f else layer.movementY * 4f
                         drawBitmap(canvas, layer.bitmap,
@@ -227,7 +258,8 @@ class LiveLayerWallpaperService : WallpaperService() {
                             layer.rotation, layer.scale * if (live2D) 1.08f else 1f)
                     }
                 },
-                post = { surfaceHolder.unlockCanvasAndPost(it) },
+                post = { if (Build.VERSION.SDK_INT >= 26) surfaceHolder.unlockCanvasAndPost(it)
+                    else drawingSurface.unlockCanvasAndPost(it) },
                 failed = { Log.w("Live2D", "Wallpaper surface changed while drawing", it) })
             if (rendered && layers.isNotEmpty() && agent && !isPreview && authorized() && preferences.getString("companion_rendered_manifest", null) != loadedManifest) {
                 preferences.edit().putString("companion_rendered_manifest", loadedManifest).apply()

@@ -2,6 +2,8 @@ namespace UpscaleLab.Application.Images;
 
 public static class ImageFormatPolicy
 {
+    public const long MaxUploadBytes = 50L * 1024 * 1024;
+    public const long MaxRequestBytes = MaxUploadBytes + 2L * 1024 * 1024;
     private static readonly IReadOnlyDictionary<string, string> ContentTypes =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {

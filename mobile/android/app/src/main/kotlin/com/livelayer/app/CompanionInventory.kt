@@ -29,9 +29,10 @@ internal class CompanionInventory(private val context: Context) {
                 val id = runCatching { manager.getWallpaperId(flag) }.getOrDefault(-1)
                 val live = activeFlags() and flag != 0
                 val activePath = context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).getString("direct_manifest_path", null)
-                val managed = saved != null && (if (saved.optString("mode") == "Live2D") live && activePath == saved.optString("manifest")
+                val cleared = CompanionWallpaperRemoval.isCleared(saved, id)
+                val managed = saved != null && !saved.optBoolean("cleared") && (if (saved.optString("mode") == "Live2D") live && activePath == saved.optString("manifest")
                     else !live && id > 0 && id == saved.optInt("wallpaperId"))
-                reports.put(JSONObject().put("target", target).put("observation", if (managed) "Managed" else if (id > 0 || live) "External" else "Unavailable")
+                reports.put(JSONObject().put("target", target).put("observation", if (cleared) "Cleared" else if (managed) "Managed" else if (id > 0 || live) "External" else "Unavailable")
                     .put("assetId", if (managed) saved!!.getString("assetId") else JSONObject.NULL))
             }
             output.put(JSONObject().put("nativeId", if (primary) "android-built-in" else "android-display-${display.displayId}")

@@ -69,6 +69,14 @@ public sealed class GalleryThumbnailServiceTests
             return new StoredObject(key, $"s3://test/{key}");
         }
         public Task DeleteAsync(string key, CancellationToken token) => Task.CompletedTask;
+    public string CreateUploadUrl(
+        string objectKey,
+        string contentType,
+        TimeSpan lifetime)
+    {
+        throw new NotSupportedException(
+            "Upload URL is not required in this test.");
+    }
         public string CreateDownloadUrl(string key, TimeSpan lifetime) => $"https://test/{key}";
     }
 }

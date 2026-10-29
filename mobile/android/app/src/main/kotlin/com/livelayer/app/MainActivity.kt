@@ -152,11 +152,22 @@ class MainActivity : FlutterActivity() {
                     "splitLive2D" -> ioExecutor.execute {
                         try {
                             val source = File(call.argument<String>("sourcePath") ?: error("이미지가 없습니다."))
-                            val draft = live2DStore.split(source)
+                            val draft = live2DStore.importCloud(source,
+                                call.argument<String>("backgroundUrl") ?: error("클라우드 분리 결과가 필요합니다."),
+                                call.argument<String>("foregroundUrl") ?: error("클라우드 분리 결과가 필요합니다."),
+                                call.argument<Int>("width") ?: error("클라우드 이미지 크기가 필요합니다."),
+                                call.argument<Int>("height") ?: error("클라우드 이미지 크기가 필요합니다."))
                             runOnUiThread { result.success(draft) }
                         } catch (error: Exception) {
                             runOnUiThread { result.error("live2d_failed", error.cause?.message ?: error.message, null) }
                         }
+                    }
+                    "setLive2DMotion" -> ioExecutor.execute {
+                        try {
+                            live2DStore.setMotion(call.argument<String>("draftId") ?: error("분리 ID가 없습니다."),
+                                call.argument<Boolean>("enabled") ?: false)
+                            runOnUiThread { result.success(null) }
+                        } catch (error: Exception) { runOnUiThread { result.error("live2d_failed", error.message, null) } }
                     }
                     "editLive2D" -> ioExecutor.execute {
                         try {

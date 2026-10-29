@@ -1,15 +1,13 @@
-import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useId, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { X, Layers3, LoaderCircle } from "lucide-react";
 import { filterStyle, type Picture } from "./model";
+export { navigate } from "./navigation";
+import { navigate } from "./navigation";
 
-export function navigate(path: string, replace = false) {
-  window.history[replace ? "replaceState" : "pushState"]({}, "", path);
-  window.dispatchEvent(new PopStateEvent("popstate"));
-  window.scrollTo(0, 0);
-}
 const subscribe = (callback: () => void) => {
   window.addEventListener("popstate", callback);
-  return () => window.removeEventListener("popstate", callback);
+  window.addEventListener("upscale:route", callback);
+  return () => { window.removeEventListener("popstate", callback); window.removeEventListener("upscale:route", callback); };
 };
 export function useRoute() {
   return useSyncExternalStore(
@@ -29,6 +27,7 @@ export function Link({
   return (
     <a
       href={to}
+      data-spa-link
       className={className}
       onClick={(e) => {
         if (!e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) {
@@ -61,6 +60,7 @@ export function Modal({
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   const closeRef = useRef(close);
   closeRef.current = close;
   useEffect(() => {
@@ -82,7 +82,7 @@ export function Modal({
     <dialog
       ref={ref}
       className={`modal ${wide ? "wide" : ""}`}
-      aria-labelledby="modal-title"
+      aria-labelledby={titleId}
       onClick={(e) => {
         if (e.target === e.currentTarget) {
           const r = e.currentTarget.getBoundingClientRect();
@@ -97,7 +97,7 @@ export function Modal({
       }}
     >
       <div className="modal-heading">
-        <h2 id="modal-title">{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         <button className="icon-button" aria-label="닫기" onClick={close}>
           <X size={21} />
         </button>

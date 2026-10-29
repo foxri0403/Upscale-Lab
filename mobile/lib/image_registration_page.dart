@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter/rendering.dart' show OverflowBoxFit;
 import 'services/live_2d_service.dart';
+import 'services/api_client.dart';
 import 'widgets/live_2d_preview.dart';
 
 import 'models/gallery_tags.dart';
@@ -55,9 +56,11 @@ class ImageFeaturePage extends StatefulWidget {
       this.initialTags = const [],
       this.initialRatio = const ImageRatioSettings(),
       this.loadLive2D,
+      this.apiClient,
       this.onSave});
   final String filePath;
   final String title;
+  final ApiClient? apiClient;
   final List<String> initialTags;
   final ImageRatioSettings initialRatio;
   final Future<Live2DDraft?> Function()? loadLive2D;
@@ -91,6 +94,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
   bool _splitting = false;
   bool _activatingLive2D = false;
   bool _live2DActivated = false;
+  bool _motionEnabled = true;
   String? _splitError;
   String _liveLayer = 'composite';
   int _splitGeneration = 0;
@@ -118,7 +122,8 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
       _splitError = null;
     });
     try {
-      final draft = await Live2DService.split(widget.filePath);
+      final draft = await Live2DService.split(widget.filePath,
+          apiClient: widget.apiClient);
       if (!mounted || generation != _splitGeneration) {
         await Live2DService.discard(draft);
         return;
@@ -149,6 +154,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
     Live2DDraft? applied;
     try {
       applied = await Live2DService.export(draft, crop: _crop, filter: _filter);
+      await Live2DService.setMotion(applied, _motionEnabled);
       final confirmed = await Live2DService.activate(applied);
       if (!mounted) return;
       if (!confirmed) {
@@ -158,7 +164,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
       }
       final previous = _live2D;
       setState(() {
-        _live2D = draft;
+        _live2D = draft.withMotion(_motionEnabled);
         _candidate = null;
         _liveLayer = 'composite';
         _live2DActivated = true;
@@ -207,6 +213,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
       setState(() {
         _source = source;
         _live2D = live;
+        _motionEnabled = live?.motionEnabled ?? true;
         _live2DActivated = activated;
       });
     } catch (_) {
@@ -297,6 +304,8 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
       if (_live2D case final draft?) {
         prepared =
             await Live2DService.export(draft, crop: _crop, filter: _filter);
+        await Live2DService.setMotion(prepared, _motionEnabled);
+        prepared = prepared.withMotion(_motionEnabled);
       }
       final options = ImageRegistrationOptions(
           title: title,
@@ -510,6 +519,7 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
                 preview: draft == null
                     ? null
                     : Live2DPreview(
+                        motionEnabled: _motionEnabled,
                         backgroundPath: draft.backgroundPath,
                         foregroundPath: draft.foregroundPath,
                         layer: _tool == _RegistrationTool.parallax
@@ -624,6 +634,13 @@ class _ImageFeaturePageState extends State<ImageFeaturePage> {
         ]),
       if (_splitError != null) Text(_splitError!, textAlign: TextAlign.center),
       if (!_splitting && draft != null) ...[
+        SwitchListTile(
+            title: const Text('동적 효과'),
+            subtitle: const Text('자이로 센서로 인물·사물 움직이기'),
+            value: _motionEnabled,
+            onChanged: _saving
+                ? null
+                : (value) => setState(() => _motionEnabled = value)),
         if (wide)
           SingleChildScrollView(
               scrollDirection: Axis.horizontal,
