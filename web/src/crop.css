@@ -5,19 +5,25 @@
 .crop-source-image, .crop-source-image > img { position: absolute; inset: 0; width: 100%; height: 100%; }
 .crop-source-image > img { object-fit: fill; pointer-events: none; }
 .crop-editable { touch-action: none; cursor: crosshair; }
-.crop-excluded { position: absolute; background: #b3bac5; }
-.crop-selection { position: absolute; outline: 2px solid #7774ff; cursor: move; }
-.crop-selection:focus-visible { outline: 3px solid #5753e9; }
-.crop-selection .crop-guides { border: 0; }
-.crop-handle { position: absolute; width: 24px; height: 24px; padding: 0; z-index: 2; transform: translate(-50%, -50%); background: transparent; touch-action: none; }
-.crop-handle::after { content: ""; display: block; width: 10px; height: 10px; margin: 7px; border: 1px solid #5753e9; border-radius: 2px; background: white; }
+.crop-excluded { position: absolute; background: rgba(52, 58, 70, .62); }
+.crop-selection { position: absolute; outline: 1px solid #fff; box-shadow: 0 0 0 1px #17203326; cursor: move; }
+.crop-selection:focus-visible { outline: 1px solid #fff; box-shadow: 0 0 0 2px var(--primary); }
+.crop-handle { position: absolute; width: 40px; height: 40px; padding: 0; z-index: 2; transform: translate(-50%, -50%); background: transparent; touch-action: none; }
+.crop-handle::after { content: ""; position: absolute; display: block; left: 50%; top: 50%; width: 28px; height: 28px; pointer-events: none; }
+.crop-handle-nw::after { border-top: 3px solid white; border-left: 3px solid white; transform: translate(-1px, -1px); }
+.crop-handle-ne::after { border-top: 3px solid white; border-right: 3px solid white; transform: translate(calc(-100% + 1px), -1px); }
+.crop-handle-se::after { border-bottom: 3px solid white; border-right: 3px solid white; transform: translate(calc(-100% + 1px), calc(-100% + 1px)); }
+.crop-handle-sw::after { border-bottom: 3px solid white; border-left: 3px solid white; transform: translate(-1px, calc(-100% + 1px)); }
+.crop-handle-n::after, .crop-handle-s::after { width: 32px; height: 3px; background: white; transform: translate(-50%, -50%); }
+.crop-handle-e::after, .crop-handle-w::after { width: 3px; height: 32px; background: white; transform: translate(-50%, -50%); }
+.crop-handle:focus-visible { outline: none; }.crop-handle:focus-visible::after { filter: drop-shadow(0 0 2px #5753e9); }
+.crop-frame-mark { pointer-events: none; cursor: inherit; }
 .crop-handle-nw { left: 0; top: 0; cursor: nwse-resize; }.crop-handle-n { left: 50%; top: 0; cursor: ns-resize; }.crop-handle-ne { left: 100%; top: 0; cursor: nesw-resize; }
 .crop-handle-e { left: 100%; top: 50%; cursor: ew-resize; }.crop-handle-se { left: 100%; top: 100%; cursor: nwse-resize; }.crop-handle-s { left: 50%; top: 100%; cursor: ns-resize; }
 .crop-handle-sw { left: 0; top: 100%; cursor: nesw-resize; }.crop-handle-w { left: 0; top: 50%; cursor: ew-resize; }
-.crop-dimensions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
-.crop-dimensions label { min-width: 0; font-size: .8rem; }.crop-dimensions input { width: 100%; min-width: 0; margin-top: 5px; }
+.crop-dimensions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 18px; }
+.crop-dimensions label { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; font-size: .8rem; }.crop-dimensions input { width: 100%; min-width: 0; margin: 0; }
 .crop-area-controls { margin-top: 18px; }.crop-area-controls > div { display: flex; gap: 6px; margin-top: 12px; }.crop-area-controls .button { min-width: 0; padding: 8px; font-size: .75rem; }
-.crop-help { margin-top: 14px; color: #7b89a1; font-size: .75rem; line-height: 1.7; }
 .studio-image-plane { position: absolute; }.studio-image-plane > img { width: 100%; height: 100%; object-fit: fill; }
 .creator-avatar { display: inline-flex; width: 24px; height: 24px; flex: 0 0 24px; align-items: center; justify-content: center; border-radius: 50%; overflow: hidden; background: #e9edf5; color: #778499; }
 .creator-avatar img { width: 100%; height: 100%; object-fit: cover; }.image-card .creator { display: flex; align-items: center; gap: 6px; min-width: 0; }.image-card .creator > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -58,8 +58,9 @@ export function CropEditor({ picture, edit, change, disabled = false, zoom = "fi
           <div className="crop-excluded" aria-hidden="true" style={{ left: `${(region.x + region.width) * 100}%`, top: `${region.y * 100}%`, right: 0, height: `${region.height * 100}%` }} />
           <div className="crop-selection" role="group" aria-label="자르기 선택 영역" aria-disabled={disabled} tabIndex={editable ? 0 : -1}
             style={{ left: `${region.x * 100}%`, top: `${region.y * 100}%`, width: `${region.width * 100}%`, height: `${region.height * 100}%` }}>
-            <div className="crop-guides" aria-hidden="true"><i /><i /><i /><i /></div>
-            {edit.crop === "custom" && !disabled && Object.entries(handles).map(([handle, name]) => <button key={handle} type="button" data-crop-handle={handle} className={`crop-handle crop-handle-${handle}`} aria-label={`${name} 크기 조절`} />)}
+            {Object.entries(handles).map(([handle, name]) => edit.crop === "custom" && !disabled
+              ? <button key={handle} type="button" data-crop-handle={handle} className={`crop-handle crop-handle-${handle}`} aria-label={`${name} 크기 조절`} />
+              : <span key={handle} className={`crop-handle crop-frame-mark crop-handle-${handle}`} aria-hidden="true" />)}
           </div>
         </>}
       </div>
