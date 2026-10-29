@@ -3257,3 +3257,28 @@ td:last-child {
 @container (max-width: 700px) {
   .devices-page .device-card { grid-column: 1 / -1; }
 }
+
+/* Share the same header, preview and metadata rows across desktop and phone panels. */
+.devices-page { --device-panel-padding: 13px; }
+.devices-page .device-card-header { display: grid; grid-template-columns: 48px minmax(0, 1fr) 32px 24px; gap: 10px; align-items: start; height: 64px; flex: 0 0 64px; margin-bottom: 20px; }
+.devices-page .device-card-header > div { min-width: 0; }
+.devices-page .device-icon { width: 48px; height: 48px; padding: 0; align-items: center; justify-content: center; }
+.devices-page .device-icon > svg { width: 28px; height: 28px; }
+.devices-page .device-card-header h2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 22px; }
+.devices-page .device-card-header p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 16px; }
+.devices-page .device-refresh, .devices-page .device-more { margin-top: 8px; }
+.devices-page .device-more { grid-column: 4; }
+.devices-page .device-displays { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.devices-page .pc-device .display-card { padding: var(--device-panel-padding); }
+.devices-page .display-label { height: 24px; min-height: 24px; flex: 0 0 24px; }
+.devices-page .mobile-display-group { position: relative; padding: var(--device-panel-padding); border: 1px solid var(--line); border-radius: 8px; }
+.devices-page .mobile-device .display-grid { padding-bottom: 0; }
+.devices-page .mobile-device .display-card { padding: 0; border: 0; }
+.devices-page .mobile-device .display-label { display: flex; justify-content: center; }
+.devices-page .mobile-device .display-name { justify-content: center; width: 100%; }
+.devices-page .mobile-device .display-name h3 { text-align: center; }
+.devices-page .mobile-device-connection { position: absolute; top: var(--device-panel-padding); right: var(--device-panel-padding); line-height: 24px; font-size: 0.5714286rem; white-space: nowrap; }
+.devices-page .display-resolution, .devices-page .mobile-device .display-resolution { height: 32px; min-height: 32px; flex: 0 0 32px; line-height: 16px; }
+@media (max-width: 1250px) {
+  .devices-page { --device-panel-padding: 9px; }
+}

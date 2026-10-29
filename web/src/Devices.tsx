@@ -196,6 +196,7 @@ export function Devices() {
         <div className="device-grid">
           {registeredDevices(library.devices).map((device) => {
             const mobile = device.platform === "Android";
+            const displayConnection = device.displays.some(display => display.connected) && device.online ? "connected" : "disconnected";
             const screens = device.physicalDisplayCount ?? (mobile ? Math.min(1, device.displays.filter(d => d.connected).length)
               : new Set(device.displays.filter(d => d.connected).map(d => d.nativeId ?? d.id)).size);
             return (
@@ -205,7 +206,7 @@ export function Devices() {
               >
                 <div className="device-card-header">
                   <span className="device-icon">
-                    {mobile ? <Smartphone size={27} /> : <Monitor size={29} />}
+                    {mobile ? <Smartphone size={28} /> : <Monitor size={28} />}
                   </span>
                   <div>
                     <h2>{device.name}</h2>
@@ -252,7 +253,13 @@ export function Devices() {
                     로그인이 필요합니다.
                   </Notice>
                 )}
-                <div className="display-grid">
+                <div className={`device-displays ${mobile ? "mobile-display-group" : ""}`}>
+                  {mobile && device.displays.length > 0 && (
+                    <span className={`device-connection device-connection-${displayConnection} mobile-device-connection`}>
+                      {displayConnection === "connected" ? "연결됨" : "미연결"}
+                    </span>
+                  )}
+                  <div className="display-grid">
                   {deviceDisplays(device)
                     .map((display, i) => {
                       const current = findPicture(display.current);
@@ -264,13 +271,13 @@ export function Devices() {
                           <div className="display-label">
                             <h3>{display.name}</h3>
                             {!mobile && (display.isPrimary ?? i === 0) && <span>주 화면</span>}
-                            <span
+                            {!mobile && <span
                               className={
                                 display.connected ? "connected-text" : "muted"
                               }
                             >
                               {display.connected ? "연결됨" : "연결 끊김"}
-                            </span>
+                            </span>}
                           </div>
                           <div className="display-preview">
                             <div
@@ -315,6 +322,7 @@ export function Devices() {
                         </div>
                       );
                     })}
+                  </div>
                 </div>
                 <div className="device-card-footer">
                   <span>
