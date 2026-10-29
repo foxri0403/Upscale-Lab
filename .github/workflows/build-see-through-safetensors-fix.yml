@@ -1,0 +1,35 @@
+name: Build See-through safetensors fix (volume-v1 base)
+
+on:
+  push:
+    branches:
+      - inho/live2d-see-through
+    paths:
+      - .github/workflows/build-see-through-safetensors-fix.yml
+      - backend/ai-worker/runpod-see-through/Dockerfile.safetensors-fix
+      - backend/ai-worker/runpod-see-through/patch_safetensors_loading.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish separate test tag
+        uses: docker/build-push-action@v6
+        with:
+          context: backend/ai-worker
+          file: backend/ai-worker/runpod-see-through/Dockerfile.safetensors-fix
+          push: true
+          tags: ghcr.io/foxri0403/upscale-lab-see-through:safetensors-fix-${{ github.sha }}

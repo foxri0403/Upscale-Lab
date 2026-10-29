@@ -1,0 +1,8 @@
+# Safely inherit the teammate's already-published volume-aware worker.
+# Do not overwrite volume-v1 or other production image tags.
+FROM ghcr.io/foxri0403/upscale-lab-see-through:volume-v1
+
+COPY runpod-see-through/patch_safetensors_loading.py /opt/worker/patch_safetensors_loading.py
+RUN /opt/venv/bin/python /opt/worker/patch_safetensors_loading.py
+
+# Inherit the volume-v1 handler, env and CMD unchanged.
