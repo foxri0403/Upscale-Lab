@@ -116,7 +116,7 @@ sudo systemctl status upscale-lab --no-pager
 curl --fail http://127.0.0.1:5080/health
 ```
 
-현재 서버에는 nginx가 없습니다. 도메인과 TLS 인증서가 정해진 뒤 nginx 또는 AWS Application Load Balancer를 선택해 HTTPS를 종료해야 합니다. 5080 포트를 인터넷에 직접 공개하지 않는 구성을 권장합니다.
+운영 웹은 [CloudFront HTTPS 주소](https://d3bjir1z2hduu0.cloudfront.net/)에서 제공하며 원본 서버의 nginx가 웹 파일과 API 경로를 전달합니다. 현재 원본 nginx는 HTTP 80을 사용합니다. 5080 포트를 인터넷에 직접 공개하지 않는 구성을 권장합니다. [HTTPS 자이로 배포 검증](gyro-https-deployment-20261028.md)을 참고하세요.
 
 ## Migration 안전 절차
 

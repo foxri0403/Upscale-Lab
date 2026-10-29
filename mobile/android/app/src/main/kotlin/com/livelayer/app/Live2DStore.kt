@@ -3,22 +3,11 @@ package com.livelayer.app
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import com.google.android.gms.common.moduleinstall.ModuleInstall
-import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
-import com.google.android.gms.tasks.Tasks
-import com.google.android.gms.tasks.Task
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
-import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
-import com.google.mlkit.vision.segmentation.subject.SubjectSegmentationResult
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
-import java.util.concurrent.TimeUnit
-import kotlin.math.max
-import kotlin.math.roundToInt
 
 /** Drafts are disposable; saved layers and active wallpaper copies are app-private. */
 internal class Live2DStore(private val context: Context) {
@@ -43,95 +32,47 @@ internal class Live2DStore(private val context: Context) {
         if (it.isDirectory) it else File(ownerDirectory(owner), safeId(id))
     }
 
-    fun split(source: File): Map<String, Any> {
-        val segmenter = SubjectSegmentation.getClient(SubjectSegmenterOptions.Builder()
-            .enableForegroundConfidenceMask().build())
-        var bitmap: Bitmap? = null
-        var inference: Task<SubjectSegmentationResult>? = null
-        var directory: File? = null
+    /** Import cloud-generated layers. This device never runs segmentation inference. */
+    fun importCloud(source: File, backgroundUrl: String, foregroundUrl: String, width: Int, height: Int): Map<String, Any> {
+        require(width in 1..32768 && height in 1..32768 && width.toLong() * height <= 64_000_000) { "클라우드 레이어 크기가 올바르지 않습니다." }
+        val id = UUID.randomUUID().toString()
+        val directory = File(drafts, id)
         try {
-            val modules = ModuleInstall.getClient(context)
-            if (!Tasks.await(modules.areModulesAvailable(segmenter), 15, TimeUnit.SECONDS).areModulesAvailable()) {
-                Tasks.await(modules.installModules(ModuleInstallRequest.newBuilder().addApi(segmenter).build()),
-                    15, TimeUnit.SECONDS)
-                error("이미지 분리 모델을 다운로드하고 있습니다. 인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요.")
+            check(directory.mkdirs())
+            for ((url, name) in listOf(backgroundUrl to "background.png", foregroundUrl to "foreground.png")) {
+                val uri = java.net.URI(url)
+                require(uri.scheme == "https" && uri.userInfo == null) { "클라우드 다운로드 주소가 올바르지 않습니다." }
+                val connection = uri.toURL().openConnection() as java.net.HttpURLConnection
+                try {
+                    connection.connectTimeout = 15000; connection.readTimeout = 60000; connection.instanceFollowRedirects = false
+                    require(connection.responseCode == 200) { "클라우드 레이어를 내려받지 못했습니다." }
+                    connection.inputStream.use { input -> File(directory, name).outputStream().use { output ->
+                        val buffer = ByteArray(65536); var total = 0L
+                        while (true) { val count = input.read(buffer); if (count < 0) break
+                            total += count; require(total <= 256L * 1024 * 1024) { "클라우드 레이어 용량이 너무 큽니다." }
+                            output.write(buffer, 0, count)
+                        }
+                    } }
+                } finally { connection.disconnect() }
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(File(directory, name).absolutePath, bounds)
+                require(bounds.outMimeType == "image/png" && bounds.outWidth == width && bounds.outHeight == height) { "클라우드 레이어 규격이 일치하지 않습니다." }
             }
-            val sourceBitmap = WallpaperImageProcessor.decode(source, 1600)
-            bitmap = sourceBitmap
-            val task = segmenter.process(InputImage.fromBitmap(sourceBitmap, 0))
-            inference = task
-            val result = Tasks.await(task, 60, TimeUnit.SECONDS)
-            val buffer = result.foregroundConfidenceMask ?: error("이미지 분리 결과가 없습니다. 다시 시도해 주세요.")
-            val width = sourceBitmap.width
-            val height = sourceBitmap.height
-            val mask = FloatArray(width * height)
-            require(buffer.capacity() == mask.size) { "이미지 분리 결과 크기가 다릅니다." }
-            buffer.rewind(); buffer.get(mask)
-            val count = mask.count { it > .5f }
-            require(count > max(8, mask.size / 2000) && count < mask.size * .98) {
-                "분리할 인물·사물 또는 배경을 찾지 못했습니다. 피사체가 뚜렷한 사진을 선택해 주세요."
-            }
-            val pixels = IntArray(mask.size)
-            sourceBitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-            val foreground = Bitmap.createBitmap(LayerPixels.foreground(pixels, mask), width, height, Bitmap.Config.ARGB_8888)
-            val id = UUID.randomUUID().toString()
-            val outputDirectory = File(drafts, id)
-            directory = outputDirectory
-            check(outputDirectory.mkdirs())
-            try { write(foreground, File(outputDirectory, "foreground.png")) } finally { foreground.recycle() }
-
-            // Reconstruct a small plate, then preserve the original unmasked background
-            // at full processing resolution. This is spatial inpainting, not generative AI.
-            val factor = 256.0 / max(width, height)
-            val smallWidth = max(1, (width * factor).roundToInt())
-            val smallHeight = max(1, (height * factor).roundToInt())
-            val small = Bitmap.createScaledBitmap(sourceBitmap, smallWidth, smallHeight, true)
-            val smallPixels = IntArray(smallWidth * smallHeight)
-            small.getPixels(smallPixels, 0, smallWidth, 0, 0, smallWidth, smallHeight)
-            if (small !== sourceBitmap) small.recycle()
-            val holes = BooleanArray(smallPixels.size)
-            // Include the entire footprint and dilate to remove subject-coloured edges.
-            for (i in mask.indices) if (mask[i] > .02f) {
-                val x = (i % width * smallWidth / width).coerceAtMost(smallWidth - 1)
-                val y = (i / width * smallHeight / height).coerceAtMost(smallHeight - 1)
-                for (dy in -1..1) for (dx in -1..1) {
-                    val nx = x + dx; val ny = y + dy
-                    if (nx in 0 until smallWidth && ny in 0 until smallHeight) holes[ny * smallWidth + nx] = true
-                }
-            }
-            val plate = Bitmap.createBitmap(LayerPixels.inpaint(smallPixels, holes, smallWidth, smallHeight),
-                smallWidth, smallHeight, Bitmap.Config.ARGB_8888)
-            val expanded = Bitmap.createScaledBitmap(plate, width, height, true)
-            if (plate !== expanded) plate.recycle()
-            val fillPixels = IntArray(pixels.size)
-            expanded.getPixels(fillPixels, 0, width, 0, 0, width, height)
-            expanded.recycle()
-            for (i in pixels.indices) {
-                val x = i % width * smallWidth / width
-                val y = i / width * smallHeight / height
-                if (holes[y * smallWidth + x]) pixels[i] = fillPixels[i]
-            }
-            val background = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
-            try { write(background, File(outputDirectory, "background.png")) } finally { background.recycle() }
+            source.copyTo(File(directory, "original.img"))
             val layers = JSONArray()
-                .put(JSONObject().put("fileName", "background.png").put("layerOrder", 0).put("movementX", 0).put("movementY", 0))
-                .put(JSONObject().put("fileName", "foreground.png").put("layerOrder", 1).put("movementX", 1).put("movementY", 1))
-            File(outputDirectory, "manifest.json").writeText(JSONObject()
-                .put("renderer", "live2d").put("projectId", id).put("sensitivity", 1)
+                .put(JSONObject().put("fileName", "background.png").put("role", "Background").put("layerOrder", 0).put("movementX", 0).put("movementY", 0))
+                .put(JSONObject().put("fileName", "foreground.png").put("role", "Body").put("layerOrder", 1).put("movementX", 1).put("movementY", 1))
+            File(directory, "manifest.json").writeText(JSONObject().put("renderer", "live2d")
+                .put("projectId", id).put("motionEnabled", true).put("sensitivity", 1).put("width", width).put("height", height)
                 .put("layers", layers).toString())
-            return mapOf("draftId" to id, "backgroundPath" to File(outputDirectory, "background.png").absolutePath,
-                "foregroundPath" to File(outputDirectory, "foreground.png").absolutePath,
-                "width" to width, "height" to height)
-        } catch (error: Exception) {
-            directory?.deleteRecursively()
-            throw error
-        } finally {
-            val input = bitmap
-            val task = inference
-            if (task != null && !task.isComplete) {
-                task.addOnCompleteListener { input?.recycle(); segmenter.close() }
-            } else { input?.recycle(); segmenter.close() }
-        }
+            return mapOf("draftId" to id, "backgroundPath" to File(directory, "background.png").absolutePath,
+                "foregroundPath" to File(directory, "foreground.png").absolutePath, "width" to width, "height" to height)
+        } catch (error: Exception) { directory.deleteRecursively(); throw error }
+    }
+
+    fun setMotion(id: String, enabled: Boolean) {
+        val file = File(File(drafts, safeId(id)), "manifest.json")
+        file.writeText(JSONObject(file.readText()).put("motionEnabled", enabled).toString())
     }
 
     private fun write(bitmap: Bitmap, output: File) {
@@ -157,7 +98,7 @@ internal class Live2DStore(private val context: Context) {
         val sizes = listOf(background, foreground).map { file ->
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(file.absolutePath, bounds)
-            require(bounds.outMimeType == "image/png" && bounds.outWidth in 1..1600 && bounds.outHeight in 1..1600) {
+            require(bounds.outMimeType == "image/png" && bounds.outWidth in 1..32768 && bounds.outHeight in 1..32768 && bounds.outWidth.toLong() * bounds.outHeight <= 64_000_000) {
                 "편집한 Live 2D 이미지가 올바르지 않습니다."
             }
             bounds.outWidth to bounds.outHeight
@@ -172,7 +113,8 @@ internal class Live2DStore(private val context: Context) {
             File(destination, "manifest.json").writeText(manifest.put("projectId", id).toString())
             return mapOf("draftId" to id, "backgroundPath" to File(destination, "background.png").absolutePath,
                 "foregroundPath" to File(destination, "foreground.png").absolutePath,
-                "width" to sizes[0].first, "height" to sizes[0].second)
+                "width" to sizes[0].first, "height" to sizes[0].second,
+                "motionEnabled" to manifest.optBoolean("motionEnabled", true))
         } catch (error: Exception) {
             destination.deleteRecursively()
             throw error

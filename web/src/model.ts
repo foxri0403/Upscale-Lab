@@ -1,7 +1,9 @@
 import { selectableTags, unspecifiedTag } from "./image-tags";
+import { validateImageUpload } from "./image-upload";
+import { requestBlob } from "./api";
 import { pixelCrop, type CropRegion } from "./crop-geometry";
 export type Genre = (typeof selectableTags)[number] | typeof unspecifiedTag;
-export type Tool = "upscale" | "layers" | "live" | "crop" | "filter";
+export type Tool = "upscale" | "layers" | "live" | "crop" | "filter" | "tags";
 export type Edit = {
   strength: number;
   filter: string;
@@ -10,16 +12,22 @@ export type Edit = {
   scale: number;
   foreground: boolean;
   liveEnabled?: boolean;
+  mouseEnabled?: boolean;
+  gyroEnabled?: boolean;
 };
 export type Picture = {
+  separationDisabled?: boolean;
+  isDraft?: boolean;
   id: string;
   name: string;
   src: string;
   genre: Genre;
   kind?: "Live 2D" | "배경 분리" | "업스케일";
   features?: string[];
+  exportSources?: { image: string; background?: string; foregrounds?: string[] };
   created: string;
   edit?: Edit;
+  savedAt?: string;
   sharedId?: string;
   galleryPostId?: string;
   galleryPostIds?: string[];
@@ -46,6 +54,7 @@ export type Display = {
   resolution: string;
   current: string;
   desired?: string;
+  removing?: boolean;
   connected: boolean;
   nativeId?: string;
   target?: string;
@@ -60,29 +69,21 @@ export type Device = {
   name: string;
   platform: "Windows" | "Android";
   osVersion?: string;
-  manufacturer?: string;
-  model?: string;
-  architecture?: string;
   physicalDisplayCount?: number;
   online: boolean;
+  connection?: "connected" | "connecting" | "disconnected";
+  supportsWallpaperRemoval?: boolean;
   displays: Display[];
-};
-export type Command = {
-  id: string;
-  device: string;
-  display: string;
-  picture: string;
-  status: "대기" | "완료" | "실패";
-  created: string;
-  detail?: string;
 };
 export type Library = {
   images: Picture[];
   devices: Device[];
-  commands: Command[];
   assets?: Picture[];
 };
 export const defaultEdit: Edit = {
+  liveEnabled: false,
+  mouseEnabled: false,
+  gyroEnabled: false,
   strength: 70,
   filter: "original",
   crop: "original",
@@ -169,16 +170,6 @@ export function sampleLibrary(): Library {
         ],
       },
     ],
-    commands: [
-      {
-        id: "sample-1",
-        device: "내 휴대폰",
-        display: "홈 화면",
-        picture: "숲속의 여우",
-        status: "대기",
-        created: new Date().toISOString(),
-      },
-    ],
   };
 }
 export const community = sampleImages().map((p, i) => ({
@@ -235,10 +226,7 @@ export async function loadImage(src: string): Promise<HTMLImageElement> {
   return img;
 }
 export async function uploadImage(file: File): Promise<Picture> {
-  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
-    throw new Error("JPG, PNG, WebP 이미지를 선택해 주세요.");
-  if (file.size > 15 * 1024 * 1024)
-    throw new Error("15MB 이하의 이미지를 선택해 주세요.");
+  validateImageUpload(file);
   const url = URL.createObjectURL(file);
   try {
     const img = await loadImage(url);
@@ -263,7 +251,15 @@ export async function uploadImage(file: File): Promise<Picture> {
   }
 }
 export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
-  const img = await loadImage(picture.background || picture.src);
+  const temporary: string[] = [];
+  const load = async (source: string, endpoint?: string) => {
+    if (!endpoint) return loadImage(source);
+    const url = URL.createObjectURL(await requestBlob(endpoint));
+    temporary.push(url);
+    return loadImage(url);
+  };
+  try {
+  const img = await load(picture.background || picture.src, picture.background ? picture.exportSources?.background : picture.exportSources?.image);
   let source: CanvasImageSource = img;
   if (picture.background && picture.foregrounds?.length) {
     const composite = document.createElement("canvas");
@@ -272,8 +268,8 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
     const context = composite.getContext("2d")!;
     context.drawImage(img, 0, 0);
     if (edit.foreground)
-      for (const src of picture.foregrounds)
-        context.drawImage(await loadImage(src), 0, 0, img.width, img.height);
+      for (const [index, src] of picture.foregrounds.entries())
+        context.drawImage(await load(src, picture.exportSources?.foregrounds?.[index]), 0, 0, img.width, img.height);
     source = composite;
   }
   const selected = pixelCrop(img.width, img.height, edit);
@@ -296,7 +292,7 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
     canvas.width,
     canvas.height,
   );
-  return new Promise<Blob>((resolve, reject) =>
+  return await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(
       (b) =>
         b
@@ -309,6 +305,7 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
       "image/png",
     ),
   );
+  } finally { temporary.forEach(url => URL.revokeObjectURL(url)); }
 }
 export async function downloadImage(
   picture: Picture,
@@ -319,6 +316,8 @@ export async function downloadImage(
   const a = document.createElement("a");
   a.href = url;
   a.download = `${picture.name.replace(/[<>:"/\\|?*]/g, "_")}.png`;
-  a.click();
+  a.style.display = "none";
+  document.body.appendChild(a);
+  try { a.click(); } finally { a.remove(); }
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }

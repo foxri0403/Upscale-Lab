@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import '../models/image_editor.dart';
 import '../services/live_2d_service.dart';
 
@@ -11,27 +13,63 @@ class Live2DPreview extends StatefulWidget {
       required this.backgroundPath,
       required this.foregroundPath,
       this.layer = 'composite',
+      this.motionEnabled = true,
       this.crop = const Rect.fromLTWH(0, 0, 1, 1),
       this.filter = PhotoFilter.original});
   final String backgroundPath;
   final String foregroundPath;
   final String layer;
+  final bool motionEnabled;
   final Rect crop;
   final PhotoFilter filter;
   @override
   State<Live2DPreview> createState() => _Live2DPreviewState();
 }
 
-class _Live2DPreviewState extends State<Live2DPreview> {
+class _Live2DPreviewState extends State<Live2DPreview>
+    with SingleTickerProviderStateMixin {
   StreamSubscription<dynamic>? _events;
   Offset _tilt = Offset.zero;
+  Offset _target = Offset.zero;
+  late final Ticker _ticker = createTicker(_frame);
+  Duration _previous = Duration.zero;
+  void _frame(Duration elapsed) {
+    final seconds =
+        ((elapsed - _previous).inMicroseconds / 1000000).clamp(0.0, .1);
+    _previous = elapsed;
+    final amount = 1 - math.exp(-seconds / .065);
+    setState(() {
+      _tilt += (_target - _tilt) * amount;
+      if ((_target - _tilt).distance < .0001) {
+        _tilt = _target;
+        _ticker.stop();
+        _previous = Duration.zero;
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(Live2DPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.motionEnabled != widget.motionEnabled) _syncMotion();
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!(ModalRoute.of(context)?.isCurrent ?? true)) {
+    _syncMotion();
+  }
+
+  void _syncMotion() {
+    if (!widget.motionEnabled ||
+        !(ModalRoute.of(context)?.isCurrent ?? true) ||
+        !TickerMode.valuesOf(context).enabled) {
       _events?.cancel();
       _events = null;
       _tilt = Offset.zero;
+      _target = Offset.zero;
+      _ticker.stop();
+      _previous = Duration.zero;
       return;
     }
     if (_events != null) return;
@@ -40,7 +78,11 @@ class _Live2DPreviewState extends State<Live2DPreview> {
       final x = (event[0] as num).toDouble();
       final y = (event[1] as num).toDouble();
       if (x.isFinite && y.isFinite) {
-        setState(() => _tilt = Offset(x.clamp(-1, 1), y.clamp(-1, 1)));
+        _target = Offset(x.clamp(-1, 1), y.clamp(-1, 1));
+        if (!_ticker.isActive) {
+          _previous = Duration.zero;
+          _ticker.start();
+        }
       }
     }, onError: (_) {
       if (mounted) setState(() => _tilt = Offset.zero);
@@ -50,6 +92,7 @@ class _Live2DPreviewState extends State<Live2DPreview> {
   @override
   void dispose() {
     _events?.cancel();
+    _ticker.dispose();
     super.dispose();
   }
 

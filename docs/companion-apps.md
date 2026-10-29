@@ -14,7 +14,7 @@ Windows 창을 닫으면 트레이에서 계속 실행합니다. 트레이의 �
 
 ## 수집 범위와 인증
 
-수집은 OS 디스플레이 API로 수행합니다. 연결된 물리 화면 개수, 픽셀 해상도, 소수점 주사율, 배율, 회전, 위치, 주 화면, 연결 상태와 제조사·모델·OS 버전·CPU 구조·연결 앱 버전을 보고합니다. Android의 홈/잠금은 한 물리 화면의 적용 대상이며 화면 개수에 중복 계산하지 않습니다. 화면을 꺼도 연결된 물리 화면으로 유지합니다. Android 외부 디스플레이는 공개 WallpaperManager API로 개별 적용할 수 없어 **정보 조회 전용**으로 보고하고 웹/API에서 적용을 차단합니다.
+수집은 OS 디스플레이 API로 수행합니다. 기기 이름·모니터 이름, 연결된 물리 화면 개수, 픽셀 해상도, 소수점 주사율, 배율, 회전, 위치, 주 화면, 연결 상태와 OS 버전·연결 앱 버전을 보고합니다. 제조사·모델·CPU 구조는 수집하거나 표시하지 않습니다. Android의 홈/잠금은 한 물리 화면의 적용 대상이며 화면 개수에 중복 계산하지 않습니다. 화면을 꺼도 연결된 물리 화면으로 유지합니다. Android 외부 디스플레이는 공개 WallpaperManager API로 개별 적용할 수 없어 **정보 조회 전용**으로 보고하고 웹/API에서 적용을 차단합니다.
 
 이 앱이 적용한 배경화면은 결과물 ID와 OS의 적용 식별자를 대조합니다. 다른 프로그램/사용자가 바꾼 배경화면은 External/Unavailable로 보고합니다. 외부 배경화면의 원본 사진, 로컬 경로, 다른 앱 목록, MAC 주소와 일련번호는 수집·전송하지 않습니다. Windows 모니터의 로컬 장치 경로는 안정적인 해시로 바꾸어 전송합니다.
 
@@ -32,7 +32,11 @@ Windows 창을 닫으면 트레이에서 계속 실행합니다. 트레이의 �
 
 ## 빌드와 다운로드 배포
 
-APK 버전/빌드 번호는 `AGENTS.md`, `mobile/pubspec.yaml`, `mobile/README.md`를 함께 갱신합니다. 공유 서명 설정은 Git 밖 파일을 지정하고 `apksigner verify --print-certs`로 반드시 검증합니다. 최신 APK는 **1.0.2+32**, Windows 앱은 **1.0.2**입니다.
+APK 버전/빌드 번호는 `AGENTS.md`, `mobile/pubspec.yaml`, `mobile/README.md`를 함께 갱신합니다. 공유 서명 설정은 Git 밖 파일을 지정하고 `apksigner verify --print-certs`로 반드시 검증합니다. 최신 APK는 **1.2.2+36**, Windows 앱은 **1.2.2**입니다. 1.2.2는 제조사·모델·CPU 구조 수집을 제거하며 기기 이름·OS·화면 해상도·주사율은 유지합니다. 신규 Android 기기는 OS에 설정된 이름으로 등록하며 이름을 읽을 수 없을 때만 일반 이름을 사용합니다.
+
+1.2.1은 Windows 11의 raised desktop에서 동적 창을 정적 WorkerW 내부 대신 아이콘 아래·시스템 배경 위의 불투명 layered child로 연결합니다. 테마 변경 후 순서를 재확인하며 마우스의 가로 움직임은 웹과 같은 방향으로 적용합니다. 트레이에서 이전 앱을 종료하고 새 EXE를 실행한 뒤 다시 적용합니다. Android는 gyroEnabled 설정에 따라 센서를 구독하며, 회전 벡터가 없는 기기는 원시 자이로를 사용합니다. 캐시된 레이어도 최신 입력 설정을 반영하고 실행 엔진에 갱신을 알립니다. Android APK 인증서는 이전 정식 릴리스와 동일합니다. 실기기별 OS·센서 확인은 설치 후 필요합니다.
+
+1.2.0은 웹의 **배경화면 삭제** 명령을 지원합니다. Windows는 선택 모니터의 OS 배경화면을 해제하고 경로가 비워진 것을 확인한 뒤 해당 Live 창을 종료합니다. Android는 선택 Home/Lock의 WallpaperManager 초기화 API를 호출하고 완료 영수증을 저장합니다. 다른 화면과 내 이미지 라이브러리는 유지합니다. 서버는 기기의 Applied 보고 후에만 삭제 완료를 표시합니다. 기존 앱은 업데이트하고 연결 상태를 새로 보고해야 삭제 버튼이 활성화됩니다. Android APK 인증서는 1.1.0과 동일함을 확인했습니다. 실제 기기에서 OS별 삭제 동작은 설치 후 확인해야 합니다.
 
 ```powershell
 $env:UPSCALE_SIGNING_PROPERTIES_FILE = 'C:\UpscaleLab-Secrets\key.properties'
@@ -45,10 +49,12 @@ $env:UPSCALE_SIGNING_PROPERTIES_FILE = 'C:\UpscaleLab-Secrets\key.properties'
 
 ## 백엔드와 DB
 
-`20261027034626_AddCompanionInventory`는 devices에 Manufacturer/Model/Architecture, device_displays에 RefreshRateHz/CanApplyWallpaper를 추가합니다. 주사율 미보고는 null이며 기존 화면의 적용 가능 기본값은 true입니다. heartbeat 선택 필드를 생략하는 기존 클라이언트와 호환됩니다. 잘못된 주사율·기기 정보는 상태 변경 전에 검증합니다. 정보 조회 전용 화면은 적용 요청을 거부합니다.
+`20261027034626_AddCompanionInventory`가 추가했던 devices의 Manufacturer/Model/Architecture 열은 스키마 호환을 위해 남아 있지만 신규 값을 저장하지 않습니다. 기존 값은 다음 유효 heartbeat에서 비우며 구형 앱의 해당 필드는 무시합니다. device_displays의 RefreshRateHz/CanApplyWallpaper는 유지합니다. 주사율 미보고는 null이며 기존 화면의 적용 가능 기본값은 true입니다. 잘못된 주사율·기기 정보는 상태 변경 전에 검증합니다. 정보 조회 전용 화면은 적용 요청을 거부합니다.
+
+기기 관리의 최근 적용 내역, 웹 기록 저장·조회 코드와 계정용 내역 조회 API는 제거했습니다. 기기 명령 저장은 전달·재시도·중복 요청 방지·현재 적용 결과물 복구에 사용합니다. 웹은 기기 state의 실제 배경화면·대기 상태만 조회합니다.
 
 `backend/tools/UpscaleLab.DatabaseTool`은 운영자가 명시적으로 실행하는 유지보수 도구입니다. `status`로 대상 DB/소유자와 미적용 migration을 확인하고, `apply-companion /absolute/backup.dump`는 새 migration 하나만 남아 있을 때 `pg_dump` 전체 백업을 완료한 뒤 적용합니다. DB 자격은 서비스와 같은 보안 환경 공급자로만 받으며 명령행 인수나 로그에 출력하지 않습니다. API 시작 시 자동 migration이나 자동 배포를 추가하지 않습니다.
 
 관련 규격: [agent API](agent-api.md). 플랫폼 문서: [Windows IDesktopWallpaper](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-idesktopwallpaper), [Android Display.Mode](https://developer.android.com/reference/android/view/Display.Mode), [Android specialUse foreground service](https://developer.android.com/develop/background-work/services/fgs/service-types#special-use).
 
-검증: 백엔드 101건(실제 HTTP 명령 전달·완료 보고와 계정/기기 분리 포함), Windows 계정·기기 자격 테스트 7건, Android 앱 자체 테스트 61건, 웹 및 클라우드 HTTP 점검 42건을 통과했습니다. Windows 실제 모니터에서 1920×1080/60 Hz 정보를 읽었으며 다운로드 파일은 서명 검증한 APK/실행 가능한 EXE 헤더·바이트 크기·SHA-256을 대조합니다. 계정 로그인 후 실제 배경화면 변경은 실기기 통합 검증이 남아 있습니다. Android 전체 하위 프로젝트 테스트에서는 외부 image_picker 플러그인 10건이 테스트 리소스 누락으로 실패했으며, `:app:testDebugUnitTest`로 앱 자체 범위를 분리해 통과를 확인했습니다.
+현재 검증: 백엔드 190건, Windows 15건, Android 앱 자체 66건(`:app:testReleaseUnitTest`), 웹 및 운영 HTTPS 점검 54건을 통과했습니다. 삭제 요청·대기·완료 보고와 다른 화면 유지도 가상 기기로 확인했습니다. Android 전체 하위 프로젝트의 외부 image_picker 테스트 10건은 기존 리소스 누락으로 실패하며 앱 자체 범위는 통과했습니다. 실제 기기의 OS 배경화면 삭제는 새 앱 설치 후 통합 확인이 필요합니다. 배포 경로, 파일 해시와 검증 범위는 [기기 관리 배포 기록](device-management-deployment-20261028.md)에 정리했습니다.

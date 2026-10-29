@@ -1,4 +1,6 @@
 import type { Session } from "./auth";
+import type { Edit } from "./model";
+export type SavedEdit = Edit & { savedAt: string; tags?: string[] };
 declare global {
   interface Window {
     __UPSCALE_CONFIG__?: { apiBaseUrl?: string; mode?: "cloud" | "demo" };
@@ -102,11 +104,11 @@ async function parse<T>(response: Response): Promise<T> {
   }
   return response.status === 204 ? (undefined as T) : response.json();
 }
-export async function request<T>(
+async function requestResponse(
   path: string,
   init: RequestInit = {},
   authenticated = true,
-): Promise<T> {
+): Promise<Response> {
   const epoch = memoryEpoch;
   let response = await raw(path, init, authenticated);
   if (response.status === 401 && authenticated && tokens?.refreshToken) {
@@ -138,7 +140,15 @@ export async function request<T>(
   if (authenticated && response.status === 401) expire();
   if (authenticated && epoch !== memoryEpoch)
     throw new ApiError(401, "세션이 종료되었습니다.");
-  return parse<T>(response);
+  return response;
+}
+export async function request<T>(path: string, init: RequestInit = {}, authenticated = true): Promise<T> {
+  return parse<T>(await requestResponse(path, init, authenticated));
+}
+export async function requestBlob(path: string): Promise<Blob> {
+  const response = await requestResponse(path, { signal: AbortSignal.timeout(180000) });
+  if (!response.ok) await parse(response);
+  return response.blob();
 }
 export async function cloudLogin(
   email: string,
@@ -210,6 +220,10 @@ export type ApiLayer = {
   movementY: number;
 };
 export type Project = {
+  isDraft?: boolean;
+  features?: string[];
+  imageResult?: { jobId: string; imageUrl: string; width: number; height: number } | null;
+  edit?: SavedEdit;
   id: string;
   title: string;
   status: string;
@@ -223,6 +237,7 @@ export type Project = {
   originalContentType?: string;
 };
 export type Job = {
+  targetLongEdge?: number | null;
   jobId: string;
   status: string;
   progress: number;
@@ -236,6 +251,8 @@ export type Asset = {
   userId?: string;
   username?: string;
   profileImageUrl?: string | null;
+  features?: string[];
+  edit?: SavedEdit;
   id: string;
   title: string;
   mode: string;
@@ -263,9 +280,8 @@ export type CloudState = {
   platform: "Windows" | "Android";
   recentlySeen: boolean;
   isLinked: boolean;
-  manufacturer?: string;
-  model?: string;
-  architecture?: string;
+  lastSeenAt?: string | null;
+  supportsWallpaperRemoval?: boolean;
   displays: {
     id: string;
     name: string;
@@ -280,14 +296,7 @@ export type CloudState = {
       desiredAssetId?: string;
       reportedAssetId?: string;
       observation: string;
+      pendingRemoval?: boolean;
     }[];
   }[];
-};
-export type CloudCommand = {
-  id: string;
-  displayId: string;
-  assetId: string;
-  target: string;
-  status: string;
-  error?: string;
 };

@@ -3,11 +3,14 @@ using UpscaleLab.Application.Projects;
 
 namespace UpscaleLab.Application.Processing;
 
-public sealed record LayerProcessingRequest(string InputPath, string OutputDirectory);
+public sealed record LayerProcessingRequest(string InputPath, string OutputDirectory, Guid JobId = default,
+    Func<int, CancellationToken, Task>? ReportProgress = null);
 
-public sealed record ProcessProjectRequest(ProcessingOperation Operation = ProcessingOperation.Layers, int UpscaleFactor = 2);
+public sealed record ProcessProjectRequest(ProcessingOperation Operation = ProcessingOperation.Layers, int UpscaleFactor = 2,
+    int? TargetLongEdge = null);
 public sealed record ProjectProcessingRequest(string InputPath, string OutputDirectory, ProcessingOperation Operation,
-    int UpscaleFactor, Guid JobId = default);
+    int UpscaleFactor, Guid JobId = default, int? TargetLongEdge = null,
+    Func<int, CancellationToken, Task>? ReportProgress = null);
 public sealed record ProjectProcessingResult(IReadOnlyList<ProcessedLayer> Layers, string? ImagePath, int Width, int Height);
 
 // The cloud integration owner implements this boundary; no provider credentials reach clients.
@@ -31,6 +34,7 @@ public sealed record ProcessedLayer(
 
 public interface IImageLayerProcessor
 {
+    bool IsConfigured => true;
     Task<IReadOnlyList<ProcessedLayer>> ProcessAsync(LayerProcessingRequest request, CancellationToken cancellationToken);
 }
 

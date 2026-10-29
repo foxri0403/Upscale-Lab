@@ -41,9 +41,10 @@ public sealed class DevicesController(IDeviceService deviceService, IDeviceContr
         Accepted(await control.ApplyAsync(User.GetRequiredUserId(), id, request, ct));
 
     [Authorize(Policy = "AccountSession")]
-    [HttpGet("{id:guid}/commands")]
-    public async Task<ActionResult<IReadOnlyList<DeviceCommandResponse>>> Commands(Guid id, CancellationToken ct) =>
-        Ok(await control.GetCommandsAsync(User.GetRequiredUserId(), id, false, ct));
+    [HttpPost("{id:guid}/wallpapers/clear")]
+    public async Task<ActionResult<DeviceCommandResponse>> Clear(Guid id, ClearWallpaperRequest request, CancellationToken ct) =>
+        Accepted(await control.ClearAsync(User.GetRequiredUserId(), id, request, ct));
+
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<DeviceResponse>>> GetAll(CancellationToken cancellationToken)
     {

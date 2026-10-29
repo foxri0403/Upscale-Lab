@@ -7,6 +7,7 @@ public sealed class ProcessingJob : BaseEntity
     public Guid ProjectId { get; set; }
     public ProcessingOperation Operation { get; set; } = ProcessingOperation.Layers;
     public int UpscaleFactor { get; set; } = 2;
+    public int? TargetLongEdge { get; set; }
     public string? ResultObjectKey { get; set; }
     public int ResultWidth { get; set; }
     public int ResultHeight { get; set; }

@@ -92,12 +92,12 @@ class _CompanionPageState extends State<CompanionPage> {
           if (busy) const LinearProgressIndicator(),
           if (error != null) Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
           const SizedBox(height: 24), Text('이 기기의 화면 ${displays.length}개', style: Theme.of(context).textTheme.titleLarge),
-          Text('${state['manufacturer'] ?? ''} ${state['model'] ?? ''} · ${state['osVersion'] ?? ''}'),
+          Text(state['osVersion'] as String? ?? ''),
           ...displays.map((raw) { final d = raw as Map; final hz = d['refreshRateHz'] as num?;
             return Card(child: ListTile(leading: const Icon(Icons.screenshot_monitor), title: Text(d['name'] as String? ?? '화면'),
               subtitle: Text('${d['width']} × ${d['height']}${hz == null ? '' : ' · ${hz.toStringAsFixed(2)} Hz'}${d['canApply'] == true ? '' : ' · 정보 조회 전용'}')));
           }),
-          const SizedBox(height: 24), const Text('수집 정보: 연결된 화면 개수·해상도·주사율·회전·연결 상태, 제조사·모델·OS·CPU 구조 및 이 앱이 적용한 배경화면의 식별 정보. 외부 배경화면 사진과 다른 앱 목록은 전송하지 않습니다.', style: TextStyle(fontSize: 13, color: Colors.black54)),
+          const SizedBox(height: 24), const Text('수집 정보: 연결된 화면 개수·해상도·주사율·회전·연결 상태, OS 및 이 앱이 적용한 배경화면의 식별 정보. 외부 배경화면 사진과 다른 앱 목록은 전송하지 않습니다.', style: TextStyle(fontSize: 13, color: Colors.black54)),
           const SizedBox(height: 16), const Text('로그아웃하면 동기화를 중지합니다. 이미 적용한 정적 배경화면은 유지되며 Live 2D 움직임은 중지됩니다.', style: TextStyle(fontSize: 13, color: Colors.black54)),
         ]),
       ))));

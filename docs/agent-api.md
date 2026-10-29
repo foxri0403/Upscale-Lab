@@ -2,6 +2,8 @@
 
 ## 인증
 
+Live 2D manifest에는 선택적인 `motionEnabled` boolean을 추가했다. 생략한 기존 manifest는 true로 처리한다. false이면 같은 레이어를 중앙 위치에 합성하되 센서 구독과 지속 프레임 갱신을 중단한다. `POST /api/wallpapers/{id}/snapshot`은 소유자만 호출할 수 있으며 `{ "motionEnabled": false, "strength": 35 }`로 새 불변 결과물을 생성한다. 원래 결과물이나 기존 기기 적용은 수정하지 않는다.
+
 계정과 기기를 함께 검증한다. 에이전트의 모든 `/api/agent/*` 요청은 다음 두 헤더가 필요하다.
 
 ```http
@@ -25,7 +27,7 @@ JWT `sid`의 서버 로그인 세션이 유효하고, 이메일 인증 계정이
 | DELETE | `/api/devices/{id}/agent-token` | 기기 연결 해제, 대기 명령 대체 처리 |
 | GET | `/api/devices/{id}/state` | 화면 목록, 지원 기능, 마지막 통신, 적용 요청/실제 관측 상태 |
 | POST | `/api/devices/{id}/commands` | 내 결과물을 연결된 내 화면에 적용 요청 |
-| GET | `/api/devices/{id}/commands` | 최근 명령 최대 100개 |
+| POST | `/api/devices/{id}/wallpapers/clear` | 선택 화면의 배경화면 삭제 요청. 최신 연결 앱 필요 |
 | GET/POST | `/api/wallpapers` | 내 결과물 최대 100개/불변 결과물 생성 |
 | GET | `/api/wallpapers/shared` | 공개 결과물 최대 100개. 익명 허용 |
 | GET | `/api/wallpapers/{id}/manifest` | 소유자 또는 공개 결과물의 다운로드 URL과 렌더링 설정 |
@@ -57,6 +59,7 @@ Windows는 `Desktop`, Android는 `Home` 또는 지원하는 경우 `Lock`이다.
 | GET | `/api/agent/updates?after=<cursor>` | 이 기기의 새 명령·연결 해제 알림 대기. 계정 JWT와 기기 키 모두 필요 |
 | POST | `/api/agent/heartbeat` | 화면/기기 전체 스냅샷 보고 |
 | GET | `/api/agent/commands` | 재시도 가능한 최신 대기/다운로드/사용자 확인 명령 |
+| GET | `/api/agent/commands/{id}` | 최신 sequence·유효기간·연결 상태를 검증한 명령. 삭제 직전 재확인 |
 | GET | `/api/agent/commands/{id}/manifest` | 해당 명령의 파일 URL 갱신. 현재 적용 완료 명령의 복구도 허용 |
 | POST | `/api/agent/commands/{id}/report` | 명령 처리 결과 보고 |
 
@@ -87,11 +90,15 @@ Heartbeat 예:
 }
 ```
 
-화면은 최대 16개이며 `nativeId`는 같은 설치 내에서 동일 화면을 식별하는 안정적인 값이어야 한다. heartbeat의 선택 필드 `manufacturer`, `model`은 최대 120자, `architecture`는 최대 32자다. 각 display의 `refreshRateHz`는 null 또는 1~1000의 유한한 실수다(59.94 등 보존). `canApplyWallpaper`는 기본 true이며 Android 외부 화면처럼 조회만 지원하는 화면은 false로 보낸다. false인 화면의 적용 요청은 409로 거부한다. 이 필드들은 기기 state에도 포함된다. 주사율을 알 수 없을 때 60으로 추정하지 않고 null을 보낸다.
+화면은 최대 16개이며 `nativeId`는 같은 설치 내에서 동일 화면을 식별하는 안정적인 값이어야 한다. 제조사·모델·CPU 구조는 수집하거나 state에 포함하지 않는다. 구형 연결 앱이 전송하는 `manufacturer`, `model`, `architecture`는 무시하며 기존 저장값은 다음 유효 heartbeat에서 비운다. 각 display의 `refreshRateHz`는 null 또는 1~1000의 유한한 실수다(59.94 등 보존). `canApplyWallpaper`는 기본 true이며 Android 외부 화면처럼 조회만 지원하는 화면은 false로 보낸다. false인 화면의 적용 요청은 409로 거부한다. 화면 필드들은 기기 state에도 포함된다. 주사율을 알 수 없을 때 60으로 추정하지 않고 null을 보낸다.
 
 `revision`은 서버의 inventoryRevision보다 커야 한다. 에이전트 재시작 시 state를 읽고 다음 값을 사용하며 응답 유실/409 시 재조회한다. 키 회전 시 revision은 0으로 초기화된다. 누락된 화면은 disconnected로 남긴다. 해상도는 픽셀이며 물리 인치로 해석하지 않는다. Android Home/Lock은 화면 개수가 아니다.
 
-관측 상태는 `Unknown`, `Managed`, `External`, `Unavailable`이다. `Managed`일 때만 내 결과물 `assetId`가 필요하다. 외부 배경화면의 원본을 읽을 수 없으면 `Unavailable`을 보고한다. 보고하지 않은 대상의 이전 관측값은 마지막 관측 시각과 함께 남으므로 웹은 최신 확정값으로 표시하지 않아야 한다.
+관측 상태는 `Unknown`, `Managed`, `External`, `Unavailable`, `Cleared`이다. `Managed`일 때만 내 결과물 `assetId`가 필요하다. `Cleared`는 OS 배경화면 초기화를 확인한 상태이며 assetId가 없다. 외부 배경화면의 원본을 읽을 수 없으면 `Unavailable`을 보고한다. 보고하지 않은 대상의 이전 관측값은 마지막 관측 시각과 함께 남으므로 웹은 최신 확정값으로 표시하지 않아야 한다.
+
+배경화면 삭제는 `{ "requestId": "<새 uuid>", "displayId": "<화면 uuid>", "target": "Desktop" }`를 `POST /api/devices/{id}/wallpapers/clear`로 전송한다. Windows는 Desktop, Android는 Home/Lock을 각각 요청한다. `action: Clear`, `assetId: null`인 명령을 반환하며 이미지 manifest는 409로 거부한다. 삭제 대기 중 state의 `pendingRemoval`은 true이고 기존 실제 관측 이미지가 유지된다. 기기가 OS 삭제 성공 후 Applied를 보고해야 관측 이미지가 비워지고 Cleared로 전환된다. 실패하면 기존 관측 이미지를 유지한다. 이미지 라이브러리나 다른 화면은 삭제하지 않는다.
+
+연결 앱 1.2.0부터 heartbeat에 `supportsWallpaperRemoval: true`를 보내며 state에도 해당 지원 여부가 포함된다. 생략한 기존 앱은 false로 처리하고 삭제 요청을 거부하며 삭제 명령을 전달하지 않는다. 키 회전·폐기 시 지원 여부를 초기화하므로 새 heartbeat가 필요하다. 명령의 `action`은 Apply/Clear이며 생략한 기존 응답은 Apply로 처리한다. Clear 실행 전에는 state의 대상 sequence·desiredAssetId(null) 및 `GET /api/agent/commands/{id}`를 재검증한다. 두 계정/기기 자격은 삭제에도 동일하게 필요하다.
 
 명령 상태 보고 예:
 
@@ -105,7 +112,11 @@ Heartbeat 예:
 
 응답은 camelCase, enum은 문자열이다. `schemaVersion: 1`, `assetId`, `mode`, `width`, `height`, `files`, `urlsExpireAt`를 제공한다. 각 file의 `source`는 15분짜리 서명 URL이며 저장된 DB manifest에는 S3 object key만 있다. URL을 영구 저장하지 말고 bytes를 로컬에 캐시한다. 공유 해제/로그아웃으로 이미 발급한 S3 URL의 남은 유효기간을 취소하지는 못한다.
 
-파일은 `order` 오름차순으로 합성한다. `role`은 정적 이미지의 `image` 또는 기존 LayerType(`Background`, `Body`, `Hair` 등)이다. PNG 레이어는 공통 width/height 캔버스를 사용한다. `x/y`는 원본 캔버스 중심 기준 이동량(px), rotation은 시계 방향 도, scale은 배율이다. 먼저 cover 배율 `s = max(표시너비/width, 표시높이/height)`를 구하고 x/y와 movementX/Y에 s를 곱해 기기 픽셀로 변환한다. 시차 입력은 자이로 ±30도 또는 미리보기 영역 중심으로부터의 마우스/터치를 [-1, 1]로 제한한다. Background는 시차를 적용하지 않고 전경의 X는 -입력X*movementX*s, Y는 입력Y*movementY*s를 더한다. depth는 편집 메타데이터이며 별도로 이동량에 다시 곱하지 않는다. 기존 Android의 3.5% 고정 이동 규칙과 로컬 manifest는 그대로 남으므로 후속 에이전트 어댑터에서 이 공통 규격을 읽도록 연결해야 한다.
+1.2.1부터 manifest에 선택적인 `mouseEnabled`, `gyroEnabled`가 포함된다. `motionEnabled`는 전체 스위치이고 Windows는 mouseEnabled, Android는 gyroEnabled를 사용한다. 두 필드가 모두 없거나 null인 기존 manifest는 기존 motionEnabled 동작을 따른다. 예전 저장 결과물에 개별 입력 메타데이터가 있으면 응답에서 해당 설정을 보완하며 원본 JSON은 변경하지 않는다. 캐시된 픽셀을 재사용하더라도 새 manifest의 입력 설정은 갱신한다.
+
+배경 분리 결과의 Create/Snapshot 요청은 선택적인 `render: { strength, filter, crop, scale, foreground }`를 받는다. 서버가 각 레이어를 독립적으로 자르고 필터·배율을 반영해 알파 채널을 보존한다. 강도는 최종 캔버스의 3.5%에 0~100 비율을 곱한다. 원본 프로젝트의 공용 레이어 이동량을 수정하지 않는다. 결과물의 편집 메타데이터는 이미 적용한 필터·자르기·배율을 초기화해 중복 적용을 방지한다. wire mode의 Live2D는 기존 레이어 운송 규격 이름이며 별도 제품 Live 2D 기능을 활성화하지 않는다.
+
+파일은 `order` 오름차순으로 합성한다. `role`은 정적 이미지의 `image` 또는 기존 LayerType(`Background`, `Body`, `Hair` 등)이다. PNG 레이어는 공통 width/height 캔버스를 사용한다. `x/y`는 원본 캔버스 중심 기준 이동량(px), rotation은 시계 방향 도, scale은 배율이다. 먼저 cover 배율 `s = max(표시너비/width, 표시높이/height)`를 구하고 x/y와 movementX/Y에 s를 곱해 기기 픽셀로 변환한다. 시차 입력은 자이로 ±30도 또는 미리보기 영역 중심으로부터의 마우스/터치를 [-1, 1]로 제한한다. Background는 시차를 적용하지 않고 Windows 1.2.1의 마우스는 X에 입력X*movementX*s를 더하고 Android 센서는 X에 -입력X*movementX*s를 더한다. 두 플랫폼의 Y에는 입력Y*movementY*s를 더한다. depth는 편집 메타데이터이며 별도로 이동량에 다시 곱하지 않는다. 기존 Android의 3.5% 고정 이동 규칙과 로컬 manifest는 그대로 남으므로 후속 에이전트 어댑터에서 이 공통 규격을 읽도록 연결해야 한다.
 
 일반 다운로드는 manifest의 파일 URL을 이용한다. Live 2D 내보내기는 클라이언트가 manifest와 PNG를 묶고 로컬 파일명으로 URL을 치환한다. 서버 ZIP 생성 API는 이번 범위에 없다.
 

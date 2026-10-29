@@ -65,7 +65,7 @@ These are expected to come from local user secrets, environment variables, or a 
 
 ## Mobile versioning
 
-- Current APK version: **1.0.2** (Android build **32**, immediate device updates and wallpaper reuse fixes). Keep only this latest version entry; replace it after every generated APK and never append a version history here.
+- Current APK version: **1.2.2** (Android build **36**, remove manufacturer/model/CPU architecture collection and display). Keep only this latest version entry; replace it after every generated APK and never append a version history here.
 - Use semantic version numbers in `major.minor.patch` form for every new APK release.
 - Increase the first number (`major`) by exactly 1 for a large feature or major product update.
 - Increase the second number (`minor`) by exactly 1 for a smaller feature update.

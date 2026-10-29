@@ -309,7 +309,7 @@ class ApiClient {
     _ensureSuccess(response);
   }
 
-    // GPU 업스케일링 시작 (2배 또는 4배)
+  // GPU 업스케일링 시작 (2배 또는 4배)
   Future<void> startUpscaling(String projectId, {required int scale}) async {
     if (scale != 2 && scale != 4) {
       throw ArgumentError('업스케일 배율은 2 또는 4만 가능합니다.');
@@ -334,8 +334,7 @@ class ApiClient {
     );
     _ensureSuccess(response);
 
-    return jsonDecode(utf8.decode(response.bodyBytes))
-        as Map<String, dynamic>;
+    return jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
   }
 
   // GPU 처리 완료까지 대기
@@ -343,6 +342,14 @@ class ApiClient {
     String projectId, {
     Duration interval = const Duration(seconds: 2),
     int maxAttempts = 120,
+  }) =>
+      waitForProcessing(projectId,
+          interval: interval, maxAttempts: maxAttempts);
+
+  Future<Map<String, dynamic>> waitForProcessing(
+    String projectId, {
+    Duration interval = const Duration(seconds: 2),
+    int maxAttempts = 480,
   }) async {
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       final result = await getProcessingStatus(projectId);
@@ -355,9 +362,7 @@ class ApiClient {
       if (status == 'Failed' || status == '3') {
         final message = result['errorMessage']?.toString();
         throw StateError(
-          message == null || message.isEmpty
-              ? '업스케일링에 실패했습니다.'
-              : message,
+          message == null || message.isEmpty ? '클라우드 이미지 처리에 실패했습니다.' : message,
         );
       }
 
@@ -366,7 +371,7 @@ class ApiClient {
       }
     }
 
-    throw StateError('업스케일링 처리 시간이 초과되었습니다.');
+    throw StateError('클라우드 이미지 처리 시간이 초과되었습니다.');
   }
 
   // 업스케일링 결과 다운로드 URL

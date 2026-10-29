@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using UpscaleLab.Application.Common;
 using UpscaleLab.Application.Devices;
@@ -33,7 +34,7 @@ public sealed class DeviceControlServiceTests
         }
         await using var restarted = new UpscaleLab.Infrastructure.Database.ApplicationDbContext(options);
         var restored = new DeviceControlService(restarted, new WorkflowClock());
-        Assert.Equal(commandId, (await restored.GetCommandsAsync(userId, deviceId, true, Ct)).Single().Id);
+        Assert.Equal(commandId, (await restored.GetPendingCommandsAsync(userId, deviceId, Ct)).Single().Id);
         await Assert.ThrowsAsync<NotFoundException>(() => restored.ReportAsync(new(otherId, userId), commandId, new(DeviceCommandStatus.Applied), Ct));
     }
 
@@ -55,12 +56,7 @@ public sealed class DeviceControlServiceTests
         var identity = new AgentIdentity(device.Id, device.UserId);
         var state = await service.HeartbeatAsync(identity, Inventory(1,
             Screen() with { RefreshRateHz = 59.94005994 },
-            Screen("external") with { RefreshRateHz = 144, CanApplyWallpaper = false }) with {
-                Manufacturer = "Maker", Model = "Model", Architecture = "Arm64"
-            }, Ct);
-        Assert.Equal("Maker", state.Manufacturer);
-        Assert.Equal("Model", state.Model);
-        Assert.Equal("Arm64", state.Architecture);
+            Screen("external") with { RefreshRateHz = 144, CanApplyWallpaper = false }), Ct);
         Assert.Equal(59.94005994, state.Displays.Single(d => d.NativeId == "monitor-1").RefreshRateHz);
         var external = state.Displays.Single(d => d.NativeId == "external");
         Assert.False(external.CanApplyWallpaper);
@@ -80,12 +76,40 @@ public sealed class DeviceControlServiceTests
         var service = new DeviceControlService(db, new WorkflowClock());
         await service.RotateTokenAsync(device.UserId, device.Id, Ct);
         var identity = new AgentIdentity(device.Id, device.UserId);
-        await service.HeartbeatAsync(identity, Inventory(1, Screen() with { RefreshRateHz = 120 }) with { Model = "Before" }, Ct);
+        await service.HeartbeatAsync(identity, Inventory(1, Screen() with { RefreshRateHz = 120 }), Ct);
         await Assert.ThrowsAsync<ValidationException>(() => service.HeartbeatAsync(identity,
-            Inventory(2, Screen() with { RefreshRateHz = rate }) with { Model = "After" }, Ct));
+            Inventory(2, Screen() with { RefreshRateHz = rate }), Ct));
         var state = await service.GetStateAsync(device.UserId, device.Id, Ct);
-        Assert.Equal(1, state.InventoryRevision); Assert.Equal("Before", state.Model);
+        Assert.Equal(1, state.InventoryRevision);
         Assert.Equal(120, state.Displays.Single().RefreshRateHz);
+    }
+
+    [Fact]
+    public async Task LegacyHardwareMetadata_IsIgnoredClearedAndExcludedFromState()
+    {
+        await using var db = WorkflowData.Db();
+        var device = WorkflowData.Device(Guid.NewGuid());
+        device.Manufacturer = "Old maker"; device.Model = "Old model"; device.Architecture = "X64";
+        db.Add(device); await db.SaveChangesAsync();
+        var service = new DeviceControlService(db, new WorkflowClock());
+        await service.RotateTokenAsync(device.UserId, device.Id, Ct);
+        var json = System.Text.Json.JsonSerializer.SerializeToElement(new {
+            Revision = 1, OsVersion = "Windows", AgentVersion = "legacy", SupportsLive2D = false,
+            SupportsLockScreen = false, Displays = new[] { Screen() },
+            Manufacturer = "System manufacturer", Model = "System Product Name", Architecture = "X64"
+        });
+        var request = json.Deserialize<AgentHeartbeat>()!;
+        var state = await service.HeartbeatAsync(new(device.Id, device.UserId), request, Ct);
+        db.ChangeTracker.Clear();
+        var stored = await db.Devices.SingleAsync();
+        Assert.Empty(stored.Manufacturer); Assert.Empty(stored.Model); Assert.Empty(stored.Architecture);
+        foreach (var response in new[] { state, await service.GetStateAsync(device.UserId, device.Id, Ct) })
+        {
+            var result = System.Text.Json.JsonSerializer.SerializeToElement(response);
+            Assert.False(result.TryGetProperty("Manufacturer", out _));
+            Assert.False(result.TryGetProperty("Model", out _));
+            Assert.False(result.TryGetProperty("Architecture", out _));
+        }
     }
 
     [Fact]
@@ -143,7 +167,7 @@ public sealed class DeviceControlServiceTests
         Assert.Null((await service.GetStateAsync(device.UserId, device.Id, Ct)).Displays.Single().Wallpapers.Single().ReportedAssetId);
         var latest = await service.ApplyAsync(device.UserId, device.Id, request with { RequestId = Guid.NewGuid() }, Ct);
         await Assert.ThrowsAsync<ConflictException>(() => service.ReportAsync(agent, first.Id, new(DeviceCommandStatus.Applied), Ct));
-        Assert.Equal(latest.Id, (await service.GetCommandsAsync(device.UserId, device.Id, true, Ct)).Single().Id);
+        Assert.Equal(latest.Id, (await service.GetPendingCommandsAsync(device.UserId, device.Id, Ct)).Single().Id);
         await service.ReportAsync(agent, latest.Id, new(DeviceCommandStatus.NeedsUserAction), Ct);
         Assert.Null((await service.GetStateAsync(device.UserId, device.Id, Ct)).Displays.Single().Wallpapers.Single().ReportedAssetId);
         await service.ReportAsync(agent, latest.Id, new(DeviceCommandStatus.Applied), Ct);
@@ -151,7 +175,7 @@ public sealed class DeviceControlServiceTests
         Assert.Equal(asset.Id, applied.ReportedAssetId);
         Assert.Equal(WallpaperObservation.Managed, applied.Observation);
         Assert.Equal(DeviceCommandStatus.Applied, (await service.ReportAsync(agent, latest.Id, new(DeviceCommandStatus.Applied), Ct)).Status);
-        Assert.Empty(await service.GetCommandsAsync(device.UserId, device.Id, true, Ct));
+        Assert.Empty(await service.GetPendingCommandsAsync(device.UserId, device.Id, Ct));
     }
 
     [Fact]
@@ -173,7 +197,7 @@ public sealed class DeviceControlServiceTests
         var command = await service.ApplyAsync(device.UserId, device.Id, request, Ct);
         await Assert.ThrowsAsync<ConflictException>(() => service.ApplyAsync(device.UserId, device.Id, request with { AssetId = foreign.Id }, Ct));
         clock.Time = clock.Time.AddDays(2);
-        Assert.Empty(await service.GetCommandsAsync(device.UserId, device.Id, true, Ct));
+        Assert.Empty(await service.GetPendingCommandsAsync(device.UserId, device.Id, Ct));
         Assert.Equal(DeviceCommandStatus.Expired, (await db.DeviceCommands.SingleAsync()).Status);
         await Assert.ThrowsAsync<ConflictException>(() => service.GetCommandAssetAsync(agent, command.Id, Ct));
     }

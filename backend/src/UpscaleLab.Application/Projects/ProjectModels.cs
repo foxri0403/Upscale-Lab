@@ -1,9 +1,11 @@
 using System.ComponentModel.DataAnnotations;
 using UpscaleLab.Domain.Enums;
+using UpscaleLab.Application.Images;
 
 namespace UpscaleLab.Application.Projects;
 
 public sealed record RenameProjectRequest([param: Required, MaxLength(160)] string Title);
+public sealed record ResetProjectEffectsRequest(string Feature = "All");
 
 public sealed record CreateProjectCommand(
     Stream Content,
@@ -11,7 +13,8 @@ public sealed record CreateProjectCommand(
     [param: Required, MaxLength(100)] string ContentType,
     [param: Required, MaxLength(160)] string Title,
     [param: Range(1, 32768)] int OriginalWidth,
-    [param: Range(1, 32768)] int OriginalHeight);
+    [param: Range(1, 32768)] int OriginalHeight,
+    bool IsDraft = false);
 
 public sealed record ProjectSummaryResponse(
     Guid Id,
@@ -22,7 +25,11 @@ public sealed record ProjectSummaryResponse(
     string? FailureReason,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    string? OriginalContentType = null);
+    string? OriginalContentType = null,
+    ImageEditState? Edit = null,
+    int? OriginalWidth = null,
+    int? OriginalHeight = null,
+    ProjectImageResult? ImageResult = null, IReadOnlyList<string>? Features = null, bool IsDraft = false);
 
 public sealed record ProjectDetailResponse(
     Guid Id,
@@ -36,7 +43,11 @@ public sealed record ProjectDetailResponse(
     DateTime UpdatedAt,
     IReadOnlyList<LayerResponse> Layers,
     ProcessingStatusResponse? LatestJob,
-    string? OriginalContentType = null);
+    string? OriginalContentType = null,
+    ImageEditState? Edit = null,
+    ProjectImageResult? ImageResult = null, IReadOnlyList<string>? Features = null, bool IsDraft = false);
+
+public sealed record ProjectImageResult(Guid JobId, string ImageUrl, int Width, int Height);
 
 public sealed record LayerResponse(
     Guid Id,
@@ -76,4 +87,5 @@ public sealed record ProcessingStatusResponse(
     int UpscaleFactor = 2,
     bool HasImageResult = false,
     int ResultWidth = 0,
-    int ResultHeight = 0);
+    int ResultHeight = 0,
+    int? TargetLongEdge = null);

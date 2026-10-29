@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Picture } from "./model";
 import { Modal } from "./ui";
 import { imageFileFormat, imageResolution } from "./image-information";
+import { imageFeatures } from "./image-features";
 
 export function ImageInformation({ picture, layerCount, close }: {
   picture: Picture;
@@ -34,7 +35,7 @@ export function ImageInformation({ picture, layerCount, close }: {
         <div><dt>이미지 이름</dt><dd>{picture.name}</dd></div>
         <div><dt>해상도</dt><dd aria-live="polite">{resolution}</dd></div>
         <div><dt>파일 형식</dt><dd>{imageFileFormat(picture.src, picture.contentType)}</dd></div>
-        <div><dt>이미지 종류</dt><dd>{picture.kind || "정적 이미지"}</dd></div>
+        <div><dt>이용한 기능</dt><dd>{imageFeatures(picture).join(" · ") || "정적 이미지"}</dd></div>
         <div><dt>레이어</dt><dd>{layerCount}개</dd></div>
         <div><dt>등록일</dt><dd>{Number.isNaN(created.getTime()) ? "정보 없음"
           : created.toLocaleString("ko-KR")}</dd></div>

@@ -7,6 +7,7 @@ import { navigate, useRoute, Empty, Link } from "./ui";
 import "./styles.css";
 import { cloud, cloudMe, cloudLogout } from "./api";
 import { clearCloudCache } from "./cloud-store";
+import { SharedImage } from "./SharedImage";
 
 function Redirect({ to }: { to: string }) {
   useEffect(() => navigate(to, true), [to]);
@@ -62,6 +63,7 @@ function App() {
     setSession(null);
     navigate("/", true);
   }
+  if (path.startsWith("/share/")) return <SharedImage token={path.slice("/share/".length)} />;
   if (!ready)
     return (
       <main className="boot-screen">

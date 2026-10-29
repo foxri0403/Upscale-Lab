@@ -14,18 +14,24 @@ namespace UpscaleLab.Api.Controllers;
 [Route("api/projects")]
 public sealed class ProjectsController(
     IProjectService projectService,
-    IProjectProcessingService processingService) : ControllerBase
+    IProjectProcessingService processingService,
+    IProjectImageProcessor processor) : ControllerBase
 {
+    [HttpGet("capabilities")]
+    public IActionResult Capabilities() => Ok(new {
+        upscale = processor.Supports(UpscaleLab.Domain.Enums.ProcessingOperation.Upscale),
+        layers = processor.Supports(UpscaleLab.Domain.Enums.ProcessingOperation.Layers)
+    });
     [HttpPost]
     [Consumes("multipart/form-data")]
-    [RequestSizeLimit(25 * 1024 * 1024)]
+    [RequestSizeLimit(ImageFormatPolicy.MaxRequestBytes)]
     public async Task<ActionResult<ProjectDetailResponse>> Create(
         [FromForm] CreateProjectForm form,
         CancellationToken cancellationToken)
     {
-        if (form.File.Length <= 0)
+        if (form.File.Length <= 0 || form.File.Length > ImageFormatPolicy.MaxUploadBytes)
         {
-            return ValidationProblem("빈 파일은 업로드할 수 없습니다.");
+            return ValidationProblem("이미지는 0바이트 초과, 50MB 이하로 업로드해 주세요.");
         }
 
         if (!ImageFormatPolicy.TryResolveContentType(
@@ -46,7 +52,8 @@ public sealed class ProjectsController(
                 contentType,
                 form.Title,
                 form.OriginalWidth,
-                form.OriginalHeight),
+                form.OriginalHeight,
+                form.IsDraft),
             cancellationToken);
         return CreatedAtAction(nameof(Get), new { projectId = response.Id }, response);
     }
@@ -58,6 +65,14 @@ public sealed class ProjectsController(
     [HttpGet("{projectId:guid}")]
     public async Task<ActionResult<ProjectDetailResponse>> Get(Guid projectId, CancellationToken cancellationToken) =>
         Ok(await projectService.GetAsync(User.GetRequiredUserId(), projectId, cancellationToken));
+
+    [HttpGet("{projectId:guid}/content")]
+    public async Task<IActionResult> Content(Guid projectId, [FromQuery] Guid? jobId, [FromQuery] Guid? layerId, CancellationToken ct)
+    {
+        var content = await projectService.ReadContentAsync(User.GetRequiredUserId(), projectId, jobId, layerId, ct);
+        Response.Headers.CacheControl = "private, no-store";
+        return File(content.Bytes, content.ContentType);
+    }
 
     [HttpDelete("{projectId:guid}")]
     public async Task<IActionResult> Delete(Guid projectId, CancellationToken cancellationToken)
@@ -72,6 +87,21 @@ public sealed class ProjectsController(
         await projectService.RenameAsync(User.GetRequiredUserId(), projectId, request, ct);
         return NoContent();
     }
+
+    [HttpDelete("{projectId:guid}/draft")]
+    public async Task<IActionResult> DiscardDraft(Guid projectId, CancellationToken ct)
+    {
+        await projectService.DiscardDraftAsync(User.GetRequiredUserId(), projectId, ct);
+        return NoContent();
+    }
+
+    [HttpPut("{projectId:guid}/edit")]
+    public async Task<ActionResult<ImageEditState>> SaveEdit(Guid projectId, SaveImageEditRequest request, CancellationToken ct) =>
+        Ok(await projectService.SaveEditAsync(User.GetRequiredUserId(), projectId, request, ct));
+
+    [HttpPost("{projectId:guid}/effects/reset")]
+    public async Task<ActionResult<ProjectDetailResponse>> ResetEffects(Guid projectId, ResetProjectEffectsRequest request, CancellationToken ct) =>
+        Ok(await projectService.ResetEffectsAsync(User.GetRequiredUserId(), projectId, request, ct));
 
     [HttpPost("{projectId:guid}/process")]
     public async Task<ActionResult<ProcessingStatusResponse>> Process(

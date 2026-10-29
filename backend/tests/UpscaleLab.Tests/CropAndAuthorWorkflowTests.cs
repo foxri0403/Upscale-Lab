@@ -21,14 +21,15 @@ public sealed class CropAndAuthorWorkflowTests
         using var image=new MagickImage(MagickColors.Red,40,30);using var right=new MagickImage(MagickColors.Blue,20,30);image.Composite(right,20,0,CompositeOperator.Over);
         store.Files["bg.png"]=image.ToByteArray(MagickFormat.Png);using var fg=new MagickImage(MagickColors.Transparent,40,30);store.Files["fg.png"]=fg.ToByteArray(MagickFormat.Png);
         db.AddRange(owner,project);await db.SaveChangesAsync();var region=new ImageCropRegion(.5,0,.5,1);
-        var state=ImageEditState.Create(new(35,"original","custom",1,true,CropRegion:region));
-        Assert.Equal(region,ImageEditState.FromJson(state.ToJson())!.CropRegion);
+        var state=await new ProjectService(db,store).SaveEditAsync(owner.Id,project.Id,new(35,"original","custom",1,true,CropRegion:region),default);
+        db.ChangeTracker.Clear();Assert.Equal(region,(await new ProjectService(db,store).GetAsync(owner.Id,project.Id,default)).Edit!.CropRegion);
         var service=new WallpaperService(db,store,store);
         var asset=await service.CreateAsync(owner.Id,new(project.Id,"Crop",WallpaperMode.Live2D,Render:new(35,"original","custom",1,true,region)),default);
         var manifest=(await db.WallpaperAssets.SingleAsync(x=>x.Id==asset.Id)).ManifestJson;
         using var json=System.Text.Json.JsonDocument.Parse(manifest);Assert.Equal(20,json.RootElement.GetProperty("Width").GetInt32());Assert.Equal(30,json.RootElement.GetProperty("Height").GetInt32());
         var file=json.RootElement.GetProperty("Files")[0].GetProperty("Source").GetString()!;using var output=new MagickImage(store.Files[file]);
         Assert.Equal(20u,output.Width);Assert.Equal(30u,output.Height);using var pixels=output.GetPixels();Assert.Equal(MagickColors.Blue.ToString(),pixels.GetPixel(0,0).ToColor()!.ToString());
+        Assert.Null(asset.Edit!.CropRegion);Assert.Equal("original",asset.Edit.Crop);
     }
     [Fact]
     public async Task ExploreResponsesUseCurrentProfilePhotoAndPreserveVisibility()

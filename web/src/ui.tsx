@@ -1,15 +1,13 @@
 import { useEffect, useId, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { X, Layers3, LoaderCircle } from "lucide-react";
 import { filterStyle, type Picture } from "./model";
+export { navigate } from "./navigation";
+import { navigate } from "./navigation";
 
-export function navigate(path: string, replace = false) {
-  window.history[replace ? "replaceState" : "pushState"]({}, "", path);
-  window.dispatchEvent(new PopStateEvent("popstate"));
-  window.scrollTo(0, 0);
-}
 const subscribe = (callback: () => void) => {
   window.addEventListener("popstate", callback);
-  return () => window.removeEventListener("popstate", callback);
+  window.addEventListener("upscale:route", callback);
+  return () => { window.removeEventListener("popstate", callback); window.removeEventListener("upscale:route", callback); };
 };
 export function useRoute() {
   return useSyncExternalStore(
@@ -29,6 +27,7 @@ export function Link({
   return (
     <a
       href={to}
+      data-spa-link
       className={className}
       onClick={(e) => {
         if (!e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) {

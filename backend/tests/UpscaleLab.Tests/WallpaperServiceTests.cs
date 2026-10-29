@@ -15,6 +15,28 @@ public sealed class WallpaperServiceTests
     private static readonly CancellationToken Ct = CancellationToken.None;
 
     [Fact]
+    public async Task MotionOffSnapshotKeepsBothLayersAndCannotChangeAnotherUsersWallpaper()
+    {
+        await using var db = WorkflowData.Db(); var store = new WorkflowStore();
+        var project = WorkflowData.Project(Guid.NewGuid());
+        project.Layers.Add(new ImageLayer { LayerType = LayerType.Background, LayerOrder = 0, ObjectKey = "background.png" });
+        project.Layers.Add(new ImageLayer { LayerType = LayerType.Body, LayerOrder = 1, ObjectKey = "foreground.png", MovementX = 8, MovementY = 5 });
+        store.Files["background.png"] = [1]; store.Files["foreground.png"] = [2];
+        db.Add(project); await db.SaveChangesAsync(); var service = new WallpaperService(db, store, store);
+        var original = await service.CreateAsync(project.UserId, new(project.Id, "Layers", WallpaperMode.Live2D), Ct);
+        var disabled = await service.SnapshotAsync(project.UserId, original.Id, new(false, 35), Ct);
+        Assert.NotEqual(original.Id, disabled.Id);
+        var neutral = await service.GetManifestAsync(project.UserId, disabled.Id, false, Ct);
+        Assert.Equal(WallpaperMode.Live2D, neutral.Mode); Assert.False(neutral.MotionEnabled); Assert.Equal(2, neutral.Files.Count);
+        Assert.True((await service.GetManifestAsync(project.UserId, original.Id, false, Ct)).MotionEnabled);
+        Assert.False(disabled.Edit!.LiveEnabled);
+        Assert.DoesNotContain("Live 2D", disabled.Features!);
+        var enabled = await service.SnapshotAsync(project.UserId, disabled.Id, new(true, 80), Ct);
+        Assert.True((await service.GetManifestAsync(project.UserId, enabled.Id, false, Ct)).MotionEnabled);
+        await Assert.ThrowsAsync<NotFoundException>(() => service.SnapshotAsync(Guid.NewGuid(), original.Id, new(false, 35), Ct));
+    }
+
+    [Fact]
     public async Task UnchangedApplicationReusesSnapshotAcrossServiceInstancesButChangedPixelsCreateAVersion()
     {
         await using var db = WorkflowData.Db(); var store = new WorkflowStore();

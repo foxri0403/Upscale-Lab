@@ -20,7 +20,8 @@ sudo mkdir -p "$destination"
 sudo tar -xzf "$archive" -C "$destination"
 sudo test -f "$destination/index.html"
 sudo test -f "$destination/config.js"
-sudo chmod -R a+rX "$destination"
+sudo find "$destination" -type d -exec chmod 755 {} +
+sudo find "$destination" -type f -exec chmod 644 {} +
 rollback() {
   sudo cp "$backup/nginx.conf" "$nginx_config"
   if [ -n "$previous" ]; then

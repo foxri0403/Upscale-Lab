@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.Win32;
 
 namespace UpscaleLab.Companion;
 
@@ -34,7 +33,6 @@ internal static class DisplayInventory
     [DllImport("user32.dll")] private static extern IntPtr MonitorFromPoint(Point point, uint flags);
     [DllImport("shcore.dll")] private static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
     internal static IDesktopWallpaper Desktop() => (IDesktopWallpaper)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("C2CF3110-460E-4FC1-B9D0-8A1C0C9CC4BD"))!)!;
-    public static string Hardware(string name) { using var key = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\BIOS"); return (key?.GetValue(name)?.ToString() ?? "").Trim(); }
     private static List<(string Gdi, string Path, string Name, double? Rate, int Rotation)> Modes()
     {
         var result = new List<(string, string, string, double?, int)>();

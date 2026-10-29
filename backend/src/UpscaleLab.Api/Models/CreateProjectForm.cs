@@ -10,9 +10,10 @@ public sealed class CreateProjectForm
     [Required, MaxLength(160)]
     public string Title { get; init; } = string.Empty;
 
-    [Range(1, 32768)]
+    [Range(0, 32768)]
     public int OriginalWidth { get; init; }
 
-    [Range(1, 32768)]
+    [Range(0, 32768)]
     public int OriginalHeight { get; init; }
+    public bool IsDraft { get; init; }
 }

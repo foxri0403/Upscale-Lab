@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'models/image_editor.dart';
 import 'services/live_2d_service.dart';
+import 'services/api_client.dart';
 import 'widgets/live_2d_preview.dart';
 
 class Live2DPage extends StatefulWidget {
@@ -11,8 +12,10 @@ class Live2DPage extends StatefulWidget {
       this.crop = const Rect.fromLTWH(0, 0, 1, 1),
       this.filter = PhotoFilter.original,
       this.keepSourceLayers = false,
+      this.apiClient,
       this.initialDraft});
   final String sourcePath;
+  final ApiClient? apiClient;
   final Rect crop;
   final PhotoFilter filter;
   final Live2DDraft? initialDraft;
@@ -28,10 +31,12 @@ class _Live2DPageState extends State<Live2DPage> {
   bool _processing = true;
   String? _error;
   String _layer = 'composite';
+  bool _motionEnabled = true;
   @override
   void initState() {
     super.initState();
     _draft = widget.initialDraft;
+    _motionEnabled = _draft?.motionEnabled ?? true;
     if (_draft == null) {
       _split();
     } else {
@@ -45,7 +50,8 @@ class _Live2DPageState extends State<Live2DPage> {
       _error = null;
     });
     try {
-      final draft = await Live2DService.split(widget.sourcePath);
+      final draft = await Live2DService.split(widget.sourcePath,
+          apiClient: widget.apiClient);
       if (!mounted) {
         await Live2DService.discard(draft);
         return;
@@ -69,10 +75,13 @@ class _Live2DPageState extends State<Live2DPage> {
     Live2DDraft? output;
     Live2DDraft? applied;
     try {
+      await Live2DService.setMotion(original, _motionEnabled);
       applied = await Live2DService.export(original,
           crop: widget.crop, filter: widget.filter);
+      await Live2DService.setMotion(applied, _motionEnabled);
       if (!await Live2DService.activate(applied)) return;
-      output = widget.keepSourceLayers ? original : applied;
+      output = (widget.keepSourceLayers ? original : applied)
+          .withMotion(_motionEnabled);
       if (!mounted) return;
       setState(() => _processing = false);
       await WidgetsBinding.instance.endOfFrame;
@@ -150,6 +159,7 @@ class _Live2DPageState extends State<Live2DPage> {
                                                   (widget.crop.height *
                                                       draft.height),
                                               child: Live2DPreview(
+                                                  motionEnabled: _motionEnabled,
                                                   backgroundPath:
                                                       draft.backgroundPath,
                                                   foregroundPath:
@@ -165,6 +175,13 @@ class _Live2DPageState extends State<Live2DPage> {
                                           CrossAxisAlignment.stretch,
                                       children: [
                                 if (draft != null) ...[
+                                  SwitchListTile(
+                                      title: const Text('동적 효과'),
+                                      value: _motionEnabled,
+                                      onChanged: _processing
+                                          ? null
+                                          : (value) => setState(
+                                              () => _motionEnabled = value)),
                                   SegmentedButton<String>(
                                       segments: const [
                                         ButtonSegment(
@@ -184,7 +201,7 @@ class _Live2DPageState extends State<Live2DPage> {
                                           setState(() => _layer = value.first)),
                                   const SizedBox(height: 12),
                                   const Text(
-                                      '기기를 기울여 보세요. 배경은 고정되고 인물·사물만 움직입니다.\n가려진 배경은 주변 색으로 채워져 실제 배경과 다를 수 있습니다.',
+                                      '기기를 기울여 보세요. 배경은 고정되고 인물·사물만 움직입니다.\n가려진 배경은 AI로 채워져 실제 배경과 다를 수 있습니다.',
                                       textAlign: TextAlign.center),
                                   const SizedBox(height: 12),
                                   FilledButton(
@@ -210,7 +227,7 @@ class _Live2DPageState extends State<Live2DPage> {
                                       textAlign: TextAlign.center),
                                 ] else
                                   const Text(
-                                      '최초 사용 시 Google Play 서비스의 분리 모델 다운로드가 필요합니다.\n자이로 센서가 없는 기기에서는 정지 이미지로 표시됩니다.',
+                                      '배경 분리는 클라우드 GPU에서 처리합니다.\n자이로 센서가 없는 기기에서는 정지 이미지로 표시됩니다.',
                                       textAlign: TextAlign.center),
                               ]))),
                         ])))));

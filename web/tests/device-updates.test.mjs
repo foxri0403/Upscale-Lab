@@ -22,7 +22,7 @@ test("Android home and lock count as one physical display; extra screens retain 
       wallpapers: [{ target: "Home", reportedAssetId: "a" }, { target: "Lock" }] },
       { id: "external", name: "External", width: 1920, height: 1080, isConnected: true, canApplyWallpaper: false,
         refreshRateHz: 59.94, wallpapers: [] },
-      { id: "disconnected", width: 100, height: 100, isConnected: false, wallpapers: [] }] }], [[]], []);
+      { id: "disconnected", width: 100, height: 100, isConnected: false, wallpapers: [] }] }]);
   assert.equal(result.devices[0].physicalDisplayCount, 2);
   assert.equal(result.devices[0].displays[0].refreshRateHz, 119.88);
   const external = result.devices[0].displays.find(d => d.nativeId === "external");

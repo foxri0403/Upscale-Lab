@@ -13,10 +13,14 @@ internal record AppliedWallpaper(Guid AssetId, Guid CommandId, string Path, stri
 internal record Assignment(string Target, Guid? DesiredAssetId, Guid? ReportedAssetId, string Observation, long Sequence);
 internal record DisplayState(Guid Id, string NativeId, bool IsConnected, Assignment[] Wallpapers);
 internal record AgentState(long InventoryRevision, DisplayState[] Displays);
-internal record DeviceCommand(Guid Id, Guid DisplayId, Guid AssetId, string Target, long Sequence, string Status, DateTime ExpiresAt);
+internal record DeviceCommand(Guid Id, Guid DisplayId, Guid? AssetId, string Target, long Sequence, string Status, DateTime ExpiresAt, string Action = "Apply");
 internal record WallpaperFile(string Source, string ContentType, int Order, string Role, double X = 0, double Y = 0,
     double Rotation = 0, double Scale = 1, double MovementX = 0, double MovementY = 0);
-internal record WallpaperManifest(int SchemaVersion, Guid AssetId, string Mode, int Width, int Height, WallpaperFile[] Files);
+internal record WallpaperManifest(int SchemaVersion, Guid AssetId, string Mode, int Width, int Height, WallpaperFile[] Files,
+    bool MotionEnabled = true, bool? MouseEnabled = null, bool? GyroEnabled = null)
+{
+    public bool UsesMouse => MotionEnabled && (MouseEnabled ?? (GyroEnabled.HasValue ? false : true));
+}
 internal sealed class ApiFailure(int status, string message) : Exception(message) { public int Status { get; } = status; }
 
 internal sealed class AgentApi(string server, HttpClient http)

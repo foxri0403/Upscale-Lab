@@ -15,7 +15,13 @@ internal sealed class WallpaperCache(HttpClient downloads, Guid account, string 
         {
             var cached = JsonSerializer.Deserialize<WallpaperManifest>(await File.ReadAllTextAsync(saved, ct), AgentApi.Json);
             if (cached != null && cached.AssetId == manifest.AssetId && cached.Mode == manifest.Mode && cached.Files.Length == manifest.Files.Length &&
-                cached.Files.All(f => File.Exists(f.Source) && Path.GetDirectoryName(f.Source) == directory)) return cached;
+                cached.Files.All(f => File.Exists(f.Source) && Path.GetDirectoryName(f.Source) == directory) &&
+                manifest.Files.All(f => cached.Files.Any(c => c.Order == f.Order)))
+            {
+                var fresh = manifest with { Files = manifest.Files.Select(f => f with { Source = cached.Files.Single(c => c.Order == f.Order).Source }).ToArray() };
+                await File.WriteAllTextAsync(saved + ".part", JsonSerializer.Serialize(fresh, AgentApi.Json), ct); File.Move(saved + ".part", saved, true);
+                return fresh;
+            }
         }
         Directory.CreateDirectory(directory);
         var files = new List<WallpaperFile>(); long total = 0;
@@ -47,6 +53,17 @@ internal sealed class WallpaperCache(HttpClient downloads, Guid account, string 
         await File.WriteAllTextAsync(saved + ".part", JsonSerializer.Serialize(local, AgentApi.Json), ct);
         File.Move(saved + ".part", saved, true);
         return local;
+    }
+    public void Remove(Guid assetId)
+    {
+        var parent = Path.GetFullPath(root);
+        var directory = Path.GetFullPath(Path.Combine(parent, assetId.ToString("N")));
+        if (Path.GetDirectoryName(directory) != parent) throw new IOException("잘못된 배경화면 캐시 경로입니다.");
+        if (Directory.Exists(directory))
+        {
+            if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0) throw new IOException("연결된 캐시 경로는 삭제할 수 없습니다.");
+            Directory.Delete(directory, true);
+        }
     }
     internal static void Validate(WallpaperManifest m)
     {

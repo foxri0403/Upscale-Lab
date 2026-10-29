@@ -12,6 +12,8 @@ public sealed class WallpaperAsset : BaseEntity
     public string Title { get; set; } = string.Empty;
     public WallpaperMode Mode { get; set; }
     public string ManifestJson { get; set; } = string.Empty;
+    public string? SavedEditJson { get; set; }
+    public string? ShareToken { get; set; }
     public bool IsPublic { get; set; }
     public bool IsArchived { get; set; }
 }

@@ -170,6 +170,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
       options = await Navigator.of(context).push<ImageRegistrationOptions>(
         MaterialPageRoute(
           builder: (_) => ImageFeaturePage(
+            apiClient: widget.apiClient,
             filePath: picked.path,
             title: picked.name,
           ),
@@ -291,8 +292,10 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
           _reload();
           if (target != null) {
             try {
-              final confirmed = await _localImageStore.registerWallpaper(saved.id, target: target);
-              _message(confirmed ? '업스케일 이미지를 저장하고 배경화면을 등록했습니다.'
+              final confirmed = await _localImageStore
+                  .registerWallpaper(saved.id, target: target);
+              _message(confirmed
+                  ? '업스케일 이미지를 저장하고 배경화면을 등록했습니다.'
                   : '업스케일 이미지는 저장했습니다. 배경화면 등록은 취소했습니다.');
             } catch (error) {
               _message('업스케일 이미지는 저장했지만 배경화면을 등록하지 못했습니다.\n$error');
@@ -424,6 +427,7 @@ class _UnifiedHomePageState extends State<UnifiedHomePage> {
     try {
       await Navigator.of(context).push<void>(MaterialPageRoute(
           builder: (_) => ImageFeaturePage(
+              apiClient: widget.apiClient,
               filePath: image.path,
               title: image.title,
               initialTags: image.tags,
@@ -1325,9 +1329,11 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
                       content: const Text(
                           'Android에서 Live 2D 연결이 해제되어 있습니다. Live 2D 적용에서 화면을 선택하면 이후에는 바로 등록됩니다.'),
                       actions: [
-                        TextButton(onPressed: () => Navigator.pop(context, false),
+                        TextButton(
+                            onPressed: () => Navigator.pop(context, false),
                             child: const Text('취소')),
-                        FilledButton(onPressed: () => Navigator.pop(context, true),
+                        FilledButton(
+                            onPressed: () => Navigator.pop(context, true),
                             child: const Text('Live 2D 적용')),
                       ]));
           if (reconnect != true || !mounted) return;
@@ -1335,14 +1341,16 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
           confirmed = await widget.store.activateLive2D(widget.image.id);
         } else {
           setState(() => _busy = true);
-          confirmed = await widget.store.registerWallpaper(widget.image.id, target: target);
+          confirmed = await widget.store
+              .registerWallpaper(widget.image.id, target: target);
         }
       } else {
         final target = await showDialog<WallpaperTarget>(
             context: context, builder: (_) => const WallpaperApplyDialog());
         if (target == null || !mounted) return;
         setState(() => _busy = true);
-        confirmed = await widget.store.registerWallpaper(widget.image.id, target: target);
+        confirmed = await widget.store
+            .registerWallpaper(widget.image.id, target: target);
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -1367,7 +1375,9 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
 
   Widget _original() => Image.file(File(widget.image.path),
       key: const ValueKey('wallpaper-preview-image'),
-      width: double.infinity, height: double.infinity, fit: BoxFit.contain);
+      width: double.infinity,
+      height: double.infinity,
+      fit: BoxFit.contain);
 
   Future<void> _changeLiveTarget() async {
     if (_busy || _choosingWallpaper) return;
@@ -1377,13 +1387,15 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
-        ..showSnackBar(SnackBar(content: Text(confirmed
-            ? 'Android에서 선택한 화면에 Live 2D를 적용했습니다.'
-            : '적용 화면 변경을 취소했습니다.')));
+        ..showSnackBar(SnackBar(
+            content: Text(confirmed
+                ? 'Android에서 선택한 화면에 Live 2D를 적용했습니다.'
+                : '적용 화면 변경을 취소했습니다.')));
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
-            error is PlatformException ? error.message ?? '적용 화면을 변경하지 못했습니다.'
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(error is PlatformException
+                ? error.message ?? '적용 화면을 변경하지 못했습니다.'
                 : '적용 화면을 변경하지 못했습니다.')));
       }
     } finally {
@@ -1467,7 +1479,8 @@ class _HomeWallpaperPreviewPageState extends State<HomeWallpaperPreviewPage> {
                           },
                           itemBuilder: (_) => [
                                 if (widget.image.isLive2D)
-                                  const PopupMenuItem(value: 'live-target',
+                                  const PopupMenuItem(
+                                      value: 'live-target',
                                       child: Text('Live 2D 적용 화면 변경')),
                                 if (!widget.image.isShared)
                                   const PopupMenuItem(

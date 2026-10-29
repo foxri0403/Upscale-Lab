@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'live_2d_page.dart';
 import 'services/live_2d_service.dart';
+import 'services/api_client.dart';
 import 'widgets/live_2d_preview.dart';
 
 import 'models/image_editor.dart';
@@ -23,8 +24,10 @@ class ImageEditorPage extends StatefulWidget {
   const ImageEditorPage(
       {super.key,
       required this.filePath,
+      this.apiClient,
       this.initialRatio = const ImageRatioSettings()});
   final String filePath;
+  final ApiClient? apiClient;
   final ImageRatioSettings initialRatio;
 
   @override
@@ -57,6 +60,7 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
         MaterialPageRoute(
             builder: (_) => Live2DPage(
                 sourcePath: widget.filePath,
+                apiClient: widget.apiClient,
                 crop: geometry.normalizedCrop,
                 filter: _filter,
                 keepSourceLayers: true)));
@@ -286,6 +290,7 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
                                     aspectRatio:
                                         _geometry!.sourceRect.size.aspectRatio,
                                     child: Live2DPreview(
+                                        motionEnabled: _live2D!.motionEnabled,
                                         backgroundPath: _live2D!.backgroundPath,
                                         foregroundPath: _live2D!.foregroundPath,
                                         crop: _geometry!.normalizedCrop,

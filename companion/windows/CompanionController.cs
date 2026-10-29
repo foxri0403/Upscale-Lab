@@ -142,14 +142,13 @@ internal sealed class CompanionController : IDisposable
     {
         Monitors = DisplayInventory.Read(); var state = await State(ct);
         var body = new { revision = state.InventoryRevision + 1, osVersion = RuntimeInformation.OSDescription,
-            agentVersion = typeof(CompanionController).Assembly.GetName().Version?.ToString(3) ?? "1.0.1", manufacturer = DisplayInventory.Hardware("SystemManufacturer"),
-            model = DisplayInventory.Hardware("SystemProductName"), architecture = RuntimeInformation.OSArchitecture.ToString(),
-            supportsLive2D = engine.SupportsLive, supportsLockScreen = false,
+            agentVersion = typeof(CompanionController).Assembly.GetName().Version?.ToString(3) ?? "1.0.1",
+            supportsLive2D = engine.SupportsLive, supportsLockScreen = false, supportsWallpaperRemoval = true,
             displays = Monitors.Select(m => new { m.NativeId, m.Name, m.Width, m.Height, m.Scale, m.Rotation, m.OffsetX, m.OffsetY,
                 m.IsPrimary, m.IsConnected, m.RefreshRateHz,
                 wallpapers = new[] { applied.TryGetValue(m.NativeId, out var a) && engine.Matches(m, a)
                     ? new { target = "Desktop", observation = "Managed", assetId = (Guid?)a.AssetId }
-                    : new { target = "Desktop", observation = "External", assetId = (Guid?)null } } }).ToArray() };
+                    : new { target = "Desktop", observation = engine.IsClear(m) ? "Cleared" : "External", assetId = (Guid?)null } } }).ToArray() };
         try { await api!.Call<AgentState>("/api/agent/heartbeat", HttpMethod.Post, body, agent: true, ct: ct); }
         catch (ApiFailure error) when (error.Status == 409) { /* The next loop re-reads revision. */ }
     }
@@ -181,6 +180,27 @@ internal sealed class CompanionController : IDisposable
                     try
                     {
                         if (command.Target != "Desktop") throw new InvalidOperationException("지원하지 않는 배경화면 대상입니다.");
+                        if (command.Action == "Clear")
+                        {
+                            var freshClear = await State(ct);
+                            var clearDisplay = freshClear.Displays.SingleOrDefault(d => d.Id == command.DisplayId && d.IsConnected)
+                                ?? throw new InvalidOperationException("화면 연결이 해제되었습니다.");
+                            if (!clearDisplay.Wallpapers.Any(a => a.Target == "Desktop" && a.Sequence == command.Sequence && a.DesiredAssetId == null)) continue;
+                            var clearMonitor = Monitors.SingleOrDefault(m => m.NativeId == clearDisplay.NativeId)
+                                ?? throw new InvalidOperationException("연결된 모니터를 찾지 못했습니다.");
+                            var confirmed = await api.Call<DeviceCommand>($"/api/agent/commands/{command.Id}", agent: true, ct: ct);
+                            if (confirmed.Action != "Clear" || confirmed.Sequence != command.Sequence) continue;
+                            ct.ThrowIfCancellationRequested(); engine.Clear(clearMonitor); didApply = true;
+                            if (applied.Remove(clearMonitor.NativeId, out var removed))
+                            {
+                                SaveApplied();
+                                if (!applied.Values.Any(a => a.AssetId == removed.AssetId))
+                                    try { cache.Remove(removed.AssetId); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                            }
+                            await api.Report(command.Id, "Applied", null, ct); inventoryDirty = true;
+                            Notify("배경화면을 삭제했습니다."); continue;
+                        }
+                        if (command.Action != "Apply" || !command.AssetId.HasValue) throw new InvalidDataException("잘못된 배경화면 명령입니다.");
                         await api.Report(command.Id, "Downloading", null, ct);
                         var manifest = await api.Call<WallpaperManifest>($"/api/agent/commands/{command.Id}/manifest", agent: true, ct: ct);
                         if (manifest.AssetId != command.AssetId) throw new InvalidDataException("결과물 식별자가 일치하지 않습니다.");
@@ -198,7 +218,7 @@ internal sealed class CompanionController : IDisposable
                         {
                             engine.Apply(monitor, local);
                             didApply = true;
-                            applied[monitor.NativeId] = new(command.AssetId, command.Id, engine.CurrentPath, manifest.Mode); SaveApplied();
+                            applied[monitor.NativeId] = new(command.AssetId.Value, command.Id, engine.CurrentPath, manifest.Mode); SaveApplied();
                         }
                         didApply = true; await api.Report(command.Id, "Applied", null, ct); Notify("배경화면을 적용했습니다. " + DateTime.Now.ToString("HH:mm:ss"));
                     }

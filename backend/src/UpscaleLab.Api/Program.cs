@@ -1,3 +1,4 @@
+using UpscaleLab.Infrastructure.Inpainting;
 using System.Text;
 using System.Threading.RateLimiting;
 using System.Text.Json.Serialization;
@@ -88,6 +89,7 @@ builder.Services.AddHttpClient<RunPodUpscaleService>(client =>
 {
     client.Timeout = Timeout.InfiniteTimeSpan;
 });
+builder.Services.AddHttpClient<RunPodImageLayerProcessor>(client => client.Timeout = Timeout.InfiniteTimeSpan);
 builder.Services.AddSingleton(seeThroughOptions);
 builder.Services.AddSingleton(cognitoOptions);
 builder.Services.AddSingleton(TimeProvider.System);
@@ -142,16 +144,22 @@ builder.Services.AddSingleton<GalleryThumbnailCache>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IProjectProcessingService, ProjectProcessingService>();
 builder.Services.AddSingleton<IProcessingJobQueue, ProcessingJobQueue>();
-builder.Services.AddSingleton<IImageLayerProcessor, SeeThroughImageLayerProcessor>();
+builder.Services.AddSingleton<IImageLayerProcessor>(services => services.GetRequiredService<RunPodImageLayerProcessor>());
 builder.Services.AddSingleton<ExistingLayerProjectProcessor>();
-builder.Services.AddSingleton<IProjectImageProcessor, RunPodProjectImageProcessor>();
+builder.Services.AddScoped<IProjectImageProcessor, RunPodProjectImageProcessor>();
+builder.Services.AddHttpClient<RunPodS3UpscaleService>(client => client.Timeout = Timeout.InfiniteTimeSpan);
+var inpaintingOptions = builder.Configuration.GetSection("RunPodInpainting").Get<RunPodInpaintingOptions>() ?? new RunPodInpaintingOptions();
+builder.Services.AddSingleton(inpaintingOptions);
+builder.Services.AddScoped<InpaintingQuotaService>();
+builder.Services.AddHttpClient<RunPodInpaintingService>(client => client.Timeout = Timeout.InfiniteTimeSpan);
 builder.Services.AddHostedService<LiveLayerProcessingWorker>();
 
 builder.Services.AddClientAuthentication(jwtOptions);
 
 builder.Services.AddControllers().AddJsonOptions(options =>
     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
-builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = 25 * 1024 * 1024);
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = ImageFormatPolicy.MaxRequestBytes);
+builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = ImageFormatPolicy.MaxRequestBytes);
 builder.Services.AddSignalR();
 builder.Services.AddHealthChecks();
 

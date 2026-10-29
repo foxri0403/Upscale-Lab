@@ -1,7 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
-  Layers3,
   MoreVertical,
   Pencil,
   Tag,
@@ -22,7 +21,6 @@ export function ImageCard({
   selected = false,
   open,
   rename,
-  edit,
   remove,
 }: {
   picture: Picture;
@@ -30,9 +28,21 @@ export function ImageCard({
   selected?: boolean;
   open: () => void;
   rename: () => void;
-  edit: () => void;
   remove: () => void;
 }) {
+  const menu = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const closeOutside = (event: Event) => {
+      if (menu.current && !menu.current.contains(event.target as Node))
+        menu.current.open = false;
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("focusin", closeOutside);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("focusin", closeOutside);
+    };
+  }, []);
   const [decoded, setDecoded] = useState<{
     src: string;
     width: number;
@@ -90,14 +100,20 @@ export function ImageCard({
         <ImageFeatureBadges picture={picture} />
         {!explore && <div className="card-actions">
           {!explore && shared && (
-            <span className="mobile-shared-badge" aria-label="공유된 이미지">
-              공유
+            <span className="mobile-shared-badge" aria-label="업로드된 이미지">
+              업로드
               <span>
                 <Check size={11} strokeWidth={3} />
               </span>
             </span>
           )}
-          <details className="card-menu">
+          <details className="card-menu" ref={menu}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && menu.current) {
+                menu.current.open = false;
+                menu.current.querySelector("summary")?.focus();
+              }
+            }}>
             <summary aria-label={`${picture.name} 이미지 설정`}>
               <MoreVertical size={20} />
             </summary>
@@ -114,8 +130,8 @@ export function ImageCard({
               ) : (
                 <>
                   <div className="image-sharing-row">
-                    <span>공유 {shared ? "ON" : "OFF"}</span>
-                    <ImageSharingToggle picture={picture} label={`${picture.name} 공유`} />
+                    <span>업로드 {shared ? "ON" : "OFF"}</span>
+                    <ImageSharingToggle picture={picture} label={`${picture.name} 업로드`} />
                   </div>
                   <button
                     disabled={shared}
@@ -128,16 +144,6 @@ export function ImageCard({
                     }}
                   >
                     <Pencil size={15} /> 이름 변경
-                  </button>
-                  <button
-                    disabled={shared}
-                    title={shared ? "공유를 끈 뒤 변경할 수 있습니다." : undefined}
-                    onClick={(e) => {
-                      e.currentTarget.closest("details")?.removeAttribute("open");
-                      edit();
-                    }}
-                  >
-                    <Layers3 size={15} /> 사진 설정
                   </button>
                   <button
                     className="danger-text"

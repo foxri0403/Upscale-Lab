@@ -10,5 +10,11 @@ public enum LayerType
     Face,
     Clothes,
     Accessory,
-    Other
+    Other,
+    BackHair,
+    FrontHair,
+    Eye,
+    Eyebrow,
+    Mouth,
+    Nose
 }

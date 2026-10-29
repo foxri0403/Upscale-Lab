@@ -19,7 +19,6 @@ import {
   Plus,
   ArrowDownUp,
   X,
-  Check,
 } from "lucide-react";
 import { type Session } from "./auth";
 import {
@@ -31,7 +30,6 @@ import {
   type Library,
   type Picture,
   type Device,
-  type Command,
 } from "./model";
 import {
   Brand,
@@ -65,6 +63,8 @@ import { ExploreDetails } from "./ExploreDetails";
 import { ApplyWallpaperDialog } from "./ApplyWallpaperDialog";
 import { isOwnExplorePicture, ownedExplorePicture, wallpaperTargets } from "./explore-actions";
 import { isImageShared, sharingTargets } from "./image-sharing";
+import { canNavigate } from "./navigation";
+import { ToastBubble, type ToastMessage } from "./ToastBubble";
 import { AccountSettings, AccountAvatar, profileSession, type AccountProfile } from "./AccountSettings";
 
 type SharedPicture = Picture & { ownerId: string };
@@ -137,11 +137,11 @@ export function Workspace({
     return () => { active = false; clearInterval(timer); window.removeEventListener("focus", refresh); };
   }, []);
   const key = `upscale.demo.library.v1.${session.id}`;
-  const [library, setLibrary] = useState<Library>(() =>
-    cloud
-      ? { images: [], devices: [], commands: [] }
-      : read(key, sampleLibrary()),
-  );
+  const [library, setLibrary] = useState<Library>(() => {
+    if (cloud) return { images: [], devices: [] };
+    const stored = read(key, sampleLibrary());
+    return { images: stored.images, devices: stored.devices, assets: stored.assets };
+  });
   const current = useRef(library);
   const [loading, setLoading] = useState(cloud);
   const [loadError, setLoadError] = useState("");
@@ -156,30 +156,28 @@ export function Workspace({
     cloud ? [] : read("upscale.demo.shared.v1", []),
   );
   const [sidebar, setSidebar] = useState(() => read("upscale.sidebar", true));
-  const [message, setMessage] = useState("");
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [message, setMessage] = useState<ToastMessage | null>(null);
+  const toastPointer = useRef({ x: innerWidth / 2, y: innerHeight / 2 });
+  const toastSequence = useRef(0);
   const [dialog, setDialog] = useState<"settings" | "downloads" | null>(null);
   const page = navigation.find((n) => route.startsWith(`/app/${n.slug}`));
   function toast(text: string) {
-    setMessage(text);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setMessage(""), 4500);
+    setMessage({ id: ++toastSequence.current, text, ...toastPointer.current });
   }
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
+  useEffect(() => {
+    const track = (event: PointerEvent) => { toastPointer.current = { x: event.clientX, y: event.clientY }; };
+    window.addEventListener('pointermove', track, true); window.addEventListener('pointerdown', track, true);
+    return () => { window.removeEventListener('pointermove', track, true); window.removeEventListener('pointerdown', track, true); };
+  }, []);
   function update(fn: (value: Library) => Library) {
     try {
       const next = fn(current.current);
       if (cloud) {
         const prefs = Object.fromEntries(
-          next.images.map((p) => [p.id, { edit: p.edit }]),
+          next.images.filter(p => !p.isDraft).map((p) => [p.id, { edit: p.edit }]),
         );
         write(preferencesKey(session.id), prefs);
-      } else write(key, next);
+      } else write(key, { ...next, images: next.images.filter(p => !p.isDraft) });
       current.current = next;
       setLibrary(next);
       return true;
@@ -195,6 +193,7 @@ export function Workspace({
     try {
       const result = await fetchLibrary(session.id);
       if (!mounted.current || ticket !== epoch.current) return;
+      result.library.images = [...current.current.images.filter(p => p.isDraft && !result.library.images.some(x => x.id === p.id)), ...result.library.images];
       result.library.images = result.library.images.map((p) => {
         const previous = current.current.images.find((x) => x.id === p.id);
         return previous?.detailsUntil && previous.detailsUntil > Date.now()
@@ -207,13 +206,13 @@ export function Workspace({
               width: previous.width,
               height: previous.height,
               contentType: previous.contentType,
+              exportSources: previous.exportSources,
               detailsUntil: previous.detailsUntil,
             }
           : p;
       });
       if (devicesAtStart !== deviceEpoch.current) {
         result.library.devices = current.current.devices;
-        result.library.commands = current.current.commands;
       }
       current.current = result.library;
       setLibrary(result.library);
@@ -239,7 +238,7 @@ export function Workspace({
     const work = (async () => {
       while (devicesDirty.current && mounted.current) {
         devicesDirty.current = false;
-        const patch = await fetchDevices([...(current.current.assets || []), ...current.current.images]);
+        const patch = await fetchDevices();
         if (!mounted.current) return;
         deviceEpoch.current++;
         current.current = { ...current.current, ...patch }; setLibrary(current.current);
@@ -268,7 +267,7 @@ export function Workspace({
     const publishedAsset = picture.assetId || picture.sharedAssetIds?.[0];
     if (publishedAsset && isImageShared(picture)) return {
       id: publishedAsset, title: picture.name,
-      mode: picture.kind === "Live 2D" ? "Live2D" : "Static",
+      mode: picture.background && picture.foregrounds?.length ? "Live2D" : "Static",
       isPublic: true, createdAt: picture.created,
     };
     const signature = JSON.stringify([
@@ -276,7 +275,12 @@ export function Workspace({
       picture.name,
       picture.src,
       picture.jobId,
+      picture.background,
+      picture.foregrounds,
+      picture.width,
+      picture.height,
       picture.edit,
+      picture.tags,
     ]);
     const existing = snapshots.current.get(signature);
     if (existing) return existing;
@@ -288,9 +292,13 @@ export function Workspace({
   // Cross-tab updates stay scoped to the authenticated local account.
   useEffect(() => {
     if (cloud) return;
+    // Rewrite older local libraries with the current fields, dropping stored activity history.
+    try { write(key, { ...current.current, images: current.current.images.filter(p => !p.isDraft) }); }
+    catch (error) { toast((error as Error).message); }
     const sync = (e: StorageEvent) => {
       if (e.key === key) {
-        const next = read(key, sampleLibrary());
+        const stored = read(key, sampleLibrary());
+        const next = { images: stored.images, devices: stored.devices, assets: stored.assets };
         current.current = next;
         setLibrary(next);
       }
@@ -308,7 +316,7 @@ export function Workspace({
         const latest = current.current.images.find((p) => p.id === picture.id) || picture;
         if (enabled) {
           if (isImageShared(latest)) return true;
-          const asset = picture.assetId ? { id: picture.assetId } : await saveCloud(picture);
+          const asset = await saveCloud(picture);
           await request(`/api/wallpapers/${asset.id}/sharing`, {
             method: "PUT", body: JSON.stringify({ isPublic: true }),
           });
@@ -324,8 +332,8 @@ export function Workspace({
         await refresh();
         toast(
           enabled
-            ? "탐색에 공유했습니다."
-            : "공유를 취소했습니다. 저장된 이미지는 유지됩니다.",
+            ? "탐색에 업로드하고 저장했습니다."
+            : "업로드를 해제했습니다. 저장된 이미지는 유지됩니다.",
         );
         return true;
       }
@@ -410,19 +418,10 @@ export function Workspace({
         return sent;
       }
     }
-    const command: Command = {
-      id: crypto.randomUUID(),
-      device: device.name,
-      display: display.name,
-      picture: picture.name,
-      status: "대기",
-      created: new Date().toISOString(),
-    };
     const snapshot = { ...picture, id: uuid() };
     const applied = update((v) => ({
         ...v,
         assets: [...(v.assets || []), snapshot],
-        commands: [command, ...v.commands].slice(0, 100),
         devices: v.devices.map((d) =>
           d.id === deviceId
             ? {
@@ -485,7 +484,7 @@ export function Workspace({
                 <button onClick={() => { if (accountMenu.current) { accountMenu.current.open = false; accountMenu.current.querySelector("summary")?.focus(); } setDialog("settings"); }}>
                   <UserRound size={16} /> 계정 정보
                 </button>
-                <button onClick={logout}>
+                <button onClick={() => { if (canNavigate("/login")) logout(); }}>
                   <LogOut size={16} /> 로그아웃
                 </button>
               </div>
@@ -516,7 +515,7 @@ export function Workspace({
             </button>
           </div>
         </aside>
-        <main className="app-main" key={page?.slug || "unknown"}>
+        <main className={`app-main ${page?.slug === "studio" ? "studio-main" : ""}`} key={page?.slug || "unknown"}>
           {loadError && (
             <div className="api-error" role="alert">
               {loadError}
@@ -545,15 +544,7 @@ export function Workspace({
             </Empty>
           )}
         </main>
-        {message && (
-          <div className="toast" role="status">
-            <Check size={17} />
-            {message}
-            <button aria-label="알림 닫기" onClick={() => setMessage("")}>
-              <X size={16} />
-            </button>
-          </div>
-        )}
+        {message && <ToastBubble key={message.id} message={message} close={() => setMessage(null)} />}
         {dialog === "settings" && (
           <AccountSettings session={session} updated={setSession} close={() => setDialog(null)} logout={logout} />
         )}
@@ -600,7 +591,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     ? cloud
       ? shared
       : [...shared, ...community]
-    : library.images;
+    : library.images.filter(p => !p.isDraft);
   const selectedPicture = preview ? all.find(p => p.id === preview.id) || null : null;
   useEffect(() => {
     if (!selectedPicture) return;
@@ -709,7 +700,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           <h1>
             {explore ? "탐색" : "내 이미지"}
             {!explore && (
-              <span className="heading-count">{library.images.length}개</span>
+              <span className="heading-count">{all.length}개</span>
             )}
           </h1>
           <p>
@@ -806,7 +797,6 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
                 setEditing(p);
                 setName(p.name);
               }}
-              edit={() => navigate(`/app/studio?id=${p.id}`)}
               remove={() => setDeleting(p)}
             />
           ))}

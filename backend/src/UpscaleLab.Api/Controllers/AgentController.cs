@@ -29,11 +29,15 @@ public sealed class AgentController(IDeviceControlService devices, IWallpaperSer
 
     [HttpGet("commands")]
     public async Task<ActionResult<IReadOnlyList<DeviceCommandResponse>>> Commands(CancellationToken ct) =>
-        Ok(await devices.GetCommandsAsync(Identity.UserId, Identity.DeviceId, true, ct));
+        Ok(await devices.GetPendingCommandsAsync(Identity.UserId, Identity.DeviceId, ct));
 
     [HttpPost("commands/{id:guid}/report")]
     public async Task<ActionResult<DeviceCommandResponse>> Report(Guid id, CommandReport request, CancellationToken ct) =>
         Ok(await devices.ReportAsync(Identity, id, request, ct));
+
+    [HttpGet("commands/{id:guid}")]
+    public async Task<ActionResult<DeviceCommandResponse>> Command(Guid id, CancellationToken ct) =>
+        Ok(await devices.GetCommandAsync(Identity, id, ct));
 
     [HttpGet("commands/{id:guid}/manifest")]
     public async Task<ActionResult<WallpaperManifest>> Manifest(Guid id, CancellationToken ct)
