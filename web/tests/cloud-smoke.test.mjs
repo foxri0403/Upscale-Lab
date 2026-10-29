@@ -106,6 +106,13 @@ run("shared wallpaper API returns JSON, never the SPA fallback", async () => {
   assert.equal(r.status, 200);
   assert.ok(Array.isArray(await r.json()));
 });
+run("gallery import is deployed and requires an account session", async () => {
+  const response = await fetch(`${base}/api/gallery/00000000-0000-0000-0000-000000000001/import`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    signal: AbortSignal.timeout(15000),
+  });
+  assert.equal(response.status, 401);
+});
 run("image settings PATCH routes exist and require authentication", async () => {
   for (const resource of ["projects", "wallpapers"]) {
     const path = `/api/${resource}/00000000-0000-0000-0000-000000000001`;

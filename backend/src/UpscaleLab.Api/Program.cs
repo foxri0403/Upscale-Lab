@@ -139,6 +139,7 @@ builder.Services.AddScoped<IWallpaperService, WallpaperService>();
 builder.Services.AddScoped<IUserSettingService, UserSettingService>();
 builder.Services.AddScoped<IImageService, ImageService>();
 builder.Services.AddScoped<IGalleryService, GalleryService>();
+builder.Services.AddScoped<IGalleryImportService, GalleryImportService>();
 builder.Services.AddScoped<IGalleryThumbnailService, GalleryThumbnailService>();
 builder.Services.AddSingleton<GalleryThumbnailCache>();
 builder.Services.AddScoped<IProjectService, ProjectService>();

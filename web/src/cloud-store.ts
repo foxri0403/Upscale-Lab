@@ -203,33 +203,10 @@ export async function fetchLibrary(
 }
 export async function importGalleryPicture(picture: Picture): Promise<Picture> {
   if (!picture.galleryPostId) throw new Error("공유 게시물을 확인해 주세요.");
-  // Get a fresh read-only preview URL. Importing is not a completed file download
-  // and must not increment the mobile gallery's download counter.
-  const { url } = await request<{ url: string }>(
-    `/api/gallery/${picture.galleryPostId}/preview-url`,
-  );
-  let response: Response;
-  try {
-    response = await fetch(url, { signal: AbortSignal.timeout(30000) });
-  } catch {
-    throw new Error(
-      "공유 원본 이미지를 가져올 수 없습니다. 잠시 후 다시 시도해 주세요.",
-    );
-  }
-  if (!response.ok) throw new Error("공유 원본 이미지에 접근할 수 없습니다.");
-  const blob = await response.blob();
-  const extension = (
-    { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" } as Record<
-      string,
-      string
-    >
-  )[blob.type];
-  if (!extension)
-    throw new Error("이 공유 이미지 형식은 웹 가져오기를 지원하지 않습니다.");
-  return uploadProject(
-    new File([blob], `${picture.name}.${extension}`, { type: blob.type }),
-    false,
-  );
+  return projectPicture(await request<Project>(
+    `/api/gallery/${encodeURIComponent(picture.galleryPostId)}/import`,
+    { method: "POST", body: "{}", signal: AbortSignal.timeout(180000) },
+  ));
 }
 export async function uploadProject(file: File, isDraft = true): Promise<Picture> {
   const contentType = validateImageUpload(file);
