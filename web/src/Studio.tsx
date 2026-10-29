@@ -1,3 +1,5 @@
+import { CropEditor } from "./CropEditor";
+import { CropControls } from "./CropControls";
 import { useEffect, useRef, useState } from "react";
 import {
   Expand,
@@ -316,7 +318,7 @@ export function Studio({ route }: { route: string }) {
           </button>
         </div>
         <div className="canvas-panel">
-          <div
+          {tool === "crop" ? <div className="canvas-stage"><CropEditor picture={isFox ? { ...picture, background: backgroundSrc, foregrounds: foregroundSrcs } : picture} edit={edit} disabled={published || busy} change={value => { if (!published && !busy) setEdit(value); }} /></div> : <div
             className={`canvas-stage ${cropRatio ? "crop-stage" : ""}`}
             style={
               cropRatio
@@ -362,21 +364,13 @@ export function Studio({ route }: { route: string }) {
                 style={{ filter: filterStyle(edit.filter) }}
               />
             )}{" "}
-            {tool === "crop" && (
-              <div className="crop-guides" aria-hidden="true">
-                <i />
-                <i />
-                <i />
-                <i />
-              </div>
-            )}
-          </div>
+          </div>}
           <p className="canvas-caption">
             <Mouse size={15} />
             {tool === "live" && isFox
               ? "마우스를 움직여 확인하세요"
               : tool === "crop"
-                ? "가운데를 기준으로 선택한 비율로 저장합니다"
+                ? "선택 영역을 드래그해 이동하세요"
                 : "로컬 편집 미리보기"}
           </p>
 
@@ -501,33 +495,7 @@ export function Studio({ route }: { route: string }) {
             </Notice>
           </>
         )}
-        {tool === "crop" && (
-          <>
-            <h3>이미지 비율</h3>
-            <div className="crop-choices">
-              {[
-                ["original", "원본 비율"],
-                ["wide", "16:9 · PC"],
-                ["square", "1:1 · 정사각형"],
-                ["portrait", "9:16 · 휴대폰"],
-              ].map(([value, label]) => (
-                <button
-                  key={value}
-                  className={edit.crop === value ? "active" : ""}
-                  onClick={() => change("crop", value)}
-                >
-                  <Crop size={18} />
-                  {label}
-                  {edit.crop === value && <Check size={16} />}
-                </button>
-              ))}
-            </div>
-            <Notice>
-              중앙을 기준으로 자릅니다. 다운로드한 이미지에도 선택한 비율이
-              적용됩니다.
-            </Notice>
-          </>
-        )}
+        {tool === "crop" && <CropControls edit={edit} width={picture.width || 1920} height={picture.height || 1080} change={value => { if (!published && !busy) setEdit(value); }} />}
         {tool === "filter" && (
           <>
             <h3>색감</h3>

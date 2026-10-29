@@ -1,10 +1,12 @@
 import { selectableTags, unspecifiedTag } from "./image-tags";
+import { pixelCrop, type CropRegion } from "./crop-geometry";
 export type Genre = (typeof selectableTags)[number] | typeof unspecifiedTag;
 export type Tool = "upscale" | "layers" | "live" | "crop" | "filter";
 export type Edit = {
   strength: number;
   filter: string;
   crop: string;
+  cropRegion?: CropRegion;
   scale: number;
   foreground: boolean;
   liveEnabled?: boolean;
@@ -25,6 +27,7 @@ export type Picture = {
   ownerId?: string;
   tags?: string[];
   creator?: string;
+  creatorAvatar?: string;
   downloads?: number;
   projectId?: string;
   assetId?: string;
@@ -273,19 +276,8 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
         context.drawImage(await loadImage(src), 0, 0, img.width, img.height);
     source = composite;
   }
-  let sw = img.width,
-    sh = img.height;
-  const ratio =
-    edit.crop === "original"
-      ? sw / sh
-      : (
-          { wide: 16 / 9, square: 1, portrait: 9 / 16 } as Record<
-            string,
-            number
-          >
-        )[edit.crop];
-  if (sw / sh > ratio) sw = sh * ratio;
-  else sh = sw / ratio;
+  const selected = pixelCrop(img.width, img.height, edit);
+  const sw = selected.width, sh = selected.height;
   const scale = Math.min(edit.scale, 4096 / Math.max(sw, sh));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(sw * scale);
@@ -295,8 +287,8 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(
     source,
-    (img.width - sw) / 2,
-    (img.height - sh) / 2,
+    selected.x,
+    selected.y,
     sw,
     sh,
     0,

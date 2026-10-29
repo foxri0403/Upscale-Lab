@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Monitor, Plus, SquarePen, UserRound, X } from "lucide-react";
+import { Monitor, Plus, SquarePen, X } from "lucide-react";
+import { CreatorAvatar } from "./CreatorAvatar";
 import type { Picture } from "./model";
 import { imageTags } from "./image-tags";
 import { imageFileFormat, imageResolution } from "./image-information";
@@ -43,7 +44,7 @@ export function ExploreDetails({ picture, importing, own, local, close, save, op
               failed={() => setMeasured({ source, resolution: null })} />
           </div>
           <h3>{picture.name}</h3>
-          <div className="explore-details-creator"><UserRound size={18} />{picture.creator || "작성자 정보 없음"}</div>
+          <div className="explore-details-creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} />{picture.creator || "작성자 정보 없음"}</div>
           {created && !Number.isNaN(created.getTime()) && <p className="explore-details-date">
             {created.toLocaleDateString("ko-KR")} 업로드
           </p>}

@@ -233,6 +233,9 @@ export type Job = {
   resultHeight?: number;
 };
 export type Asset = {
+  userId?: string;
+  username?: string;
+  profileImageUrl?: string | null;
   id: string;
   title: string;
   mode: string;

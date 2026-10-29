@@ -62,13 +62,14 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
                 x.Id, x.ImageId, x.UserId, x.User.Username, x.Title, x.Description,
                 x.Image.OriginalObjectKey, x.Likes.Count, x.Comments.Count, x.DownloadCount,
                 x.CreatedAt, currentUserId.HasValue && x.Likes.Any(l => l.UserId == currentUserId),
-                x.ProjectId, x.IsPublic, x.Tag, x.Tags, null))
+                x.ProjectId, x.IsPublic, x.Tag, x.Tags, null, x.User.ProfileImageObjectKey))
             .ToListAsync(cancellationToken);
 
         return posts.Select(x => x with {
             ImageUrl = storageService.CreateDownloadUrl(x.ImageUrl, DownloadLifetime),
             Tags = GalleryTagCompatibility.Resolve(x.Tag, x.Tags, x.Description),
-            ThumbnailUrl = $"/api/gallery/{x.Id}/thumbnail"
+            ThumbnailUrl = $"/api/gallery/{x.Id}/thumbnail",
+            ProfileImageUrl = x.ProfileImageUrl is { } key ? storageService.CreateDownloadUrl(key, DownloadLifetime) : null
         }).Where(x => selected is null || x.Tags.Any(selected.Contains)).ToList();
     }
 
@@ -363,7 +364,8 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         post.IsPublic,
         post.Tag,
         GalleryTagCompatibility.Resolve(post.Tag, post.Tags, post.Description),
-        $"/api/gallery/{post.Id}/thumbnail");
+        $"/api/gallery/{post.Id}/thumbnail",
+        post.User.ProfileImageObjectKey is { } key ? storageService.CreateDownloadUrl(key, DownloadLifetime) : null);
 
     private static void EnsureAccessible(GalleryPost post, Guid? currentUserId)
     {

@@ -36,7 +36,8 @@ public sealed record GalleryPostResponse(
     bool IsPublic,
     string Tag,
     IReadOnlyList<string> Tags,
-    string? ThumbnailUrl = null);
+    string? ThumbnailUrl = null,
+    string? ProfileImageUrl = null);
 
 public sealed record GalleryPostDetailResponse(
     GalleryPostResponse Post,

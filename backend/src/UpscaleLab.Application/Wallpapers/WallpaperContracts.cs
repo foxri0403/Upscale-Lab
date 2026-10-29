@@ -1,15 +1,17 @@
 using System.ComponentModel.DataAnnotations;
 using UpscaleLab.Domain.Enums;
+using UpscaleLab.Application.Images;
 
 namespace UpscaleLab.Application.Wallpapers;
 
 public sealed record CreateWallpaperRequest(Guid ProjectId,
     [param: Required, MaxLength(160)] string Title, WallpaperMode Mode, Guid? ProcessingJobId = null,
-    Guid? OriginProjectId = null, bool ReuseExisting = false);
+    Guid? OriginProjectId = null, bool ReuseExisting = false, WallpaperRenderSettings? Render = null);
+public sealed record WallpaperRenderSettings(int Strength, string Filter, string Crop, int Scale, bool Foreground, ImageCropRegion? CropRegion = null);
 public sealed record RenameWallpaperRequest([param: Required, MaxLength(160)] string Title);
 public sealed record ShareWallpaperRequest(bool IsPublic);
 public sealed record WallpaperSummary(Guid Id, string Title, WallpaperMode Mode, bool IsPublic, DateTime CreatedAt,
-    Guid? SourceProjectId = null);
+    Guid? SourceProjectId = null, Guid? UserId = null, string? Username = null, string? ProfileImageUrl = null);
 // Stored manifests use object keys; network manifests replace keys with fresh URLs.
 public sealed record WallpaperFile(string Source, string ContentType, int Order, string Role,
     double Depth = 0, double X = 0, double Y = 0, double Rotation = 0, double Scale = 1,

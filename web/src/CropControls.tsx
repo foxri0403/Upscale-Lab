@@ -1,0 +1,36 @@
+import { Crop, Check, Minus, Plus, RotateCcw } from "lucide-react";
+import type { Edit } from "./model";
+import { cropPresets, cropRegion, fitCrop, pixelCrop, zoomCrop } from "./crop-geometry";
+import "./crop.css";
+
+export function CropControls({ edit, width, height, change }: { edit: Edit; width: number; height: number; change: (edit: Edit) => void }) {
+  const ready = width > 0 && height > 0, region = cropRegion(width, height, edit);
+  const pixels = ready ? pixelCrop(width, height, edit) : null;
+  const center = { x: region.x + region.width / 2, y: region.y + region.height / 2 };
+  function select(crop: string) {
+    if (crop === "original") change({ ...edit, crop, cropRegion: undefined });
+    else change({ ...edit, crop, cropRegion: crop === "custom" ? region : fitCrop(width, height, ({wide:16/9,portrait:9/16,square:1} as Record<string, number>)[crop], center) });
+  }
+  function dimension(axis: "width" | "height", value: number) {
+    if (!Number.isFinite(value) || value < 1) return;
+    const w = axis === "width" ? Math.min(width, value) / width : region.width;
+    const h = axis === "height" ? Math.min(height, value) / height : region.height;
+    change({ ...edit, cropRegion: { x: Math.max(0, Math.min(1 - w, center.x - w / 2)), y: Math.max(0, Math.min(1 - h, center.y - h / 2)), width: w, height: h } });
+  }
+  return <>
+    <h3>이미지 비율</h3>
+    <div className="crop-choices">{cropPresets.map(([value, label]) => <button type="button" key={value} aria-pressed={edit.crop === value}
+      disabled={!ready} className={edit.crop === value ? "active" : ""} onClick={() => select(value)}><Crop size={18} />{label}{edit.crop === value && <Check size={16} />}</button>)}</div>
+    {edit.crop === "custom" && <div className="crop-dimensions">
+      <label>너비 (px)<input type="number" aria-label="자르기 너비" disabled={!ready} min={1} max={width} value={pixels?.width ?? ""} onChange={event => dimension("width", event.target.valueAsNumber)} /></label>
+      <label>높이 (px)<input type="number" aria-label="자르기 높이" disabled={!ready} min={1} max={height} value={pixels?.height ?? ""} onChange={event => dimension("height", event.target.valueAsNumber)} /></label>
+    </div>}
+    {edit.crop !== "original" && <div className="crop-area-controls">
+      <p>선택 영역 {pixels ? `${pixels.width} × ${pixels.height} px` : "확인 중"}</p>
+      <div><button type="button" className="button secondary" disabled={!ready} aria-label="자르기 축소" onClick={() => change({ ...edit, cropRegion: zoomCrop(region, 1 / 1.2, width, height) })}><Minus size={17} /></button>
+        <button type="button" className="button secondary" disabled={!ready} aria-label="자르기 확대" onClick={() => change({ ...edit, cropRegion: zoomCrop(region, 1.2, width, height) })}><Plus size={17} /></button>
+        <button type="button" className="button secondary" disabled={!ready} onClick={() => change({ ...edit, cropRegion: fitCrop(width, height, region.width * width / (region.height * height)) })}><RotateCcw size={15} />영역 초기화</button></div>
+      <p className="crop-help">선택 영역을 드래그해 이동하세요. 회색 부분은 결과에 포함되지 않습니다.{edit.crop === "custom" && " 테두리와 모서리를 드래그하면 크기를 바꿀 수 있습니다."}</p>
+    </div>}
+  </>;
+}

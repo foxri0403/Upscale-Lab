@@ -63,6 +63,7 @@ export async function assetPicture(a: Asset, fresh = false): Promise<Picture> {
       ...cached.picture,
       sourceProjectId: a.sourceProjectId ?? undefined,
       name: a.title,
+      creator: a.username, creatorAvatar: a.profileImageUrl || undefined, ownerId: a.userId,
       sharedId: a.isPublic ? a.id : undefined,
     };
   const m = await request<Manifest>(`/api/wallpapers/${a.id}/manifest`);
@@ -72,6 +73,7 @@ export async function assetPicture(a: Asset, fresh = false): Promise<Picture> {
     assetId: a.id,
     sourceProjectId: a.sourceProjectId ?? undefined,
     name: a.title,
+    creator: a.username, creatorAvatar: a.profileImageUrl || undefined, ownerId: a.userId,
     src: files[0]?.source || "",
     genre: unspecifiedTag,
     tags: [],
@@ -170,8 +172,8 @@ export async function fetchLibrary(
     publicImages: mergeExploreFeed(
       publicPictures.map((p) => ({
         ...p,
-        ownerId: owned.has(p.assetId!) ? userId : undefined,
-        creator: owned.has(p.assetId!) ? "내 공유 이미지" : "공유 배경화면",
+        ownerId: p.ownerId || (owned.has(p.assetId!) ? userId : undefined),
+        creator: p.creator || (owned.has(p.assetId!) ? "내 공유 이미지" : "공유 배경화면"),
       })),
       gallery,
     ),

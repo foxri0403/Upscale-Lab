@@ -14,6 +14,7 @@ import type { Picture } from "./model";
 import { isImageShared } from "./image-sharing";
 import { ImageSharingToggle } from "./ImageSharingToggle";
 import { ImageFeatureBadges } from "./ImageFeatureBadges";
+import { CreatorAvatar } from "./CreatorAvatar";
 
 export function ImageCard({
   picture,
@@ -85,7 +86,7 @@ export function ImageCard({
         <p className="image-resolution" aria-label={`${picture.name} 해상도`}>
           {resolution}
         </p>
-        {explore && <span className="creator">{picture.creator}</span>}
+        {explore && <span className="creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} /><span>{picture.creator}</span></span>}
         <ImageFeatureBadges picture={picture} />
         {!explore && <div className="card-actions">
           {!explore && shared && (

@@ -85,9 +85,10 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
                 "image/png", x.LayerOrder, x.LayerType.ToString(), x.Depth, x.PositionX, x.PositionY,
                 x.Rotation, x.Scale, x.MovementX, x.MovementY)));
         }
+        var presentation = request.Mode == WallpaperMode.Live2D && request.Render != null ? new LayerPresentation(request.Render, width, height) : null;
         var origin = request.OriginProjectId ?? project.Id;
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new {
-            Project = project.Id, Origin = origin, Title = request.Title.Trim(), request.Mode, width, height, sources
+            Project = project.Id, Origin = origin, Title = request.Title.Trim(), request.Mode, width, height, sources, request.Render
         }))));
         if (request.ReuseExisting)
         {
@@ -110,11 +111,12 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             foreach (var source in sources)
             {
                 var key = $"users/{userId:N}/wallpapers/{asset.Id:N}/{source.Order:D3}{Path.GetExtension(source.Source)}";
-                await copier.CopyAsync(source.Source, key, ct);
+                if (presentation?.ChangesPixels == true) { using var input = new MemoryStream(); await storage.DownloadAsync(source.Source, input, ct); using var output = new MemoryStream(presentation.Render(input.ToArray())); await storage.UploadAsync(output, key, "image/png", ct); }
+                else await copier.CopyAsync(source.Source, key, ct);
                 copied.Add(key);
-                files.Add(source with { Source = key });
+                files.Add((presentation?.Transform(source) ?? source) with { Source = key });
             }
-            var stored = JsonSerializer.SerializeToNode(new WallpaperManifest(1, asset.Id, asset.Mode, width, height, files))!.AsObject();
+            var stored = JsonSerializer.SerializeToNode(new WallpaperManifest(1, asset.Id, asset.Mode, presentation?.Width ?? width, presentation?.Height ?? height, files))!.AsObject();
             stored["_sourceFingerprint"] = fingerprint;
             asset.ManifestJson = stored.ToJsonString();
             db.WallpaperAssets.Add(asset);
@@ -131,10 +133,11 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
     public async Task<IReadOnlyList<WallpaperSummary>> ListAsync(Guid? userId, bool shared, CancellationToken ct)
     {
         if (!shared && !userId.HasValue) throw new UnauthorizedException("로그인이 필요합니다.");
-        return await db.WallpaperAssets.AsNoTracking().Where(x => !x.IsArchived && (shared ? x.IsPublic : x.UserId == userId))
-            .OrderByDescending(x => x.CreatedAt).Take(100)
-            .Select(x => new WallpaperSummary(x.Id, x.Title, x.Mode, x.IsPublic, x.CreatedAt,
-                shared ? null : x.SourceProjectId)).ToListAsync(ct);
+        var assets = await db.WallpaperAssets.AsNoTracking().Where(x => !x.IsArchived && (shared ? x.IsPublic : x.UserId == userId)).OrderByDescending(x => x.CreatedAt).Take(100).ToListAsync(ct);
+        var authorIds = assets.Select(x => x.UserId).Distinct().ToArray();
+        var authors = await db.Users.AsNoTracking().Where(x => authorIds.Contains(x.Id)).Select(x => new { x.Id, x.Username, x.ProfileImageObjectKey }).ToDictionaryAsync(x => x.Id, ct);
+        return assets.Select(x => { var author = authors.GetValueOrDefault(x.UserId); return new WallpaperSummary(x.Id, x.Title, x.Mode, x.IsPublic, x.CreatedAt, shared ? null : x.SourceProjectId,
+            x.UserId, author?.Username, author?.ProfileImageObjectKey is { } key ? storage.CreateDownloadUrl(key, UrlLifetime) : null); }).ToList();
     }
 
     public async Task<WallpaperManifest> GetManifestAsync(Guid? userId, Guid assetId, bool agentAccess, CancellationToken ct)
