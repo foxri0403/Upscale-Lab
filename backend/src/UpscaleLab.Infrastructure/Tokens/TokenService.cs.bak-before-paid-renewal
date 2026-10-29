@@ -1,0 +1,166 @@
+using Microsoft.EntityFrameworkCore;
+using UpscaleLab.Domain.Entities;
+using UpscaleLab.Domain.Tokens;
+using UpscaleLab.Infrastructure.Database;
+
+namespace UpscaleLab.Infrastructure.Tokens;
+
+public sealed class TokenService(ApplicationDbContext db)
+{
+    public static DateTime CurrentPeriodUtc()
+    {
+        var now = DateTime.UtcNow;
+        return new DateTime(
+            now.Year, now.Month, 1,
+            0, 0, 0, DateTimeKind.Utc);
+    }
+
+    private void RequireTransaction()
+    {
+        if (db.Database.CurrentTransaction is null)
+            throw new InvalidOperationException(
+                "토큰 처리에는 DB 트랜잭션이 필요합니다.");
+    }
+
+    public async Task ReserveAsync(
+        Guid userId,
+        Guid jobId,
+        int targetLongEdge,
+        CancellationToken ct)
+    {
+        RequireTransaction();
+
+        var cost = TokenPolicy.UpscaleCost(targetLongEdge);
+        var period = CurrentPeriodUtc();
+        var now = DateTime.UtcNow;
+
+        // 사용자 지갑이 없으면 Free 플랜으로 생성
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO user_token_wallets
+                ("Id", "UserId", "Plan", "Balance",
+                 "PurchasedBalance", "PeriodStartUtc",
+                 "CreatedAt", "UpdatedAt")
+            VALUES
+                ({Guid.NewGuid()}, {userId}, 'Free', 10,
+                 0, {period}, {now}, {now})
+            ON CONFLICT ("UserId") DO NOTHING
+            """, ct);
+
+        // 지갑 행 잠금: 동일 사용자 동시 요청 직렬화
+        var wallet = await db.UserTokenWallets
+            .FromSqlInterpolated($"""
+                SELECT * FROM user_token_wallets
+                WHERE "UserId" = {userId}
+                FOR UPDATE
+                """)
+            .AsNoTracking()
+            .SingleAsync(ct);
+
+        // 새로운 달이면 월간 토큰만 갱신
+        var monthlyBalance =
+            wallet.PeriodStartUtc < period
+                ? TokenPolicy.MonthlyAllowance(wallet.Plan)
+                : wallet.Balance;
+
+        var monthlyUsed = Math.Min(monthlyBalance, cost);
+        var purchasedUsed = cost - monthlyUsed;
+
+        if (wallet.PurchasedBalance < purchasedUsed)
+            throw new InvalidOperationException(
+                $"토큰이 부족합니다. 필요한 토큰: {cost}개");
+
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE user_token_wallets
+            SET "Balance" = {monthlyBalance - monthlyUsed},
+                "PurchasedBalance" =
+                    "PurchasedBalance" - {purchasedUsed},
+                "PeriodStartUtc" = {period},
+                "UpdatedAt" = {now}
+            WHERE "UserId" = {userId}
+            """, ct);
+
+        db.TokenTransactions.Add(new TokenTransaction
+        {
+            UserId = userId,
+            ProcessingJobId = jobId,
+            Amount = cost,
+            MonthlyAmount = monthlyUsed,
+            PurchasedAmount = purchasedUsed,
+            PeriodStartUtc = period,
+            Status = TokenTransactionStatus.Reserved
+        });
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task CompleteAsync(
+        Guid jobId,
+        CancellationToken ct)
+    {
+        RequireTransaction();
+
+        await db.TokenTransactions
+            .Where(x => x.ProcessingJobId == jobId &&
+                        x.Status == TokenTransactionStatus.Reserved)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(
+                    x => x.Status,
+                    TokenTransactionStatus.Completed)
+                .SetProperty(
+                    x => x.CompletedAt,
+                    DateTime.UtcNow),
+                ct);
+    }
+
+    public async Task RefundAsync(
+        Guid jobId,
+        CancellationToken ct)
+    {
+        RequireTransaction();
+
+        var transaction = await db.TokenTransactions
+            .FromSqlInterpolated($"""
+                SELECT * FROM token_transactions
+                WHERE "ProcessingJobId" = {jobId}
+                FOR UPDATE
+                """)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(ct);
+
+        if (transaction is null ||
+            transaction.Status != TokenTransactionStatus.Reserved)
+            return;
+
+        var now = DateTime.UtcNow;
+        var period = CurrentPeriodUtc();
+
+        // 구매 토큰은 언제나 반환
+        // 월간 토큰은 같은 지급 월인 경우에만 반환
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE user_token_wallets
+            SET "PurchasedBalance" =
+                    "PurchasedBalance" + {transaction.PurchasedAmount},
+                "Balance" =
+                    CASE
+                        WHEN "PeriodStartUtc" =
+                             {transaction.PeriodStartUtc}
+                        THEN "Balance" + {transaction.MonthlyAmount}
+                        ELSE "Balance"
+                    END,
+                "UpdatedAt" = {now}
+            WHERE "UserId" = {transaction.UserId}
+            """, ct);
+
+        await db.TokenTransactions
+            .Where(x => x.Id == transaction.Id &&
+                        x.Status == TokenTransactionStatus.Reserved)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(
+                    x => x.Status,
+                    TokenTransactionStatus.Refunded)
+                .SetProperty(
+                    x => x.CompletedAt,
+                    now),
+                ct);
+    }
+}

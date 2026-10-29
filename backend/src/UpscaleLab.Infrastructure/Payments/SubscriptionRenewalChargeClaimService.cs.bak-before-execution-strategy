@@ -1,0 +1,89 @@
+using Microsoft.EntityFrameworkCore;
+using UpscaleLab.Domain.Entities;
+using UpscaleLab.Infrastructure.Database;
+
+namespace UpscaleLab.Infrastructure.Payments;
+
+public sealed class SubscriptionRenewalChargeClaimService(
+    ApplicationDbContext db)
+{
+    public async Task<bool> TryClaimAsync(
+        Guid userId,
+        string orderId,
+        CancellationToken ct)
+    {
+        if (userId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(orderId) ||
+            orderId.Length > 64)
+            throw new ArgumentException(
+                "구독 결제 주문 정보가 올바르지 않습니다.");
+
+        await using var tx =
+            await db.Database.BeginTransactionAsync(ct);
+
+        var orderInfo = await db.PaymentOrders
+            .AsNoTracking()
+            .Where(o => o.UserId == userId &&
+                        o.OrderId == orderId)
+            .Select(o => new
+            {
+                o.SubscriptionId
+            })
+            .SingleOrDefaultAsync(ct);
+
+        if (orderInfo?.SubscriptionId is null)
+        {
+            await tx.CommitAsync(ct);
+            return false;
+        }
+
+        // 해지 API와 동일한 구독 행을 먼저 잠근다.
+        var subscription = await db.UserSubscriptions
+            .FromSqlInterpolated($"""
+                SELECT * FROM user_subscriptions
+                WHERE "Id" = {orderInfo.SubscriptionId.Value}
+                  AND "UserId" = {userId}
+                FOR UPDATE
+                """)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(ct);
+
+        var now = DateTime.UtcNow;
+
+        if (subscription is null ||
+            subscription.Status != SubscriptionStatus.Active ||
+            subscription.CancelAtPeriodEnd ||
+            string.IsNullOrWhiteSpace(
+                subscription.BillingKeyCiphertext) ||
+            subscription.NextBillingAtUtc is null ||
+            subscription.CurrentPeriodEndUtc is null ||
+            subscription.NextBillingAtUtc > now)
+        {
+            await tx.CommitAsync(ct);
+            return false;
+        }
+
+        // 잠금을 유지한 상태에서 조건부 선점
+        var changed = await db.PaymentOrders
+            .Where(o =>
+                o.UserId == userId &&
+                o.OrderId == orderId &&
+                o.SubscriptionId == subscription.Id &&
+                o.BillingPeriodStartUtc ==
+                    subscription.NextBillingAtUtc &&
+                o.BillingPeriodStartUtc ==
+                    subscription.CurrentPeriodEndUtc &&
+                o.Status == PaymentOrderStatus.Pending)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(
+                    o => o.Status,
+                    PaymentOrderStatus.Confirming)
+                .SetProperty(
+                    o => o.UpdatedAt,
+                    now),
+                ct);
+
+        await tx.CommitAsync(ct);
+        return changed == 1;
+    }
+}

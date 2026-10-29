@@ -1,0 +1,156 @@
+using Microsoft.EntityFrameworkCore;
+using UpscaleLab.Domain.Entities;
+using UpscaleLab.Domain.Payments;
+using UpscaleLab.Domain.Tokens;
+using UpscaleLab.Infrastructure.Database;
+
+namespace UpscaleLab.Infrastructure.Payments;
+
+public sealed class SubscriptionFulfillmentService(
+    ApplicationDbContext db)
+{
+    // 반드시 토스페이먼츠에서 직접 검증한 결제 결과만 전달한다.
+    public async Task<bool> ActivateInitialSubscriptionAsync(
+        Guid userId,
+        TossBillingPaymentResult payment,
+        CancellationToken ct)
+    {
+        if (payment.Status != "DONE" ||
+            string.IsNullOrWhiteSpace(payment.PaymentKey) ||
+            string.IsNullOrWhiteSpace(payment.OrderId))
+            throw new InvalidOperationException(
+                "완료된 구독 결제 정보가 아닙니다.");
+
+        await using var tx =
+            await db.Database.BeginTransactionAsync(ct);
+
+        var order = await db.PaymentOrders
+            .FromSqlInterpolated($"""
+                SELECT * FROM payment_orders
+                WHERE "OrderId" = {payment.OrderId}
+                  AND "UserId" = {userId}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(ct);
+
+        if (order is null ||
+            order.SubscriptionId is null ||
+            order.BillingPeriodStartUtc is null)
+            throw new InvalidOperationException(
+                "구독 결제 주문을 찾을 수 없습니다.");
+
+        if (order.Amount != payment.TotalAmount)
+            throw new InvalidOperationException(
+                "구독 결제 금액이 일치하지 않습니다.");
+
+        if (order.Status == PaymentOrderStatus.Paid)
+        {
+            if (order.PaymentKey != payment.PaymentKey)
+                throw new InvalidOperationException(
+                    "이미 다른 결제로 완료된 주문입니다.");
+
+            await tx.CommitAsync(ct);
+            return false;
+        }
+
+        if (order.Status is not (
+            PaymentOrderStatus.Pending or
+            PaymentOrderStatus.Confirming))
+            throw new InvalidOperationException(
+                "처리할 수 없는 주문 상태입니다.");
+
+        if (order.PaymentKey is not null &&
+            order.PaymentKey != payment.PaymentKey)
+            throw new InvalidOperationException(
+                "주문의 결제 키가 일치하지 않습니다.");
+
+        var subscription = await db.UserSubscriptions
+            .FromSqlInterpolated($"""
+                SELECT * FROM user_subscriptions
+                WHERE "Id" = {order.SubscriptionId.Value}
+                  AND "UserId" = {userId}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(ct);
+
+        if (subscription is null ||
+            subscription.Status != SubscriptionStatus.Pending ||
+            string.IsNullOrWhiteSpace(
+                subscription.BillingKeyCiphertext))
+            throw new InvalidOperationException(
+                "활성화할 수 없는 구독입니다.");
+
+        var expectedCode = subscription.Plan switch
+        {
+            SubscriptionPlan.Plus => "PLUS_MONTHLY",
+            SubscriptionPlan.Pro => "PRO_MONTHLY",
+            _ => throw new InvalidOperationException(
+                "지원하지 않는 구독 플랜입니다.")
+        };
+
+        if (order.ProductCode != expectedCode)
+            throw new InvalidOperationException(
+                "주문과 구독 플랜이 일치하지 않습니다.");
+
+        var product = PaymentCatalog.Get(expectedCode);
+
+        if (!product.IsSubscription ||
+            product.Price != order.Amount)
+            throw new InvalidOperationException(
+                "구독 상품 정보가 올바르지 않습니다.");
+
+        var now = DateTime.UtcNow;
+
+        if (payment.ApprovedAt is null)
+            throw new InvalidOperationException(
+                "실제 결제 승인 시각을 확인할 수 없습니다.");
+
+        var start = payment.ApprovedAt.Value.UtcDateTime;
+        var end = start.AddMonths(1);
+
+        if (start > now.AddMinutes(5) || end <= now)
+            throw new InvalidOperationException(
+                "결제 승인 시각 또는 구독 기간 확인이 필요합니다.");
+
+        // 지갑이 없으면 Free 기본 지갑을 생성한다.
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO user_token_wallets
+                ("Id", "UserId", "Plan", "Balance",
+                 "PurchasedBalance", "PeriodStartUtc",
+                 "CreatedAt", "UpdatedAt")
+            VALUES
+                ({Guid.NewGuid()}, {userId}, 'Free', 10,
+                 0, {start}, {now}, {now})
+            ON CONFLICT ("UserId") DO NOTHING
+            """, ct);
+
+        // 월간 토큰만 교체하고 구매 토큰은 그대로 유지한다.
+        var updated = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE user_token_wallets
+            SET "Plan" = {subscription.Plan.ToString()},
+                "Balance" = {product.Tokens},
+                "PeriodStartUtc" = {start},
+                "UpdatedAt" = {now}
+            WHERE "UserId" = {userId}
+            """, ct);
+
+        if (updated != 1)
+            throw new InvalidOperationException(
+                "구독 토큰 지갑 변경에 실패했습니다.");
+
+        subscription.Status = SubscriptionStatus.Active;
+        subscription.CurrentPeriodStartUtc = start;
+        subscription.CurrentPeriodEndUtc = end;
+        subscription.NextBillingAtUtc = end;
+        subscription.CancelAtPeriodEnd = false;
+
+        order.Status = PaymentOrderStatus.Paid;
+        order.PaymentKey = payment.PaymentKey;
+        order.PaidAt = now;
+
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+
+        return true;
+    }
+}
