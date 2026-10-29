@@ -5,6 +5,7 @@ import { Workspace } from "./Workspace";
 import { getSession, signOut, type Session } from "./auth";
 import { navigate, useRoute, Empty, Link } from "./ui";
 import "./styles.css";
+import "./responsive.css";
 import { cloud, cloudMe, cloudLogout } from "./api";
 import { clearCloudCache } from "./cloud-store";
 import { SharedImage } from "./SharedImage";

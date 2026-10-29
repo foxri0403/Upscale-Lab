@@ -46,6 +46,7 @@ import { imageFeatures } from "./image-features";
 import { copyGeneratedLink } from "./share-clipboard";
 import "./studio.css";
 import { CropControls } from "./CropControls";
+import { useMediaQuery } from "./use-media-query";
 
 const tools: {
   id: Tool;
@@ -81,6 +82,7 @@ const tools: {
 ];
 const normalizedEdit = (value?: Edit) => ({ ...defaultEdit, ...value });
 export function Studio({ route }: { route: string }) {
+  const compact = useMediaQuery("(max-width: 1100px)");
   const {
     library,
     update,
@@ -427,7 +429,7 @@ export function Studio({ route }: { route: string }) {
           <button aria-label="이미지 정보" title="이미지 정보" onClick={() => setDialog("info")}><Info size={18} /><span>이미지 정보</span></button>
         </div>
       </div>
-      <div className="tool-tabs studio-tool-dock" role="tablist" aria-label="이미지 편집 도구" aria-orientation="vertical">
+      <div className="tool-tabs studio-tool-dock" role="tablist" aria-label="이미지 편집 도구" aria-orientation={compact ? "horizontal" : "vertical"}>
         {tools.map(({ id, name, icon: Icon }) => (
           <button key={id} id={`studio-tool-${id}`} type="button" role="tab"
             aria-controls="studio-properties" aria-selected={tool === id}
