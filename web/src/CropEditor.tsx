@@ -1,24 +1,24 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { filterStyle, type Edit, type Picture } from "./model";
 import { cropRegion, moveCrop, resizeCrop, type CropRegion } from "./crop-geometry";
+import { previewStageStyle, PreviewPaletteButton, type PreviewPalette } from "./StudioPreview";
 import "./crop.css";
 
 const handles = { nw: "왼쪽 위", n: "위쪽", ne: "오른쪽 위", e: "오른쪽", se: "오른쪽 아래", s: "아래쪽", sw: "왼쪽 아래", w: "왼쪽" };
-export function CropEditor({ picture, edit, change, disabled = false, zoom = "fit", rulers = false, onDimensions }: {
+export function CropEditor({ picture, edit, change, disabled = false, zoom = "fit", rulers = false, palette, onDimensions }: {
   picture: Picture; edit: Edit; change: (edit: Edit) => void; disabled?: boolean; zoom?: string; rulers?: boolean;
+  palette?: PreviewPalette;
   onDimensions?: (value: { src: string; width: number; height: number }) => void;
 }) {
   const root = useRef<HTMLDivElement>(null), stage = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ width: 320, height: 240 }), [pixels, setPixels] = useState({ src: "", width: 0, height: 0 });
+  const [pixels, setPixels] = useState({ src: "", width: 0, height: 0 });
   const drag = useRef<{ id: number; x: number; y: number; width: number; height: number; region: CropRegion; cancel: CropRegion; handle: string } | null>(null);
   const source = picture.background || picture.src;
   const dimensionsCallback = useRef(onDimensions); dimensionsCallback.current = onDimensions;
-  useEffect(() => { const observer = new ResizeObserver(([entry]) => setSize({ width: entry.contentRect.width, height: entry.contentRect.height })); observer.observe(root.current!); return () => observer.disconnect(); }, []);
   useEffect(() => { const img = new Image(); img.onload = () => { const value = { src: source, width: img.naturalWidth, height: img.naturalHeight }; setPixels(value); dimensionsCallback.current?.(value); }; img.src = source; return () => { img.onload = null; drag.current = null; }; }, [source]);
   const width = pixels.src === source ? pixels.width : picture.width || 1920, height = pixels.src === source ? pixels.height : picture.height || 1080;
   const region = cropRegion(width, height, edit), active = edit.crop !== "original", editable = active && !disabled;
-  const fitted = Math.max(.0001, Math.min((size.width - 48) / width, (size.height - 48) / height));
-  const scale = zoom === "fit" ? fitted : Math.max(.05, Number(zoom) / 100 || fitted), stageWidth = width * scale, stageHeight = height * scale;
+  const fit = zoom === "fit", scale = Number(zoom) / 100;
   function emit(next: CropRegion) { change({ ...edit, cropRegion: next }); }
   function start(event: ReactPointerEvent<HTMLDivElement>) {
     if (!editable || !event.isPrimary || event.button !== 0) return;
@@ -45,9 +45,10 @@ export function CropEditor({ picture, edit, change, disabled = false, zoom = "fi
     const handle = (event.target as HTMLElement).dataset.cropHandle;
     emit(handle ? resizeCrop(region, handle, dx, dy, width, height) : moveCrop(region, dx, dy));
   }
-  return <div ref={root} className={`crop-editor ${rulers ? "crop-editor-rulers" : ""}`} aria-label="원본 이미지 자르기">
-    <div className="crop-editor-surface" style={{ width: Math.max(size.width, stageWidth + 48), height: Math.max(size.height, stageHeight + 48) }}>
-      <div ref={stage} className={`crop-image-stage ${editable ? "crop-editable" : ""}`} style={{ width: stageWidth, height: stageHeight }}
+  return <div ref={root} className={`crop-editor ${rulers ? "crop-editor-rulers" : ""} ${fit ? "crop-preview-fit" : ""}`} aria-label="원본 이미지 자르기">
+    <div className="crop-editor-surface" style={{ width: fit ? "100%" : width * scale + 48, height: fit ? "100%" : height * scale + 48 }}>
+      {palette && <PreviewPaletteButton {...palette} />}
+      <div ref={stage} className={`crop-image-stage ${editable ? "crop-editable" : ""}`} style={previewStageStyle(width, height, zoom, rulers ? 22 : 48)}
         onPointerDown={start} onPointerMove={move} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)} onKeyDown={key}>
         <div className="crop-source-image" style={{ filter: filterStyle(edit.filter) }}><img src={source} alt={picture.name} draggable={false} />
           {picture.background && edit.foreground && picture.foregrounds?.map(src => <img key={src} src={src} alt="" draggable={false} />)}</div>

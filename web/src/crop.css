@@ -1,7 +1,13 @@
-.crop-editor { position: absolute; inset: 0; overflow: auto; background: #f2f4f9; overscroll-behavior: contain; }
+.crop-editor { position: absolute; inset: 0; overflow: auto; background: #f2f4f9; overscroll-behavior: contain; container-type: size; }
+.crop-editor.crop-preview-fit { overflow: hidden; }
 .crop-editor-rulers { inset: 26px 0 0 26px; }
-.crop-editor-surface { display: flex; align-items: center; justify-content: center; }
-.crop-image-stage { position: relative; flex: none; outline: 1px solid #8799ff; user-select: none; }
+.crop-editor-surface { position: relative; min-width: 100%; min-height: 100%; display: flex; align-items: center; justify-content: center; }
+.crop-image-stage { position: relative; flex: none; z-index: 1; outline: 1px solid #8799ff; user-select: none; }
+.studio-canvas-center { container-type: size; }
+.studio-preview-stage { position: relative; z-index: 1; }
+.studio-palette-toggle { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.studio-palette-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: -3px; }
+.studio-canvas-viewport.studio-palette-dark, .studio-palette-dark .crop-editor { background: #303030; }
 .crop-source-image, .crop-source-image > img { position: absolute; inset: 0; width: 100%; height: 100%; }
 .crop-source-image > img { object-fit: fill; pointer-events: none; }
 .crop-editable { touch-action: none; cursor: crosshair; }

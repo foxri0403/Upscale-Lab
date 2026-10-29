@@ -6,6 +6,7 @@ import { imageFeatures } from "./image-features";
 import { visibleLayers, type LayerPreview } from "./layer-preview";
 import { CropEditor } from "./CropEditor";
 import { pixelCrop } from "./crop-geometry";
+import { previewStageStyle, PreviewPaletteButton } from "./StudioPreview";
 
 export function StudioCanvas({ picture, edit, tool, layered, background, foregrounds, selectedLayer = "all", saveState, unsaved, onDimensions, motion, onEdit, readOnly = false }: {
   picture: Picture; edit: Edit; tool: Tool; layered: boolean;
@@ -16,24 +17,15 @@ export function StudioCanvas({ picture, edit, tool, layered, background, foregro
   motion: { active: boolean; stage: RefObject<HTMLDivElement | null>; layers: RefObject<HTMLDivElement | null> };
   onEdit: (value: Edit) => void; readOnly?: boolean;
 }) {
-  const viewport = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ width: 0, height: 0 });
   const [pixels, setPixels] = useState({ src: "", width: 0, height: 0 });
   const [zoom, setZoom] = useState("fit");
+  const [darkPalette, setDarkPalette] = useState(false);
+  const palette = { dark: darkPalette, toggle: () => setDarkPalette(value => !value) };
   const visible = visibleLayers(selectedLayer);
   const moving = motion.active;
   const dimensionsCallback = useRef(onDimensions);
   dimensionsCallback.current = onDimensions;
   const source = layered && (tool === "layers" || tool === "crop") ? background : picture.src;
-  useEffect(() => {
-    const element = viewport.current;
-    if (!element) return;
-    const observer = new ResizeObserver(([entry]) => setSize({
-      width: entry.contentRect.width, height: entry.contentRect.height,
-    }));
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
   useEffect(() => {
     setZoom("fit");
     const image = new Image();
@@ -50,26 +42,22 @@ export function StudioCanvas({ picture, edit, tool, layered, background, foregro
   const selected = pixelCrop(width, height, edit);
   const croppedWidth = tool === "crop" ? width : selected.width;
   const croppedHeight = tool === "crop" ? height : selected.height;
-  const fitted = Math.min(Math.max(1, size.width - 48) / croppedWidth,
-    Math.max(1, size.height - 48) / croppedHeight);
-  const scale = zoom === "fit" ? fitted : Number(zoom) / 100;
-  const stageWidth = Math.max(1, croppedWidth * scale);
-  const stageHeight = Math.max(1, croppedHeight * scale);
   const cropped = edit.crop !== "original";
   const measured = pixels.src === source || !!(picture.width && picture.height);
   return (
     <section className="studio-workspace" aria-label="이미지 미리보기">
-      <div className="studio-canvas-viewport" ref={viewport}>
+      <div className={`studio-canvas-viewport ${darkPalette ? "studio-palette-dark" : ""}`}>
         <div className="studio-ruler studio-ruler-x" aria-hidden="true">
           {Array.from({ length: 11 }, (_, i) => <span key={i}>{Math.round(croppedWidth * i / 10).toLocaleString("en-US")}</span>)}
         </div>
         <div className="studio-ruler studio-ruler-y" aria-hidden="true">
           {Array.from({ length: 7 }, (_, i) => <span key={i}>{Math.round(croppedHeight * i / 6).toLocaleString("en-US")}</span>)}
         </div>
-        {tool === "crop" ? <CropEditor picture={layered ? { ...picture, background, foregrounds } : picture} edit={edit} change={onEdit} disabled={readOnly} zoom={zoom} rulers /> : <div className="studio-canvas-center">
-          <div className={`canvas-stage ${cropped ? "crop-stage" : ""} ${layered && selectedLayer === "subject" && tool === "layers" ? "subject-only" : ""}`}
-            ref={motion.stage} style={{ width: stageWidth, height: stageHeight }}>
-            <div className="studio-image-plane" style={{ width: width * scale, height: height * scale, left: -selected.x * scale, top: -selected.y * scale }}>
+        {tool === "crop" ? <CropEditor picture={layered ? { ...picture, background, foregrounds } : picture} edit={edit} change={onEdit} disabled={readOnly} zoom={zoom} palette={palette} rulers /> : <div className="studio-canvas-center">
+          <PreviewPaletteButton {...palette} />
+          <div className={`canvas-stage studio-preview-stage ${cropped ? "crop-stage" : ""} ${layered && selectedLayer === "subject" && tool === "layers" ? "subject-only" : ""}`}
+            ref={motion.stage} style={previewStageStyle(croppedWidth, croppedHeight, zoom)}>
+            <div className="studio-image-plane" style={{ width: `${width / croppedWidth * 100}%`, height: `${height / croppedHeight * 100}%`, left: `${-selected.x / croppedWidth * 100}%`, top: `${-selected.y / croppedHeight * 100}%` }}>
             {layered && tool === "layers" ? (
               <div className={`live-canvas ${moving ? "motion-active" : ""}`} ref={motion.layers} style={{ filter: filterStyle(edit.filter) }}>
                 {visible.background && <img src={background} alt="배경 레이어" />}
