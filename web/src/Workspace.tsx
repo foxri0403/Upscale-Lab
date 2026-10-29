@@ -106,6 +106,27 @@ export function Workspace({
   logout: () => void;
 }) {
   const [session, setSession] = useState(initialSession);
+  const accountMenu = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const dismissOutside = (event: Event) => {
+      const menu = accountMenu.current;
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+    };
+    const dismissEscape = (event: KeyboardEvent) => {
+      const menu = accountMenu.current;
+      if (menu?.open && event.key === "Escape") {
+        event.preventDefault(); menu.open = false; menu.querySelector("summary")?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", dismissOutside, true);
+    document.addEventListener("focusin", dismissOutside);
+    document.addEventListener("keydown", dismissEscape);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOutside, true);
+      document.removeEventListener("focusin", dismissOutside);
+      document.removeEventListener("keydown", dismissEscape);
+    };
+  }, []);
   useEffect(() => {
     if (!cloud) return;
     let active = true;
@@ -452,7 +473,7 @@ export function Workspace({
           <Brand to="/app/images" />
           <span className="header-section">{page?.name || "Upscale Lab"}</span>
           <div className="header-right">
-            <details className="account-menu">
+            <details className="account-menu" ref={accountMenu}>
               <summary>
                 <AccountAvatar session={session} />
                 <span>내 계정</span>
@@ -461,7 +482,7 @@ export function Workspace({
               <div className="account-dropdown">
                 <strong>{session.name}</strong>
                 <small>{session.email}</small>
-                <button onClick={() => setDialog("settings")}>
+                <button onClick={() => { if (accountMenu.current) { accountMenu.current.open = false; accountMenu.current.querySelector("summary")?.focus(); } setDialog("settings"); }}>
                   <UserRound size={16} /> 계정 정보
                 </button>
                 <button onClick={logout}>

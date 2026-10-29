@@ -3211,9 +3211,6 @@ td:last-child {
 .account-settings .account-delete-check { display: flex !important; align-items: center; }
 .account-settings input[type="checkbox"] { width: 16px; height: 16px; flex: 0 0 16px; padding: 0; }
 .account-settings .account-danger { border-color: #efb7bf; }
-.account-photo-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.account-photo-actions label { position: relative; overflow: hidden; }
-.account-photo-actions input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
 .explore-page .explore-details { position: static; height: auto; max-height: none; scroll-margin-top: 90px; }
 .explore-details-content { overflow: visible; flex: none; scrollbar-gutter: auto; }
 .devices-page .device-grid { align-items: stretch; }
@@ -3282,3 +3279,16 @@ td:last-child {
 @media (max-width: 1250px) {
   .devices-page { --device-panel-padding: 9px; }
 }
+
+/* Profile photo controls are opened from the avatar in account settings. */
+.account-settings > form { min-width: 0; }
+.account-settings .button { white-space: normal; }
+.account-photo-trigger { display: inline-flex; flex-shrink: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.account-photo-trigger:hover { box-shadow: 0 0 0 4px #7774ff12; }
+.account-photo-trigger:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; }
+.profile-photo-dialog { display: grid; gap: 20px; }
+.profile-photo-preview { display: flex; justify-content: center; padding: 12px 0; }
+.profile-photo-preview .avatar { width: min(280px, 65vw); height: auto; aspect-ratio: 1; }
+.profile-photo-preview .avatar > svg { width: 40%; height: 40%; }
+.profile-photo-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.profile-photo-options .button { min-width: 0; }

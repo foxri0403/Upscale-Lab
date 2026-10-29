@@ -25,6 +25,8 @@ export function AccountSettings({ session, updated, close, logout }: { session: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const photoInput = useRef<HTMLInputElement>(null);
   const lock = useRef(false);
   async function run(action: () => Promise<void>) {
     if (lock.current) return;
@@ -59,7 +61,7 @@ export function AccountSettings({ session, updated, close, logout }: { session: 
         }
         next = await updateDemoAccount(session, { avatarUrl });
       }
-      updated(next); setMessage(file ? "프로필 사진을 변경했습니다." : "기본 프로필로 변경했습니다.");
+      updated(next); setPhotoOpen(false); setMessage(file ? "프로필 사진을 변경했습니다." : "기본 프로필로 변경했습니다.");
     });
   }
   async function changePassword(e: FormEvent) {
@@ -80,15 +82,11 @@ export function AccountSettings({ session, updated, close, logout }: { session: 
       setDeletePassword(""); logout();
     });
   }
-  return <Modal title="계정 정보" wide close={() => { if (!lock.current) close(); }}>
+  return <><Modal title="계정 정보" wide close={() => { if (!lock.current) close(); }}>
     <div className="account-settings" aria-busy={busy}>
-      <div className="account-profile-row"><AccountAvatar session={session} large /><div><strong>{session.name}</strong><p>{session.email}</p></div></div>
+      <div className="account-profile-row"><button type="button" className="account-photo-trigger" aria-label="프로필 사진 보기 및 변경" aria-haspopup="dialog" disabled={busy} onClick={() => { setError(""); setMessage(""); setPhotoOpen(true); }}><AccountAvatar session={session} large /></button><div><strong>{session.name}</strong><p>{session.email}</p></div></div>
       {error && <p className="form-error" role="alert">{error}</p>}
       {message && <p className="notice" role="status">{message}</p>}
-      <fieldset disabled={busy}><legend>프로필 사진</legend><p>JPG, PNG, WebP · 최대 5MB</p>
-        <div className="account-photo-actions"><label className="button secondary">사진 변경<input aria-label="프로필 사진 선택" type="file" accept="image/jpeg,image/png,image/webp" onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ""; if (f) void photo(f); }} /></label>
-          <button className="button secondary" disabled={!session.avatarUrl} onClick={() => void photo()}>기본 사진으로</button></div>
-      </fieldset>
       <form onSubmit={saveName}><fieldset disabled={busy}><legend>아이디 변경</legend>
         <label>아이디<input required minLength={2} maxLength={50} value={name} autoComplete="username" onChange={e => setName(e.target.value)} /></label>
         <label>현재 비밀번호<input required type="password" maxLength={128} autoComplete="current-password" value={current} onChange={e => setCurrent(e.target.value)} /></label>
@@ -111,5 +109,17 @@ export function AccountSettings({ session, updated, close, logout }: { session: 
         <button type="submit" className="button danger" disabled={!accepted || deleteText !== "계정 삭제"}>{busy ? <Busy /> : null}계정 영구 삭제</button>
       </fieldset></form>
     </div>
-  </Modal>;
+  </Modal>
+    {photoOpen && <Modal title="프로필 사진" close={() => { if (!lock.current) setPhotoOpen(false); }}>
+      <div className="profile-photo-dialog" aria-busy={busy}>
+        <div className="profile-photo-preview"><AccountAvatar session={session} large /></div>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <input ref={photoInput} hidden type="file" aria-label="프로필 사진 선택" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ""; if (file) void photo(file); }} />
+        <div className="profile-photo-options">
+          <button type="button" className="button primary" disabled={busy} onClick={() => photoInput.current?.click()}>{busy ? <Busy /> : null}사진 변경</button>
+          <button type="button" className="button secondary" disabled={busy || !session.avatarUrl} onClick={() => void photo()}>기본 사진</button>
+        </div>
+      </div>
+    </Modal>}
+  </>;
 }
