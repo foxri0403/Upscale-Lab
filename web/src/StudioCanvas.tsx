@@ -24,7 +24,7 @@ export function StudioCanvas({ picture, edit, tool, layered, background, foregro
   const moving = motion.active;
   const dimensionsCallback = useRef(onDimensions);
   dimensionsCallback.current = onDimensions;
-  const source = layered && tool === "layers" ? background : picture.src;
+  const source = layered && (tool === "layers" || tool === "crop") ? background : picture.src;
   useEffect(() => {
     const element = viewport.current;
     if (!element) return;

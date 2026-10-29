@@ -4,15 +4,17 @@ import { cropRegion, moveCrop, resizeCrop, type CropRegion } from "./crop-geomet
 import "./crop.css";
 
 const handles = { nw: "왼쪽 위", n: "위쪽", ne: "오른쪽 위", e: "오른쪽", se: "오른쪽 아래", s: "아래쪽", sw: "왼쪽 아래", w: "왼쪽" };
-export function CropEditor({ picture, edit, change, disabled = false, zoom = "fit", rulers = false }: {
+export function CropEditor({ picture, edit, change, disabled = false, zoom = "fit", rulers = false, onDimensions }: {
   picture: Picture; edit: Edit; change: (edit: Edit) => void; disabled?: boolean; zoom?: string; rulers?: boolean;
+  onDimensions?: (value: { src: string; width: number; height: number }) => void;
 }) {
   const root = useRef<HTMLDivElement>(null), stage = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 320, height: 240 }), [pixels, setPixels] = useState({ src: "", width: 0, height: 0 });
   const drag = useRef<{ id: number; x: number; y: number; width: number; height: number; region: CropRegion; cancel: CropRegion; handle: string } | null>(null);
   const source = picture.background || picture.src;
+  const dimensionsCallback = useRef(onDimensions); dimensionsCallback.current = onDimensions;
   useEffect(() => { const observer = new ResizeObserver(([entry]) => setSize({ width: entry.contentRect.width, height: entry.contentRect.height })); observer.observe(root.current!); return () => observer.disconnect(); }, []);
-  useEffect(() => { const img = new Image(); img.onload = () => setPixels({ src: source, width: img.naturalWidth, height: img.naturalHeight }); img.src = source; return () => { img.onload = null; drag.current = null; }; }, [source]);
+  useEffect(() => { const img = new Image(); img.onload = () => { const value = { src: source, width: img.naturalWidth, height: img.naturalHeight }; setPixels(value); dimensionsCallback.current?.(value); }; img.src = source; return () => { img.onload = null; drag.current = null; }; }, [source]);
   const width = pixels.src === source ? pixels.width : picture.width || 1920, height = pixels.src === source ? pixels.height : picture.height || 1080;
   const region = cropRegion(width, height, edit), active = edit.crop !== "original", editable = active && !disabled;
   const fitted = Math.max(.0001, Math.min((size.width - 48) / width, (size.height - 48) / height));

@@ -90,6 +90,7 @@ export function Studio({ route }: { route: string }) {
     ? [...library.images, ...(library.assets || [])].find((p) => p.id === id) : undefined;
   const [tool, setTool] = useState<Tool>("live");
   const [edit, setEdit] = useState<Edit>(picture?.edit || defaultEdit);
+  const [cropDimensions, setCropDimensions] = useState({ src: "", width: 0, height: 0 });
   const [xy, setXy] = useState({ x: 0, y: 0 });
   const editRef = useRef(edit);
   editRef.current = edit;
@@ -318,7 +319,7 @@ export function Studio({ route }: { route: string }) {
           </button>
         </div>
         <div className="canvas-panel">
-          {tool === "crop" ? <div className="canvas-stage"><CropEditor picture={isFox ? { ...picture, background: backgroundSrc, foregrounds: foregroundSrcs } : picture} edit={edit} disabled={published || busy} change={value => { if (!published && !busy) setEdit(value); }} /></div> : <div
+          {tool === "crop" ? <div className="canvas-stage"><CropEditor onDimensions={setCropDimensions} picture={isFox ? { ...picture, background: backgroundSrc, foregrounds: foregroundSrcs } : picture} edit={edit} disabled={published || busy} change={value => { if (!published && !busy) setEdit(value); }} /></div> : <div
             className={`canvas-stage ${cropRatio ? "crop-stage" : ""}`}
             style={
               cropRatio
@@ -495,7 +496,7 @@ export function Studio({ route }: { route: string }) {
             </Notice>
           </>
         )}
-        {tool === "crop" && <CropControls edit={edit} width={picture.width || 1920} height={picture.height || 1080} change={value => { if (!published && !busy) setEdit(value); }} />}
+        {tool === "crop" && <CropControls edit={edit} width={cropDimensions.src === (isFox ? backgroundSrc : picture.src) ? cropDimensions.width : picture.width || 1920} height={cropDimensions.src === (isFox ? backgroundSrc : picture.src) ? cropDimensions.height : picture.height || 1080} change={value => { if (!published && !busy) setEdit(value); }} />}
         {tool === "filter" && (
           <>
             <h3>색감</h3>
