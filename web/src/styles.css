@@ -3234,3 +3234,26 @@ td:last-child {
 @media (max-width: 800px) {
   .explore-page .explore-details { position: absolute; inset: 0 0 auto auto; height: auto; }
 }
+
+/* Device previews keep their dimensions when the navigation changes the content width. */
+.devices-page { --device-preview-height: min(180px, calc((100vw - 110px) * 0.625)); }
+.devices-page .display-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--device-preview-height) * 1.6 + 28px)), 1fr)); }
+.devices-page .display-label { grid-template-columns: minmax(0, 1fr) auto; }
+.devices-page .display-preview { display: flex; justify-content: center; align-items: flex-start; height: calc(var(--device-preview-height) + 10px); flex: 0 0 auto; }
+.devices-page .monitor-wallpaper { width: calc(var(--device-preview-height) * 1.6); height: var(--device-preview-height); flex: 0 0 auto; margin: 0; }
+.devices-page .monitor-wallpaper > .picture-view, .devices-page .monitor-wallpaper > .unknown-wallpaper { width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; }
+.devices-page .monitor-wallpaper img { height: 100%; aspect-ratio: auto; }
+.devices-page .mobile-device .phone-wallpaper { width: calc(var(--device-preview-height) * 0.5); height: var(--device-preview-height); aspect-ratio: auto; margin: 0; }
+.devices-page .display-resolution, .devices-page .mobile-device .display-resolution { margin: 12px 0 6px; }
+.devices-page .display-wallpaper-title, .devices-page .mobile-device .display-wallpaper-title { display: block; margin: 0 0 14px; min-height: 20px; min-width: 0; line-height: 20px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.7857143rem; font-weight: 500; color: #647591; }
+.devices-page .mobile-device .display-card { padding-top: 14px; }
+@media (max-width: 1250px) {
+  .devices-page .mobile-device .display-card { padding-top: 10px; }
+}
+@container (max-width: 1120px) {
+  .devices-page .device-card { grid-column: span 6; }
+  .devices-page .device-two-screens, .devices-page .device-many-screens { grid-column: 1 / -1; }
+}
+@container (max-width: 700px) {
+  .devices-page .device-card { grid-column: 1 / -1; }
+}

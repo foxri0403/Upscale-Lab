@@ -272,31 +272,32 @@ export function Devices() {
                               {display.connected ? "연결됨" : "연결 끊김"}
                             </span>
                           </div>
-                          <div
-                            className={
-                              mobile && display.canApplyWallpaper !== false ? "phone-wallpaper" : "monitor-wallpaper"
-                            }
-                          >
-                            {current ? (
-                              <PictureView picture={current} />
-                            ) : (
-                              <div className="unknown-wallpaper">
-                                {mobile && display.canApplyWallpaper !== false ? <Smartphone size={30} /> : <Monitor size={30} />}
-                                <span>이미지 정보 없음</span>
-                              </div>
-                            )}
-                            {mobile && current && display.target === "Lock" && (
-                              <span className="lock-clock">09:41</span>
-                            )}
+                          <div className="display-preview">
+                            <div
+                              className={
+                                mobile && display.canApplyWallpaper !== false ? "phone-wallpaper" : "monitor-wallpaper"
+                              }
+                            >
+                              {current ? (
+                                <PictureView picture={current} />
+                              ) : (
+                                <div className="unknown-wallpaper">
+                                  {mobile && display.canApplyWallpaper !== false ? <Smartphone size={30} /> : <Monitor size={30} />}
+                                  <span>{display.observation === "Cleared" ? "기본 바탕화면" : "이미지 정보 없음"}</span>
+                                </div>
+                              )}
+                              {mobile && current && display.target === "Lock" && (
+                                <span className="lock-clock">09:41</span>
+                              )}
+                            </div>
                           </div>
                           <p className="display-resolution">
                             {display.resolution}
                             {display.refreshRateHz != null && ` · ${Number(display.refreshRateHz.toFixed(2))} Hz`}
                           </p>
-                          <div className="wallpaper-state">
-                            <span>현재 배경화면</span>
-                            <strong>{current?.name || (display.observation === "External" ? "기기에서 변경된 배경화면" : "확인된 이미지 없음")}</strong>
-                          </div>
+                          <p className="display-wallpaper-title" title={current?.name || "기본 바탕화면"}>
+                            {current?.name || "기본 바탕화면"}
+                          </p>
                           {desired && (
                             <div className="pending-wallpaper">
                               <Clock3 size={14} /> 적용 대기: {desired.name}
