@@ -161,8 +161,13 @@ public sealed class RunPodUpscaleService(
             input = new
             {
                 operation = "upscale",
-                scale,
-                target_long_edge = targetLongEdge,
+                resolution = targetLongEdge switch
+                {
+                    1920 => "FHD",
+                    2560 => "QHD",
+                    3840 => "4K",
+                    _ => throw new ArgumentException("Unsupported target resolution.")
+                },
                 image_base64 = imageBase64
             }
         });
