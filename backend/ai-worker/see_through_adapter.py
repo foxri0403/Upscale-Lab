@@ -1,8 +1,8 @@
-"""Export pretrained See-through PSD inference as full-canvas transparent PNG parts.
+"""See-through PSD exporter with non-destructive color/alpha diagnostics.
 
-The existing ASP.NET Core result validator requires every part PNG to have the
-same width and height. PSD layer.composite() can return only a cropped layer
-bounding box, so this adapter places each part back on the PSD's full canvas.
+Keep the established full-canvas PNG + manifest interface intact.
+Diagnostic information is attached to the manifest; sensitive URLs are never read
+or logged here. Does NOT fabricate color or alpha when the PSD lacks them.
 """
 
 from __future__ import annotations
@@ -18,8 +18,7 @@ from psd_tools import PSDImage
 
 
 def classify_layer(name: str) -> str:
-    normalized = name.casefold().replace("-", "_").replace(" ", "_")
-    # Specific face/hair parts must be matched before general "face"/"hair".
+    normalized = name.casefold().replace('-', '_').replace(' ', '_')
     groups = (
         (("background", "bg"), "Background"),
         (("back_hair", "backhair", "rear_hair", "behind_hair"), "BackHair"),
@@ -42,84 +41,171 @@ def classify_layer(name: str) -> str:
     return "Other"
 
 
-def pixel_layers(psd: PSDImage):
-    for layer in psd.descendants():
-        if layer.is_group() or not layer.is_visible():
-            continue
-        picture = layer.composite()
-        if picture is not None and picture.getbbox() is not None:
-            yield layer, picture
+def pixel_quality(image: Image.Image | None) -> dict | None:
+    """Compact quality indicators; no image pixels or private data in metadata.
+
+    A downsample is used only for COLOR detection, not for the exported images.
+    Full-resolution alpha min/max is computed from the actual alpha channel.
+    """
+    if image is None:
+        return None
+    rgba = image.convert('RGBA')
+    amin, amax = rgba.getchannel('A').getextrema()
+    probe = rgba.copy()
+    probe.thumbnail((256, 256))
+    pixels = probe.getdata()
+    visible = colored = 0
+    for r, g, b, a in pixels:
+        if a > 8:
+            visible += 1
+            if max(r, g, b) - min(r, g, b) >= 5:
+                colored += 1
+    return {
+        'mode': image.mode,
+        'size': [image.width, image.height],
+        'alphaMin': amin,
+        'alphaMax': amax,
+        'hasTransparency': amin < 255,
+        'visibleColoredPercent': round(100.0 * colored / max(visible, 1), 2),
+    }
 
 
 def render_full_canvas(image: Image.Image, layer, canvas_size: tuple[int, int]) -> Image.Image:
-    """Restore PSD layer placement without premultiplying transparency twice."""
-    rgba = image.convert("RGBA")
+    rgba = image.convert('RGBA')
     if rgba.size == canvas_size:
         return rgba
-    result = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
+    result = Image.new('RGBA', canvas_size, (0, 0, 0, 0))
+    # Direct paste preserves the original RGBA channels; a mask would multiply alpha.
     result.paste(rgba, (int(layer.left), int(layer.top)))
     return result
 
 
-def export_psd(psd: PSDImage, output: Path) -> list[dict]:
-    layers_dir = output / "layers"
+def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -> list[dict]:
+    layers_dir = output / 'layers'
     layers_dir.mkdir(parents=True, exist_ok=True)
-    extracted = list(pixel_layers(psd))
+    extracted = []
+    for layer in psd.descendants():
+        if layer.is_group() or not layer.is_visible():
+            continue
+        comp = layer.composite()
+        if comp is not None and comp.getbbox() is not None:
+            extracted.append((layer, comp))
+
     if not 1 <= len(extracted) <= 64:
-        raise ValueError("See-through PSD must have between 1 and 64 visible pixel layers")
+        raise ValueError('See-through PSD must have between 1 and 64 visible pixel layers')
+
     manifest = []
+    diagnoses = []
     denominator = max(1, len(extracted) - 1)
-    for order, (layer, picture) in enumerate(extracted):
-        filename = f"{order:03d}.png"
-        result = render_full_canvas(picture, layer, (psd.width, psd.height))
-        result.save(layers_dir / filename, format="PNG")
-        depth = order / denominator
-        manifest.append(
-            {
-                "file": f"layers/{filename}",
-                "layerType": classify_layer(layer.name or ""),
-                "layerOrder": order,
-                "depth": depth,
-                "positionX": 0.0,
-                "positionY": 0.0,
-                "rotation": 0.0,
-                "scale": 1.0,
-                "movementX": round(4.0 + depth * 20.0, 3),
-                "movementY": round(3.0 + depth * 16.0, 3),
-            }
+    for order, (layer, composite) in enumerate(extracted):
+        try:
+            raw = layer.topil()
+        except (ValueError, NotImplementedError):
+            raw = None
+        composite_quality = pixel_quality(composite)
+        raw_quality = pixel_quality(raw)
+        # Trust the composited result by default, because it applies PSD masks.
+        # Use source pixels only when the composite is clearly defective and
+        # raw pixels are both colored and transparent, with no external masks.
+        has_mask = bool(layer.has_mask()) or bool(layer.has_vector_mask())
+        has_clipping = bool(layer.has_clip_layers())
+        raw_is_better = bool(
+            raw_quality and composite_quality
+            and composite_quality['visibleColoredPercent'] == 0
+            and not composite_quality['hasTransparency']
+            and raw_quality['visibleColoredPercent'] > 0
+            and raw_quality['hasTransparency']
+            and not has_mask and not has_clipping
         )
-    (output / "manifest.json").write_text(
-        json.dumps({"layers": manifest}, ensure_ascii=False, indent=2), encoding="utf-8"
+        selected = raw if raw_is_better else composite
+        filename = f'{order:03d}.png'
+        result = render_full_canvas(selected, layer, (psd.width, psd.height))
+        result.save(layers_dir / filename, format='PNG')
+        final_quality = pixel_quality(result)
+        depth = order / denominator
+        manifest.append({
+            'file': f'layers/{filename}',
+            'layerType': classify_layer(layer.name or ''),
+            'layerOrder': order,
+            'depth': depth,
+            'positionX': 0.0,
+            'positionY': 0.0,
+            'rotation': 0.0,
+            'scale': 1.0,
+            'movementX': round(4.0 + depth * 20.0, 3),
+            'movementY': round(3.0 + depth * 16.0, 3),
+        })
+        diagnoses.append({
+            'file': f'layers/{filename}',
+            'sourceLayerName': layer.name or '',
+            'composite': composite_quality,
+            'rawPixels': raw_quality,
+            'export': final_quality,
+            'exportMethod': 'raw-fallback' if raw_is_better else 'composite',
+            'hasMask': has_mask,
+            'hasClipping': has_clipping,
+        })
+        print(f'[PSD] part={order:03d} method={diagnoses[-1]["exportMethod"]} '
+              f'composite={composite_quality} raw={raw_quality} final={final_quality}', flush=True)
+
+    all_gray = all(row['export']['visibleColoredPercent'] == 0 for row in diagnoses)
+    all_opaque = all(not row['export']['hasTransparency'] for row in diagnoses)
+    psd_all_opaque = all(not row['composite']['hasTransparency'] for row in diagnoses)
+    warnings = []
+    if all_gray:
+        warnings.append('ALL_OUTPUT_LAYERS_GRAYSCALE')
+    if all_opaque:
+        warnings.append('ALL_OUTPUT_LAYERS_OPAQUE')
+    if psd_all_opaque:
+        warnings.append('ALL_PSD_COMPOSITES_OPAQUE')
+    if warnings:
+        print('[PSD][QUALITY WARNING] ' + ','.join(warnings), flush=True)
+
+    payload = {
+        'layers': manifest,
+        'diagnostics': {
+            'psdColorMode': str(psd.color_mode),
+            'inputImage': input_quality,
+            'layers': diagnoses,
+            'warnings': warnings,
+            'notice': 'Depth and movement are deterministic placeholders, not learned rigging.',
+        },
+    }
+    (output / 'manifest.json').write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8'
     )
     return manifest
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--repository", required=True)
-    parser.add_argument("--input", required=True)
-    parser.add_argument("--output", required=True)
+    parser.add_argument('--repository', required=True)
+    parser.add_argument('--input', required=True)
+    parser.add_argument('--output', required=True)
     args = parser.parse_args()
 
     repository = Path(args.repository).resolve()
     input_path = Path(args.input).resolve()
     output = Path(args.output).resolve()
-    raw_output = output / "raw"
+    raw_output = output / 'raw'
     raw_output.mkdir(parents=True, exist_ok=True)
 
-    # Verified against official See-through inference_psd.py CLI options.
-    inference_script = repository / "inference" / "scripts" / "inference_psd.py"
-    subprocess.run(
-        [sys.executable, str(inference_script), "--srcp", str(input_path),
-         "--save_dir", str(raw_output), "--save_to_psd"],
-        cwd=repository, check=True,
-    )
+    with Image.open(input_path) as source:
+        input_quality = pixel_quality(source)
+    print(f'[PSD] input={input_quality}', flush=True)
 
-    psd_candidates = sorted(raw_output.rglob("*.psd"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not psd_candidates:
-        raise RuntimeError("See-through did not create a PSD")
-    export_psd(PSDImage.open(psd_candidates[0]), output)
+    script = repository / 'inference' / 'scripts' / 'inference_psd.py'
+    subprocess.run([
+        sys.executable, str(script), '--srcp', str(input_path),
+        '--save_dir', str(raw_output), '--save_to_psd',
+    ], cwd=repository, check=True)
+
+    candidates = sorted(raw_output.rglob('*.psd'), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not candidates:
+        raise RuntimeError('See-through did not create a PSD')
+    psd = PSDImage.open(candidates[0])
+    export_psd(psd, output, input_quality)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
