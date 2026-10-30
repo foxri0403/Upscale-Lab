@@ -15,6 +15,7 @@ import sys
 
 from PIL import Image
 from psd_tools import PSDImage
+from psd_tools.constants import ColorMode
 
 
 def classify_layer(name: str) -> str:
@@ -177,6 +178,24 @@ def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -
     return manifest
 
 
+
+def select_color_psd(output_dir: Path, input_stem: str) -> Path:
+    """Select See-through's character PSD, never its separately emitted depth PSD.
+
+    The inference script names its output after the input file stem, so we use
+    that exact name rather than file modification time or alphabetical order.
+    """
+    expected = f'{input_stem}.psd'
+    matches = [p for p in output_dir.rglob('*.psd')
+               if p.name == expected and p.is_file()]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f'Expected exactly one character PSD named {expected!r}; '
+            f'found {len(matches)}. Do not use *_depth.psd as a substitute.'
+        )
+    return matches[0]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--repository', required=True)
@@ -200,10 +219,20 @@ def main() -> None:
         '--save_dir', str(raw_output), '--save_to_psd',
     ], cwd=repository, check=True)
 
-    candidates = sorted(raw_output.rglob('*.psd'), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not candidates:
-        raise RuntimeError('See-through did not create a PSD')
-    psd = PSDImage.open(candidates[0])
+    # The official See-through pipeline emits TWO PSD files for one input:
+    #   input.psd        -> RGB(A) character parts
+    #   input_depth.psd  -> grayscale depth maps (written AFTER the color PSD)
+    # Selecting the newest *.psd accidentally chooses the depth document.
+    # Match the input stem and explicitly reject depth maps instead.
+    color_psd = select_color_psd(raw_output, input_path.stem)
+    psd = PSDImage.open(color_psd)
+    if psd.color_mode != ColorMode.RGB:
+        raise ValueError(
+            f'Expected RGB See-through parts PSD, got color mode {psd.color_mode}; '
+            'refusing to export grayscale/depth output as character layers'
+        )
+    print(f'[PSD] selected character parts PSD: {color_psd.name}; '
+          f'color_mode={psd.color_mode}', flush=True)
     export_psd(psd, output, input_quality)
 
 
