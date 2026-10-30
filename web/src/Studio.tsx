@@ -329,6 +329,7 @@ export function Studio({ route }: { route: string }) {
   async function startProcessing() {
     if (!picture || published || busy || processing || separation.tracing || separation.drawing || separation.polygonPoints) return;
     if (tool === "layers") {
+      if (separation.startLocked) return;
       setSelectedLayer("all"); separation.setView("overlay");
       if (separation.hasGuides) { await separation.recognize(); return; }
       setBusy(true); const controller = new AbortController(); selectionPreview.current = controller;
@@ -536,7 +537,7 @@ export function Studio({ route }: { route: string }) {
                 processing ||
                 (tool === "upscale" && separation.dirty) ||
                 separation.tracing || separation.drawing || separation.polygonPoints > 0 ||
-                (tool === "layers" && !separation.ready) ||
+                (tool === "layers" && (!separation.ready || separation.startLocked)) ||
                 (tool === "layers" && capabilities?.layers === false) ||
                 (tool === "upscale" && capabilities?.upscale === false) ||
                 (tool === "upscale" && (!longest || resolution <= longest))

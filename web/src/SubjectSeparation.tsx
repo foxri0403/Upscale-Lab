@@ -5,13 +5,14 @@ import { requestBlob } from "./api";
 import { canvasPng, maskPoint, MaskStrokePainter, type MaskPoint, type MaskStroke } from "./subject-mask";
 import { MagneticLasso } from "./vendor/photocraft-magnetic-lasso";
 import type { SmartSelection } from "./smart-selection";
+import { fillSelectionGuide, paintSelectionGuide } from "./selection-guide";
 import "./subject-mask.css";
 
 type Operation = { kind: "brush"; stroke: MaskStroke } | { kind: "lasso"; points: MaskPoint[]; mode: MaskStroke["mode"] } | { kind: "clear" } | { kind: "smart"; mask: HTMLCanvasElement };
 type Active = { pointerId: number; points: MaskPoint[]; mode: MaskStroke["mode"]; painter?: MaskStrokePainter; stroke?: MaskStroke; startPointCount?: number; closePolygon?: boolean };
 type Session = {
   source: HTMLImageElement; subjects: HTMLImageElement[]; initial: HTMLCanvasElement; mask: HTMLCanvasElement;
-  reference: HTMLCanvasElement; hasReference: boolean;
+  reference: HTMLCanvasElement; hasReference: boolean; preview: HTMLCanvasElement; started: boolean; toolEdits: boolean;
   scratch: HTMLCanvasElement; operations: Operation[]; cursor: number; active: Active | null; magnetic?: MagneticLasso;
   polygon?: { points: MaskPoint[]; mode: MaskStroke["mode"] };
 };
@@ -51,10 +52,10 @@ function applyOperation(c: CanvasRenderingContext2D, op: Operation, sx: number, 
 }
 export function useSubjectSeparation(picture: Picture | undefined, enabled: boolean, disabled: boolean, smart?: SmartSelection) {
   const canvas = useRef<HTMLCanvasElement | null>(null), session = useRef<Session | null>(null);
+  const cursorElement = useRef<HTMLSpanElement | null>(null);
   const frame = useRef(0), generation = useRef(0), loaded = useRef("");
   const [ready, setReady] = useState(false), [error, setError] = useState("");
   const [mode, setMode] = useState<"brush" | "eraser" | "lasso">("brush");
-  const [selectionMode, setSelectionMode] = useState<"restore" | "erase">("restore");
   const [size, setSize] = useState(30);
   const [history, setHistory] = useState<{ cursor: number; length: number; operation: Operation | null }>({ cursor: 0, length: 0, operation: null });
   const [applied, setApplied] = useState<Operation | null>(null), [epoch, setEpoch] = useState(0);
@@ -63,27 +64,26 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
   const [drawing, setDrawing] = useState(false), [tracing, setTracing] = useState(false);
   const [polygonPoints, setPolygonPoints] = useState(0);
   const [view, setView] = useState<"overlay" | "cutout" | "motion">("overlay");
-  const [cursor, setCursor] = useState<{ x: number; y: number; diameter: number; erasing: boolean } | null>(null);
   const viewRef = useRef(view); viewRef.current = view;
   const disabledRef = useRef(disabled); disabledRef.current = disabled;
   const key = picture ? smart ? `${picture.id}:smart:${picture.width}:${picture.height}:${epoch}` : `${picture.id}:${picture.src}:${picture.subjectLayerId || ""}:${picture.separationDisabled || false}` : "";
   function render() {
     const s = session.current, target = canvas.current; if (!s || !target) return;
-    if (target.width !== s.mask.width || target.height !== s.mask.height) { target.width = s.mask.width; target.height = s.mask.height; }
+    // Display work is bounded by the viewport; inference and export keep their own resolution.
+    const bounds = target.getBoundingClientRect(), scale = Math.min(1, 960 / Math.max(s.mask.width, s.mask.height), Math.max(1, bounds.width) * Math.min(devicePixelRatio || 1, 1.5) / s.mask.width);
+    const width = Math.max(1, Math.round(s.mask.width * scale)), height = Math.max(1, Math.round(s.mask.height * scale));
+    if (target.width !== width || target.height !== height) { target.width = width; target.height = height; }
+    if (s.scratch.width !== width || s.scratch.height !== height) { s.scratch.width = width; s.scratch.height = height; }
     const c = target.getContext("2d")!, sc = s.scratch.getContext("2d", { willReadFrequently: true })!;
     c.clearRect(0, 0, target.width, target.height); c.globalCompositeOperation = "source-over";
     c.drawImage(s.source, 0, 0, target.width, target.height);
-    const operations = s.operations.slice(0, s.cursor), guides = pendingGuides(operations);
-    if (s.active?.stroke) guides.push({ kind: "brush", stroke: s.active.stroke });
-    else if (s.active && s.active.points.length >= 3) guides.push({ kind: "lasso", points: s.active.points, mode: s.active.mode });
-    if (smartRef.current && (guides.length || operations.at(-1)?.kind !== "smart")) {
-      sc.fillStyle = "black"; sc.fillRect(0, 0, s.mask.width, s.mask.height);
-      for (const op of guides) applyOperation(sc, positiveGuide(op), s.mask.width / s.source.naturalWidth, s.mask.height / s.source.naturalHeight);
-    } else sc.drawImage(s.mask, 0, 0);
-    const pixels = sc.getImageData(0, 0, s.mask.width, s.mask.height);
-    const values = new Uint8Array(s.mask.width * s.mask.height);
+    sc.drawImage(s.preview, 0, 0, width, height);
+    const lasso = s.active && !s.active.stroke ? s.active : s.polygon;
+    if (lasso && lasso.points.length >= 3) fillSelectionGuide(sc, lasso.points, lasso.mode, width / s.source.naturalWidth, height / s.source.naturalHeight);
+    const pixels = sc.getImageData(0, 0, width, height);
+    const values = new Uint8Array(width * height);
     for (let i = 0; i < values.length; i++) values[i] = pixels.data[i * 4];
-    const w = s.mask.width, h = s.mask.height, rim = Math.max(1, Math.ceil(w / Math.max(1, target.getBoundingClientRect().width)));
+    const w = width, h = height, rim = Math.max(1, Math.ceil(w / Math.max(1, bounds.width)));
     for (let n = 0; n < values.length; n++) {
       const i = n * 4, selection = values[n], x = n % w, y = Math.floor(n / w);
       const boundary = viewRef.current !== "cutout" && selection > 127 && (x < rim || y < rim || x >= w - rim || y >= h - rim ||
@@ -95,7 +95,7 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
     sc.putImageData(pixels, 0, 0); c.globalCompositeOperation = viewRef.current === "cutout" ? "destination-in" : "source-over";
     c.drawImage(s.scratch, 0, 0); c.globalCompositeOperation = "source-over";
     const points = s.active?.points || s.polygon?.points;
-    if (points && !s.active?.painter) {
+    if (points && !s.active?.stroke) {
       c.beginPath(); points.forEach((p, i) => { const x = p.x / s.source.naturalWidth * target.width, y = p.y / s.source.naturalHeight * target.height; if (i) c.lineTo(x, y); else c.moveTo(x, y); });
       c.strokeStyle = "#fff"; c.lineWidth = 2; c.setLineDash([5, 4]); c.stroke(); c.setLineDash([]);
       if (s.polygon) {
@@ -110,6 +110,14 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
     const c = s.mask.getContext("2d")!; c.drawImage(s.initial, 0, 0);
     for (const op of s.operations.slice(0, s.cursor)) {
       if (!smartRef.current || op.kind === "smart" || op.kind === "clear") applyOperation(c, op, s.mask.width / s.source.naturalWidth, s.mask.height / s.source.naturalHeight);
+    }
+    const preview = s.preview.getContext("2d")!, sx = s.mask.width / s.source.naturalWidth, sy = s.mask.height / s.source.naturalHeight;
+    preview.fillStyle = "black"; preview.fillRect(0, 0, s.preview.width, s.preview.height);
+    if (!smartRef.current) preview.drawImage(s.initial, 0, 0);
+    for (const op of s.operations.slice(0, s.cursor)) {
+      if (op.kind === "brush") paintSelectionGuide(preview, op.stroke, sx, sy);
+      else if (op.kind === "lasso") fillSelectionGuide(preview, op.points, op.mode, sx, sy);
+      else applyOperation(preview, op, sx, sy);
     }
     setHistory({ cursor: s.cursor, length: s.operations.length, operation: s.operations[s.cursor - 1] || null }); schedule();
   }
@@ -133,7 +141,10 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
       const scale = Math.min(1, 1600 / Math.max(source.naturalWidth, source.naturalHeight));
       const initial = subjectMask(subjects, Math.max(1, Math.round(source.naturalWidth * scale)), Math.max(1, Math.round(source.naturalHeight * scale)));
       const mask = board(initial.width, initial.height); mask.getContext("2d")!.drawImage(initial, 0, 0);
-      session.current = { source, subjects, initial, mask, reference: initial, hasReference: subjects.length > 0,
+      const preview = board(mask.width, mask.height), pc = preview.getContext("2d")!;
+      pc.fillStyle = "black"; pc.fillRect(0, 0, preview.width, preview.height);
+      if (!smartRef.current) pc.drawImage(initial, 0, 0);
+      session.current = { source, subjects, initial, mask, reference: initial, hasReference: subjects.length > 0, preview, started: false, toolEdits: false,
         scratch: board(mask.width, mask.height), operations: [], cursor: 0, active: null };
       loaded.current = key; setSize(Math.max(1, Math.min(1000, Math.round(Math.max(source.naturalWidth, source.naturalHeight) * (smartRef.current ? .18 : .025)))));
       setReady(true); schedule();
@@ -142,42 +153,50 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
   }, [key, enabled]);
   useEffect(() => () => { generation.current++; session.current = null; cancelAnimationFrame(frame.current); frame.current = 0; }, []);
   useEffect(() => { schedule(); }, [view, enabled]);
+  function hideCursor() { if (cursorElement.current) cursorElement.current.style.display = "none"; }
+  useEffect(() => { hideCursor(); }, [mode, size, disabled, enabled]);
   function updateCursor(event: PointerEvent<HTMLCanvasElement>) {
-    if (mode === "lasso" || disabled) { setCursor(null); return; }
-    const r = event.currentTarget.getBoundingClientRect(), s = session.current;
-    if (s) setCursor({ x: event.clientX - r.left, y: event.clientY - r.top, diameter: size / s.source.naturalWidth * r.width,
-      erasing: s.active?.mode === "erase" || mode === "eraser" || selectionMode === "erase" || (mode === "brush" && (event.buttons & 2) !== 0) });
+    if (mode === "lasso" || disabled || tracing) { hideCursor(); return; }
+    const r = event.currentTarget.getBoundingClientRect(), s = session.current, cursor = cursorElement.current;
+    if (s && cursor) {
+      const diameter = size / s.source.naturalWidth * r.width;
+      cursor.className = `mask-brush ${mode === "eraser" ? "eraser" : "brush"}`;
+      Object.assign(cursor.style, { display: "block", left: `${event.clientX - r.left}px`, top: `${event.clientY - r.top}px`, width: `${diameter}px`, height: `${diameter}px` });
+    }
   }
   function down(event: PointerEvent<HTMLCanvasElement>) {
-    const rightErase = mode === "brush" && event.button === 2;
-    const s = session.current; if (!s || !ready || disabled || tracing || s.active || !event.isPrimary || (event.button !== 0 && !rightErase)) return;
+    const s = session.current; if (!s || !ready || disabled || tracing || s.active || !event.isPrimary || event.button !== 0) return;
     event.preventDefault(); event.currentTarget.focus({ preventScroll: true }); setError(""); setDrawing(true);
     const p = maskPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), s.source.naturalWidth, s.source.naturalHeight);
-    const stroke: MaskStroke = { mode: mode === "eraser" || rightErase ? "erase" : selectionMode, size, hardness: 100, points: [p] };
+    const stroke: MaskStroke = { mode: mode === "eraser" ? "erase" : "restore", size, hardness: 100, points: [p] };
     if (mode === "lasso") {
       const previous = s.polygon, first = previous?.points[0];
       const closePolygon = !!first && previous!.points.length >= 3 && Math.hypot(p.x - first.x, p.y - first.y) < 12 * s.source.naturalWidth / event.currentTarget.getBoundingClientRect().width;
       const points = previous ? [...previous.points, ...(closePolygon ? [] : [p])] : [p];
       s.active = { pointerId: event.pointerId, points, startPointCount: points.length, closePolygon, mode: previous?.mode || stroke.mode };
     } else s.active = { pointerId: event.pointerId, points: stroke.points, mode: stroke.mode, stroke,
-      painter: new MaskStrokePainter(s.mask.getContext("2d")!, stroke, s.mask.width / s.source.naturalWidth, s.mask.height / s.source.naturalHeight) };
-    s.active.painter?.append(p); event.currentTarget.setPointerCapture(event.pointerId); updateCursor(event); schedule();
+      painter: smartRef.current ? undefined : new MaskStrokePainter(s.mask.getContext("2d")!, stroke, s.mask.width / s.source.naturalWidth, s.mask.height / s.source.naturalHeight) };
+    s.active.painter?.append(p);
+    if (s.active.stroke) paintSelectionGuide(s.preview.getContext("2d")!, stroke, s.mask.width / s.source.naturalWidth, s.mask.height / s.source.naturalHeight);
+    event.currentTarget.setPointerCapture(event.pointerId); updateCursor(event); schedule();
   }
   function move(event: PointerEvent<HTMLCanvasElement>) {
     updateCursor(event); const a = session.current?.active; if (!a || a.pointerId !== event.pointerId) return;
     const coalesced = event.nativeEvent.getCoalescedEvents?.() || [], samples = coalesced.length ? coalesced : [event];
     const s = session.current!, r = event.currentTarget.getBoundingClientRect();
+    const from = a.points.length;
     for (const e of samples) {
       const p = maskPoint(e.clientX, e.clientY, r, s.source.naturalWidth, s.source.naturalHeight), previous = a.points.at(-1)!;
-      if (Math.hypot(p.x - previous.x, p.y - previous.y) < (a.painter ? .3 : Math.max(1, s.source.naturalWidth / 900 * 3))) continue;
+      if (Math.hypot(p.x - previous.x, p.y - previous.y) < (a.stroke ? Math.max(.3, s.source.naturalWidth / r.width * .75) : Math.max(1, s.source.naturalWidth / 900 * 3))) continue;
       if (a.points.length >= 12_000) break;
       a.points.push(p); a.painter?.append(p);
     }
+    if (a.stroke) paintSelectionGuide(s.preview.getContext("2d")!, a.stroke, s.mask.width / s.source.naturalWidth, s.mask.height / s.source.naturalHeight, from);
     schedule();
   }
   async function finish(event: PointerEvent<HTMLCanvasElement>, cancelled = false) {
     const s = session.current, a = s?.active; if (!s || !a || a.pointerId !== event.pointerId) return;
-    s.active = null; setDrawing(false); setCursor(null);
+    s.active = null; setDrawing(false); hideCursor();
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     if (cancelled || disabledRef.current) { cancelPolygon(); replay(); return; }
     if (!a.stroke && !a.closePolygon && a.points.length === a.startPointCount) {
@@ -213,7 +232,11 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
         op = { kind: "lasso", mode: a.mode, points: path.map(p => ({ x: p.x / sx, y: p.y / sy })) };
       }
       if (gen !== generation.current || disabledRef.current) return;
-      s.operations = [...s.operations.slice(0, s.cursor), op]; s.cursor++; replay();
+      s.toolEdits = true; s.operations = [...s.operations.slice(0, s.cursor), op]; s.cursor++;
+      if (smartRef.current) {
+        if (op.kind === "lasso") fillSelectionGuide(s.preview.getContext("2d")!, op.points, op.mode, s.mask.width / s.source.naturalWidth, s.mask.height / s.source.naturalHeight);
+        setHistory({ cursor: s.cursor, length: s.operations.length, operation: op }); schedule();
+      } else replay();
     } catch (e) { if (gen === generation.current) { setError((e as Error).message); replay(); } }
     finally { if (gen === generation.current) setTracing(false); }
   }
@@ -234,7 +257,10 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
         const first = guides[i], mode = first.kind === "brush" ? first.stroke.mode : first.mode;
         const guide = board(s.mask.width, s.mask.height), gc = guide.getContext("2d")!; gc.fillStyle = "black"; gc.fillRect(0, 0, guide.width, guide.height);
         do {
-          applyOperation(gc, positiveGuide(guides[i]), guide.width / s.source.naturalWidth, guide.height / s.source.naturalHeight); i++;
+          const op = positiveGuide(guides[i]);
+          if (op.kind === "brush") paintSelectionGuide(gc, op.stroke, guide.width / s.source.naturalWidth, guide.height / s.source.naturalHeight);
+          else applyOperation(gc, op, guide.width / s.source.naturalWidth, guide.height / s.source.naturalHeight);
+          i++;
         } while (i < guides.length && guides[i].kind === first.kind && (guides[i].kind === "brush" ? (guides[i] as Extract<Operation, { kind: "brush" }>).stroke.mode : (guides[i] as Extract<Operation, { kind: "lasso" }>).mode) === mode);
         const result = await smart.refine({ imageKey: picture!.id, width: s.mask.width, height: s.mask.height,
           pixels: sc.getImageData(0, 0, source.width, source.height).data, guide: gray(guide), prior, reference: reference.slice(),
@@ -245,7 +271,7 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
       }
       const output = board(s.mask.width, s.mask.height), context = output.getContext("2d")!, pixels = context.createImageData(output.width, output.height);
       for (let i = 0; i < prior.length; i++) { pixels.data[i * 4] = pixels.data[i * 4 + 1] = pixels.data[i * 4 + 2] = prior[i]; pixels.data[i * 4 + 3] = 255; }
-      context.putImageData(pixels, 0, 0); s.operations = [...s.operations.slice(0, s.cursor), { kind: "smart", mask: output }]; s.cursor++; replay(); smart.onRefined?.();
+      context.putImageData(pixels, 0, 0); s.started = true; s.operations = [...s.operations.slice(0, s.cursor), { kind: "smart", mask: output }]; s.cursor++; replay(); smart.onRefined?.();
     } catch (e) { if (gen === generation.current) { setError((e as Error).message); replay(); } }
     finally { if (gen === generation.current) setTracing(false); }
   }
@@ -263,13 +289,15 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
     }
     if (!s.hasReference) throw new Error("먼저 피사체를 인식해 주세요.");
     const mask = board(s.mask.width, s.mask.height); mask.getContext("2d")!.drawImage(s.reference, 0, 0);
-    s.operations = [...s.operations.slice(0, s.cursor), { kind: "smart", mask }]; s.cursor++; replay(); smartRef.current?.onRefined?.();
+    s.started = true; s.operations = [...s.operations.slice(0, s.cursor), { kind: "smart", mask }]; s.cursor++; replay(); smartRef.current?.onRefined?.();
   }
   async function exportMask() {
     const s = session.current; if (!s || !ready || tracing || s.active || s.polygon) throw new Error("선택 영역을 완성한 뒤 분리해 주세요.");
-    if (smartRef.current && s.operations[s.cursor - 1]?.kind !== "smart") throw new Error("배경·피사체 분리 시작으로 선택 결과를 확인한 뒤 적용해 주세요.");
+    if (smartRef.current && s.operations[s.cursor - 1]?.kind !== "smart") throw new Error("피사체 다시 분리로 선택 결과를 확인한 뒤 적용해 주세요.");
     const native = subjectMask(s.subjects, s.source.naturalWidth, s.source.naturalHeight), c = native.getContext("2d")!;
-    for (const op of s.operations.slice(0, s.cursor)) applyOperation(c, op, 1, 1);
+    const operations = s.operations.slice(0, s.cursor);
+    if (smartRef.current) applyOperation(c, operations.at(-1)!, 1, 1);
+    else for (const op of operations) applyOperation(c, op, 1, 1);
     const image = c.getImageData(0, 0, native.width, native.height); let kept = 0;
     for (let i = 0; i < image.data.length; i += 4) kept += image.data[i];
     const ratio = kept / (native.width * native.height * 255);
@@ -285,14 +313,11 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
       event.preventDefault(); void commit(s, { pointerId: -1, points: s.polygon.points, mode: s.polygon.mode });
     }
   }
-  function reset() { const s = session.current; if (!s || drawing || tracing) return; cancelPolygon(); s.operations = []; s.cursor = 0; replay(); smartRef.current?.onRefined?.(); }
-  function clearSelection() {
-    const s = session.current; if (!s || !ready || drawing || tracing || disabledRef.current) return;
-    cancelPolygon(); s.operations = [...s.operations.slice(0, s.cursor), { kind: "clear" }]; s.cursor++; replay();
-  }
+  function reset() { const s = session.current; if (!s || drawing || tracing) return; cancelPolygon(); s.operations = []; s.cursor = 0; s.toolEdits = false; replay(); smartRef.current?.onRefined?.(); }
   return { ready, error, mode, setMode: (value: typeof mode) => { cancelPolygon(); setMode(value); },
-    selectionMode, setSelectionMode: (value: typeof selectionMode) => { cancelPolygon(); setSelectionMode(value); }, size, setSize, history, drawing, tracing, polygonPoints, view, setView, cursor, smart: !!smart, smartStatus,
-    dirty: history.operation !== applied || drawing || tracing || polygonPoints > 0, exportMask, reset, clearSelection,
+    size, setSize, history, drawing, tracing, polygonPoints, view, setView, cursorElement, smart: !!smart, smartStatus,
+    dirty: history.operation !== applied || drawing || tracing || polygonPoints > 0, exportMask, reset,
+    startLocked: !!session.current?.started && !!session.current?.toolEdits,
     recognize, previewAutomatic, hasGuides: history.operation?.kind === "brush" || history.operation?.kind === "lasso",
     recognized: !smart || history.operation?.kind === "smart", hasReference: !!session.current?.hasReference,
     markApplied: () => { const s = session.current; if (s) setApplied(s.operations[s.cursor - 1] || null); }, reload: () => setEpoch(value => value + 1),
@@ -300,7 +325,7 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
     redo: () => { const s = session.current; if (s && s.cursor < s.operations.length) { s.cursor++; replay(); smartRef.current?.onRefined?.(); } },
     bindCanvas: (target: HTMLCanvasElement | null) => { canvas.current = target; if (target) schedule(); },
     events: { onKeyDown: keyDown, onPointerDown: down, onPointerMove: move, onPointerUp: (e: PointerEvent<HTMLCanvasElement>) => void finish(e),
-      onPointerCancel: (e: PointerEvent<HTMLCanvasElement>) => void finish(e, true), onLostPointerCapture: (e: PointerEvent<HTMLCanvasElement>) => void finish(e, true), onPointerLeave: () => setCursor(null) } };
+      onPointerCancel: (e: PointerEvent<HTMLCanvasElement>) => void finish(e, true), onLostPointerCapture: (e: PointerEvent<HTMLCanvasElement>) => void finish(e, true), onPointerLeave: hideCursor } };
 }
 export type SubjectSeparation = ReturnType<typeof useSubjectSeparation>;
 export function SubjectSeparationControls({ editor, disabled, hasResult, selectTool, apply, canApply, applyLabel = "수정 사항 적용" }: {
@@ -312,17 +337,13 @@ export function SubjectSeparationControls({ editor, disabled, hasResult, selectT
       {([["brush", "브러쉬", Brush], ["eraser", "지우개", Eraser], ["lasso", "올가미", Lasso]] as const).map(([id, label, Icon]) =>
         <button key={id} type="button" aria-pressed={editor.mode === id} className={editor.mode === id ? "active" : ""} onClick={() => { editor.setMode(id); selectTool(); }}><Icon size={18} />{label}</button>)}
     </div>
-    {editor.mode !== "eraser" && <div className="separation-operation" role="group" aria-label="선택 영역 추가 또는 빼기">
-      <button type="button" aria-pressed={editor.selectionMode === "restore"} onClick={() => editor.setSelectionMode("restore")}>{editor.smart ? "피사체 선택" : "영역 추가"}</button>
-      <button type="button" aria-pressed={editor.selectionMode === "erase"} onClick={() => editor.setSelectionMode("erase")}>{editor.smart ? "제외할 영역" : "영역 빼기"}</button>
-    </div>}
     {editor.mode !== "lasso" && <>
       <label>크기 <output>{editor.size}px</output><input aria-label="선택 도구 크기" type="range" min="1" max="1000" value={editor.size} onChange={e => editor.setSize(Number(e.target.value))} /></label>
     </>}
     <div className="separation-history"><button type="button" aria-label="선택 실행 취소" disabled={!editor.history.cursor && !editor.polygonPoints} onClick={editor.undo}><Undo2 size={17} /></button>
       <button type="button" aria-label="선택 다시 실행" disabled={editor.history.cursor === editor.history.length} onClick={editor.redo}><Redo2 size={17} /></button>
       <button type="button" disabled={!editor.dirty} onClick={editor.reset}><RotateCcw size={15} />선택 초기화</button></div>
-    <button type="button" className="separation-clear" onClick={() => { editor.clearSelection(); editor.setMode("brush"); editor.setSelectionMode("restore"); selectTool(); }}>선택 비우고 다시 선택</button>
+    <button type="button" className="separation-refine" disabled={!editor.hasGuides || editor.polygonPoints > 0} onClick={() => { selectTool(); void editor.recognize(); }}>피사체 다시 분리</button>
     <button type="button" className="button full separation-action subject-edit-apply" disabled={!canApply || !editor.dirty || !editor.recognized || editor.polygonPoints > 0} onClick={apply}>{applyLabel}</button>
   </fieldset>;
 }
@@ -330,7 +351,7 @@ export function SubjectSeparationCanvas({ editor, disabled, filter }: { editor: 
   return <div className={`separation-board ${disabled ? "separation-disabled" : ""}`}>
     <canvas ref={editor.bindCanvas} {...editor.events} onPointerDown={e => { if (!disabled) editor.events.onPointerDown(e); }} onContextMenu={e => { if (!disabled) e.preventDefault(); }} aria-label="피사체 선택 영역 편집" tabIndex={disabled ? -1 : 0} style={{ opacity: editor.ready ? 1 : 0, filter }} />
     {!editor.ready && <div className="separation-status" role="status">{editor.error || "이미지를 불러오는 중…"}</div>}
-    {editor.cursor && !disabled && editor.mode !== "lasso" && <span className={`mask-brush ${editor.cursor.erasing ? "eraser" : "brush"}`} style={{ left: editor.cursor.x, top: editor.cursor.y, width: editor.cursor.diameter, height: editor.cursor.diameter }} />}
+    <span ref={editor.cursorElement} className="mask-brush" style={{ display: "none" }} aria-hidden="true" />
     {editor.tracing && <div className="separation-tracing" role="status">{editor.smart ? editor.smartStatus || "피사체 경계를 찾는 중…" : "배경 경계를 따라 선택 중…"}</div>}
   </div>;
 }

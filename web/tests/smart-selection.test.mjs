@@ -29,6 +29,23 @@ test("erase keeps a positive seed in the remaining subject and a negative seed i
   assert.equal(input.guide[keep[1] * input.width + keep[0]], 0);
   assert.equal(input.guide[remove[1] * input.width + remove[0]], 255);
 });
+
+test("recognition never paints back explicit eraser coverage even when SAM keeps most of that region", () => {
+  const input = { ...fixture(), mode: "erase" }; input.guide.fill(0);
+  for (let y = 10; y < 17; y++) for (let x = 13; x < 20; x++) input.guide[y * input.width + x] = 255;
+  input.guide[10 * input.width + 20] = 128;
+  const prompts = selectionPrompts(input), logits = Float32Array.from(input.prior, value => value ? 5 : -5);
+  for (let p = 0; p < prompts.points.length; p++) if (!prompts.labels[p]) {
+    const [x, y] = prompts.points[p]; logits[y * input.width + x] = -5;
+  }
+  const { alpha } = chooseSelection(logits, new Float32Array([.95]), input, prompts.points, prompts.labels, prompts.referenceHits);
+  for (let i = 0; i < alpha.length; i++) {
+    assert.ok(alpha[i] <= input.prior[i], "eraser must never add selection");
+    assert.ok(alpha[i] <= 255 - input.guide[i], "explicitly erased pixels must stay removed");
+  }
+  assert.equal(alpha[10 * input.width + 20], 127);
+  assert.equal(alpha[20 * input.width + 25], 255);
+});
 test("candidate selection rejects a background mask and keeps the object rather than the painted rectangle", () => {
   const input = fixture(), n = input.width * input.height, logits = new Float32Array(n * 2).fill(-5), prompts = selectionPrompts(input);
   logits.fill(5, 0, n);

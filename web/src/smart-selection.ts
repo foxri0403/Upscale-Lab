@@ -83,7 +83,8 @@ export function chooseSelection(logits: Float32Array, scores: Float32Array, inpu
   for (let i = 0; i < count; i++) {
     const value = logits[chosen * count + i];
     const selected = value <= -2 ? 0 : value >= 2 ? 255 : Math.round(255 / (1 + Math.exp(-value * 2)));
-    alpha[i] = input.mode === "erase" ? Math.min(input.prior[i], selected) : selected;
+    // Explicit eraser coverage must stay removed even if SAM predicts it as part of the object.
+    alpha[i] = input.mode === "erase" ? Math.min(input.prior[i], selected, 255 - input.guide[i]) : selected;
   }
   // SAM can predict unrelated islands in textured scenery. Keep the component containing
   // the positive object prompt, with a one-pixel soft rim, rather than adding those islands.

@@ -58,6 +58,7 @@ export function SeparationLab() {
   async function process(manual: boolean) {
     if (!picture?.projectId || busy || editor.tracing || editor.drawing || editor.polygonPoints) return;
     if (!manual) {
+      if (editor.startLocked) return;
       setView("selection"); setHand(false);
       if (editor.hasGuides) { await editor.recognize(); return; }
       setBusy(true); setError(""); active.current?.abort(); const controller = new AbortController(); active.current = controller;
@@ -122,11 +123,11 @@ export function SeparationLab() {
       </section>
       <aside className="lab-sidebar">
         <section className="lab-card"><span className="lab-step">01</span><h2>이미지 준비</h2><p>{picture?.name || "수정할 사진 한 장을 선택하세요."}</p><input ref={input} type="file" accept="image/*" hidden onChange={e => void open(e.target.files?.[0])} /><button className="button secondary full" disabled={busy || connection !== "ready"} onClick={() => input.current?.click()}><ImagePlus size={17} />{picture ? "다른 이미지 선택" : "이미지 선택"}</button>{picture && <button className="lab-sample" disabled={busy} onClick={() => void sample()}>여우 샘플 열기</button>}</section>
-        <section className="lab-card"><span className="lab-step">02</span><h2>피사체 자동 분리</h2><p>피사체를 인식해 투명한 전경과 채워진 배경으로 나눕니다.</p><button className="button primary full" disabled={!picture || busy || !editor.ready || editor.drawing || editor.tracing || editor.polygonPoints > 0 || connection !== "ready"} onClick={() => void process(false)}><Scan size={18} />배경·피사체 분리 시작</button>{busy && job && <div className="lab-progress"><progress value={job.progress} max="100" /><span>{job.status === "Queued" ? "GPU 작업 대기 중" : `분리 처리 중 · ${job.progress}%`}</span></div>}</section>
+        <section className="lab-card"><span className="lab-step">02</span><h2>피사체 자동 분리</h2><p>피사체를 인식해 투명한 전경과 채워진 배경으로 나눕니다.</p><button className="button primary full" disabled={!picture || busy || !editor.ready || editor.startLocked || editor.drawing || editor.tracing || editor.polygonPoints > 0 || connection !== "ready"} onClick={() => void process(false)}><Scan size={18} />배경·피사체 분리 시작</button>{busy && job && <div className="lab-progress"><progress value={job.progress} max="100" /><span>{job.status === "Queued" ? "GPU 작업 대기 중" : `분리 처리 중 · ${job.progress}%`}</span></div>}</section>
         <section className="lab-card lab-edit"><span className="lab-step">03</span><h2>선택 영역 수정</h2>
           <SubjectSeparationControls editor={editor} disabled={busy} hasResult={!!picture} canApply={!!picture?.projectId}
             apply={() => void process(true)} selectTool={() => { setView("selection"); setHand(false); }} />
-          {editor.dirty && <p className="lab-pending"><Sparkles size={14} />{editor.tracing ? "선택한 범위에서 피사체를 인식하고 있습니다." : editor.recognized ? "수정 사항 적용을 눌러 레이어를 갱신하세요." : "배경·피사체 분리 시작으로 그린 영역에서 피사체를 찾으세요."}</p>}
+          {editor.dirty && <p className="lab-pending"><Sparkles size={14} />{editor.tracing ? "선택한 범위에서 피사체를 인식하고 있습니다." : editor.recognized ? "수정 사항 적용을 눌러 레이어를 갱신하세요." : "피사체 다시 분리로 그린 영역에서 피사체를 찾으세요."}</p>}
         </section>
         <section className="lab-card"><h2>결과 확인</h2><div className="lab-exports"><button disabled={!separated || busy || editor.dirty} onClick={() => void download("subject")}><Download size={15} />피사체 PNG</button><button disabled={!separated || busy || editor.dirty} onClick={() => void download("background")}><Download size={15} />배경 PNG</button><button disabled={!separated || busy || editor.drawing || editor.tracing} onClick={() => void download("mask")}><Download size={15} />선택 마스크</button></div><button className="lab-cleanup" disabled={busy || editor.dirty || !picture} onClick={() => void cleanup()}>테스트 파일 정리</button></section>
       </aside>
