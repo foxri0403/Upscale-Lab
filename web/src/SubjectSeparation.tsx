@@ -11,9 +11,18 @@ type Operation = { kind: "brush"; stroke: MaskStroke } | { kind: "lasso"; points
 type Active = { pointerId: number; points: MaskPoint[]; mode: MaskStroke["mode"]; painter?: MaskStrokePainter; stroke?: MaskStroke; startPointCount?: number; closePolygon?: boolean };
 type Session = {
   source: HTMLImageElement; subjects: HTMLImageElement[]; initial: HTMLCanvasElement; mask: HTMLCanvasElement;
+  reference: HTMLCanvasElement; hasReference: boolean;
   scratch: HTMLCanvasElement; operations: Operation[]; cursor: number; active: Active | null; magnetic?: MagneticLasso;
   polygon?: { points: MaskPoint[]; mode: MaskStroke["mode"] };
 };
+function pendingGuides(operations: Operation[]) {
+  let last = operations.length - 1;
+  while (last >= 0 && operations[last].kind !== "smart" && operations[last].kind !== "clear") last--;
+  return operations.slice(last + 1).filter((op): op is Extract<Operation, { kind: "brush" | "lasso" }> => op.kind === "brush" || op.kind === "lasso");
+}
+function positiveGuide(op: Extract<Operation, { kind: "brush" | "lasso" }>): Operation {
+  return op.kind === "brush" ? { ...op, stroke: { ...op.stroke, mode: "restore" } } : { ...op, mode: "restore" };
+}
 function board(width: number, height: number) {
   const c = document.createElement("canvas"); c.width = width; c.height = height; return c;
 }
@@ -64,7 +73,14 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
     const c = target.getContext("2d")!, sc = s.scratch.getContext("2d", { willReadFrequently: true })!;
     c.clearRect(0, 0, target.width, target.height); c.globalCompositeOperation = "source-over";
     c.drawImage(s.source, 0, 0, target.width, target.height);
-    sc.drawImage(s.mask, 0, 0); const pixels = sc.getImageData(0, 0, s.mask.width, s.mask.height);
+    const operations = s.operations.slice(0, s.cursor), guides = pendingGuides(operations);
+    if (s.active?.stroke) guides.push({ kind: "brush", stroke: s.active.stroke });
+    else if (s.active && s.active.points.length >= 3) guides.push({ kind: "lasso", points: s.active.points, mode: s.active.mode });
+    if (smartRef.current && (guides.length || operations.at(-1)?.kind !== "smart")) {
+      sc.fillStyle = "black"; sc.fillRect(0, 0, s.mask.width, s.mask.height);
+      for (const op of guides) applyOperation(sc, positiveGuide(op), s.mask.width / s.source.naturalWidth, s.mask.height / s.source.naturalHeight);
+    } else sc.drawImage(s.mask, 0, 0);
+    const pixels = sc.getImageData(0, 0, s.mask.width, s.mask.height);
     const values = new Uint8Array(s.mask.width * s.mask.height);
     for (let i = 0; i < values.length; i++) values[i] = pixels.data[i * 4];
     const w = s.mask.width, h = s.mask.height, rim = Math.max(1, Math.ceil(w / Math.max(1, target.getBoundingClientRect().width)));
@@ -92,7 +108,9 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
   function replay() {
     const s = session.current; if (!s) return;
     const c = s.mask.getContext("2d")!; c.drawImage(s.initial, 0, 0);
-    for (const op of s.operations.slice(0, s.cursor)) applyOperation(c, op, s.mask.width / s.source.naturalWidth, s.mask.height / s.source.naturalHeight);
+    for (const op of s.operations.slice(0, s.cursor)) {
+      if (!smartRef.current || op.kind === "smart" || op.kind === "clear") applyOperation(c, op, s.mask.width / s.source.naturalWidth, s.mask.height / s.source.naturalHeight);
+    }
     setHistory({ cursor: s.cursor, length: s.operations.length, operation: s.operations[s.cursor - 1] || null }); schedule();
   }
   useEffect(() => {
@@ -115,7 +133,8 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
       const scale = Math.min(1, 1600 / Math.max(source.naturalWidth, source.naturalHeight));
       const initial = subjectMask(subjects, Math.max(1, Math.round(source.naturalWidth * scale)), Math.max(1, Math.round(source.naturalHeight * scale)));
       const mask = board(initial.width, initial.height); mask.getContext("2d")!.drawImage(initial, 0, 0);
-      session.current = { source, subjects, initial, mask, scratch: board(mask.width, mask.height), operations: [], cursor: 0, active: null };
+      session.current = { source, subjects, initial, mask, reference: initial, hasReference: subjects.length > 0,
+        scratch: board(mask.width, mask.height), operations: [], cursor: 0, active: null };
       loaded.current = key; setSize(Math.max(1, Math.min(1000, Math.round(Math.max(source.naturalWidth, source.naturalHeight) * (smartRef.current ? .18 : .025)))));
       setReady(true); schedule();
     })().catch(e => { if (alive) setError(e.message || "이미지를 불러오지 못했습니다."); }).finally(() => urls.forEach(url => URL.revokeObjectURL(url)));
@@ -193,35 +212,62 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
         }
         op = { kind: "lasso", mode: a.mode, points: path.map(p => ({ x: p.x / sx, y: p.y / sy })) };
       }
-      if (smartRef.current && (op.kind === "brush" || op.kind === "lasso")) {
-        setTracing(true); setSmartStatus("피사체 경계를 찾는 중…"); replay();
-        const guide = board(s.mask.width, s.mask.height), source = board(s.mask.width, s.mask.height);
-        const gc = guide.getContext("2d", { willReadFrequently: true })!, sc = source.getContext("2d", { willReadFrequently: true })!;
-        gc.fillStyle = "black"; gc.fillRect(0, 0, guide.width, guide.height);
-        const positive: Operation = op.kind === "brush" ? { kind: "brush", stroke: { ...op.stroke, mode: "restore" } } : { ...op, mode: "restore" };
-        applyOperation(gc, positive, s.mask.width / s.source.naturalWidth, s.mask.height / s.source.naturalHeight);
-        sc.drawImage(s.source, 0, 0, source.width, source.height);
-        const gray = (c: HTMLCanvasElement) => {
-          const data = c.getContext("2d", { willReadFrequently: true })!.getImageData(0, 0, c.width, c.height).data, out = new Uint8Array(c.width * c.height);
-          for (let i = 0; i < out.length; i++) out[i] = data[i * 4]; return out;
-        };
-        const result = await smartRef.current.refine({ imageKey: picture!.id, width: s.mask.width, height: s.mask.height,
-          pixels: sc.getImageData(0, 0, source.width, source.height).data, guide: gray(guide), prior: gray(s.mask), reference: gray(s.initial),
-          mode: op.kind === "brush" ? op.stroke.mode : op.mode, tool: op.kind === "brush" ? "brush" : "lasso" }, message => { if (gen === generation.current) setSmartStatus(message); });
-        if (gen !== generation.current || disabledRef.current) return;
-        if (result.alpha.length !== s.mask.width * s.mask.height) throw new Error("선택 AI의 캔버스 크기가 일치하지 않습니다.");
-        const output = board(s.mask.width, s.mask.height), context = output.getContext("2d")!, pixels = context.createImageData(output.width, output.height);
-        for (let i = 0; i < result.alpha.length; i++) { pixels.data[i * 4] = pixels.data[i * 4 + 1] = pixels.data[i * 4 + 2] = result.alpha[i]; pixels.data[i * 4 + 3] = 255; }
-        context.putImageData(pixels, 0, 0); op = { kind: "smart", mask: output };
-      }
       if (gen !== generation.current || disabledRef.current) return;
       s.operations = [...s.operations.slice(0, s.cursor), op]; s.cursor++; replay();
-      if (op.kind === "smart") smartRef.current?.onRefined?.();
     } catch (e) { if (gen === generation.current) { setError((e as Error).message); replay(); } }
     finally { if (gen === generation.current) setTracing(false); }
   }
+  async function recognize() {
+    const s = session.current, smart = smartRef.current;
+    if (!s || !smart || disabledRef.current || tracing || drawing || s.active || s.polygon) return;
+    const guides = pendingGuides(s.operations.slice(0, s.cursor)); if (!guides.length) return;
+    const gen = generation.current; setTracing(true); setError(""); setSmartStatus("피사체 경계를 찾는 중…");
+    try {
+      const source = board(s.mask.width, s.mask.height), sc = source.getContext("2d", { willReadFrequently: true })!;
+      sc.drawImage(s.source, 0, 0, source.width, source.height);
+      const gray = (c: HTMLCanvasElement) => {
+        const data = c.getContext("2d", { willReadFrequently: true })!.getImageData(0, 0, c.width, c.height).data;
+        return Uint8Array.from({ length: c.width * c.height }, (_, i) => data[i * 4]);
+      };
+      let prior: Uint8Array = gray(s.mask); const reference = gray(s.reference);
+      for (let i = 0; i < guides.length;) {
+        const first = guides[i], mode = first.kind === "brush" ? first.stroke.mode : first.mode;
+        const guide = board(s.mask.width, s.mask.height), gc = guide.getContext("2d")!; gc.fillStyle = "black"; gc.fillRect(0, 0, guide.width, guide.height);
+        do {
+          applyOperation(gc, positiveGuide(guides[i]), guide.width / s.source.naturalWidth, guide.height / s.source.naturalHeight); i++;
+        } while (i < guides.length && guides[i].kind === first.kind && (guides[i].kind === "brush" ? (guides[i] as Extract<Operation, { kind: "brush" }>).stroke.mode : (guides[i] as Extract<Operation, { kind: "lasso" }>).mode) === mode);
+        const result = await smart.refine({ imageKey: picture!.id, width: s.mask.width, height: s.mask.height,
+          pixels: sc.getImageData(0, 0, source.width, source.height).data, guide: gray(guide), prior, reference: reference.slice(),
+          mode, tool: first.kind === "brush" ? "brush" : "lasso" }, message => { if (gen === generation.current) setSmartStatus(message); });
+        if (gen !== generation.current || disabledRef.current) return;
+        if (result.alpha.length !== s.mask.width * s.mask.height) throw new Error("선택 AI의 캔버스 크기가 일치하지 않습니다.");
+        prior = result.alpha;
+      }
+      const output = board(s.mask.width, s.mask.height), context = output.getContext("2d")!, pixels = context.createImageData(output.width, output.height);
+      for (let i = 0; i < prior.length; i++) { pixels.data[i * 4] = pixels.data[i * 4 + 1] = pixels.data[i * 4 + 2] = prior[i]; pixels.data[i * 4 + 3] = 255; }
+      context.putImageData(pixels, 0, 0); s.operations = [...s.operations.slice(0, s.cursor), { kind: "smart", mask: output }]; s.cursor++; replay(); smart.onRefined?.();
+    } catch (e) { if (gen === generation.current) { setError((e as Error).message); replay(); } }
+    finally { if (gen === generation.current) setTracing(false); }
+  }
+  async function previewAutomatic(foreground?: Blob) {
+    const s = session.current, gen = generation.current; if (!s || !ready || tracing || s.active || s.polygon) return;
+    setError("");
+    if (foreground) {
+      const url = URL.createObjectURL(foreground);
+      try {
+        const image = await loadImage(url);
+        if (gen !== generation.current) return;
+        if (image.naturalWidth !== s.source.naturalWidth || image.naturalHeight !== s.source.naturalHeight) throw new Error("인식 결과의 원본 크기가 일치하지 않습니다.");
+        s.reference = subjectMask([image], s.mask.width, s.mask.height); s.hasReference = true;
+      } finally { URL.revokeObjectURL(url); }
+    }
+    if (!s.hasReference) throw new Error("먼저 피사체를 인식해 주세요.");
+    const mask = board(s.mask.width, s.mask.height); mask.getContext("2d")!.drawImage(s.reference, 0, 0);
+    s.operations = [...s.operations.slice(0, s.cursor), { kind: "smart", mask }]; s.cursor++; replay(); smartRef.current?.onRefined?.();
+  }
   async function exportMask() {
     const s = session.current; if (!s || !ready || tracing || s.active || s.polygon) throw new Error("선택 영역을 완성한 뒤 분리해 주세요.");
+    if (smartRef.current && s.operations[s.cursor - 1]?.kind !== "smart") throw new Error("배경·피사체 분리 시작으로 선택 결과를 확인한 뒤 적용해 주세요.");
     const native = subjectMask(s.subjects, s.source.naturalWidth, s.source.naturalHeight), c = native.getContext("2d")!;
     for (const op of s.operations.slice(0, s.cursor)) applyOperation(c, op, 1, 1);
     const image = c.getImageData(0, 0, native.width, native.height); let kept = 0;
@@ -247,6 +293,8 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
   return { ready, error, mode, setMode: (value: typeof mode) => { cancelPolygon(); setMode(value); },
     selectionMode, setSelectionMode: (value: typeof selectionMode) => { cancelPolygon(); setSelectionMode(value); }, size, setSize, history, drawing, tracing, polygonPoints, view, setView, cursor, smart: !!smart, smartStatus,
     dirty: history.operation !== applied || drawing || tracing || polygonPoints > 0, exportMask, reset, clearSelection,
+    recognize, previewAutomatic, hasGuides: history.operation?.kind === "brush" || history.operation?.kind === "lasso",
+    recognized: !smart || history.operation?.kind === "smart", hasReference: !!session.current?.hasReference,
     markApplied: () => { const s = session.current; if (s) setApplied(s.operations[s.cursor - 1] || null); }, reload: () => setEpoch(value => value + 1),
     undo: () => { const s = session.current; if (s?.polygon) cancelPolygon(); else if (s && s.cursor > 0) { s.cursor--; replay(); smartRef.current?.onRefined?.(); } },
     redo: () => { const s = session.current; if (s && s.cursor < s.operations.length) { s.cursor++; replay(); smartRef.current?.onRefined?.(); } },
@@ -271,13 +319,11 @@ export function SubjectSeparationControls({ editor, disabled, hasResult, selectT
     {editor.mode !== "lasso" && <>
       <label>크기 <output>{editor.size}px</output><input aria-label="선택 도구 크기" type="range" min="1" max="1000" value={editor.size} onChange={e => editor.setSize(Number(e.target.value))} /></label>
     </>}
-    {editor.smart && <p className="separation-tool-hint">{editor.mode === "eraser" || editor.selectionMode === "erase" ? "잘못 포함된 부분을 대략 표시하면 AI가 남길 피사체 경계를 다시 찾습니다." : "배경이 함께 들어가도 괜찮습니다. 피사체 중심을 대략 그리면 AI가 실제 경계를 찾습니다."}</p>}
-    {editor.mode === "lasso" && <p className="separation-tool-hint">드래그해 둘러싸거나 클릭으로 꼭짓점을 추가하세요. 첫 점 클릭 또는 Enter로 닫기 · Esc 취소</p>}
     <div className="separation-history"><button type="button" aria-label="선택 실행 취소" disabled={!editor.history.cursor && !editor.polygonPoints} onClick={editor.undo}><Undo2 size={17} /></button>
       <button type="button" aria-label="선택 다시 실행" disabled={editor.history.cursor === editor.history.length} onClick={editor.redo}><Redo2 size={17} /></button>
       <button type="button" disabled={!editor.dirty} onClick={editor.reset}><RotateCcw size={15} />선택 초기화</button></div>
     <button type="button" className="separation-clear" onClick={() => { editor.clearSelection(); editor.setMode("brush"); editor.setSelectionMode("restore"); selectTool(); }}>선택 비우고 다시 선택</button>
-    <button type="button" className="button primary full subject-edit-apply" disabled={!canApply || !editor.dirty || editor.polygonPoints > 0} onClick={apply}>{applyLabel}</button>
+    <button type="button" className="button full separation-action subject-edit-apply" disabled={!canApply || !editor.dirty || !editor.recognized || editor.polygonPoints > 0} onClick={apply}>{applyLabel}</button>
   </fieldset>;
 }
 export function SubjectSeparationCanvas({ editor, disabled, filter }: { editor: SubjectSeparation; disabled: boolean; filter: string }) {

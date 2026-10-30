@@ -1,6 +1,7 @@
 import {
   request,
   post,
+  requestBlob,
   type Project,
   type Asset,
   type Manifest,
@@ -10,6 +11,7 @@ import {
   type ApiLayer,
   type SavedEdit,
 } from "./api";
+import { subjectPreview } from "./subject-preview";
 import {
   defaultEdit,
   read,
@@ -23,6 +25,13 @@ import {
   type GalleryPost,
 } from "./explore-feed";
 import { unspecifiedTag } from "./image-tags";
+
+export async function previewSubject(picture: Picture, signal: AbortSignal, changed: (job: Job) => void) {
+  const image = picture.exportSources?.image ? await requestBlob(picture.exportSources.image, signal)
+    : await (await fetch(picture.src, { signal })).blob();
+  signal.throwIfAborted();
+  return subjectPreview({ json: request, blob: requestBlob, remove: path => request(path, { method: "DELETE" }) }, image, signal, changed);
+}
 import { isImageShared, projectSharing } from "./image-sharing";
 import { mapDeviceLibrary } from "./device-state";
 import { galleryImages } from "./gallery-library";

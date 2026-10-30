@@ -25,7 +25,7 @@ export function StudioCanvas({ picture, edit, tool, layered, background, foregro
   const [zoom, setZoom] = useState("fit");
   const [darkPalette, setDarkPalette] = useState(false);
   const [hand, setHand] = useState(false);
-  const inline = tool === "layers" && layered && !published && selectedLayer !== "background" && separation.view !== "motion";
+  const inline = tool === "layers" && !published && selectedLayer !== "background" && separation.view !== "motion";
   const pan = usePreviewPan(tool === "layers" && zoom !== "fit", !inline || hand);
   useEffect(() => { if (zoom === "fit" || tool !== "layers") setHand(false); }, [zoom, tool]);
   const palette = { dark: darkPalette, toggle: () => setDarkPalette(value => !value) };

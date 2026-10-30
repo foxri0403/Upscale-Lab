@@ -145,8 +145,8 @@ async function requestResponse(
 export async function request<T>(path: string, init: RequestInit = {}, authenticated = true): Promise<T> {
   return parse<T>(await requestResponse(path, init, authenticated));
 }
-export async function requestBlob(path: string): Promise<Blob> {
-  const response = await requestResponse(path, { signal: AbortSignal.timeout(180000) });
+export async function requestBlob(path: string, signal: AbortSignal = AbortSignal.timeout(180000)): Promise<Blob> {
+  const response = await requestResponse(path, { signal });
   if (!response.ok) await parse(response);
   return response.blob();
 }

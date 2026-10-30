@@ -30,7 +30,7 @@ import {
 } from "./model";
 import { Modal, Notice, Busy, Empty, Link } from "./ui";
 import { cloud, request, post, type Job } from "./api";
-import { detailPicture, discardDraft, loadProjectPicture, processProject, refineSubject, resetProjectEffects, saveImageEdit } from "./cloud-store";
+import { detailPicture, discardDraft, loadProjectPicture, processProject, previewSubject, refineSubject, resetProjectEffects, saveImageEdit } from "./cloud-store";
 import { useUnsavedWarning } from "./use-unsaved-warning";
 import { LayerPreviewSelector } from "./LayerPreviewSelector";
 import { LayerMotionControls } from "./LayerMotionControls";
@@ -119,9 +119,8 @@ export function Studio({ route }: { route: string }) {
   const [target, setTarget] = useState("pc/monitor1");
   const [job, setJob] = useState<Job | null>(null);
   const [capabilities, setCapabilities] = useState<{ upscale: boolean; layers: boolean } | null>(null);
-  const [selectionStatus, setSelectionStatus] = useState("선택 AI 준비 중…"), [automaticSelection, setAutomaticSelection] = useState(true);
-  const [selectionRevision, setSelectionRevision] = useState(0);
-  const selectionClient = useRef<SmartSelectionClient | null>(null), lastAutomaticSelection = useRef(0);
+  const selectionClient = useRef<SmartSelectionClient | null>(null), selectionPreview = useRef<AbortController | null>(null);
+  const [previewJob, setPreviewJob] = useState<Job | null>(null);
   const subjectJob = useRef<string | null>(null);
   useEffect(() => { settingsScroll.current?.scrollTo(0, 0); }, [tool, picture?.id]);
   useEffect(() => {
@@ -140,9 +139,9 @@ export function Studio({ route }: { route: string }) {
     if (allTags.current) allTags.current.indeterminate = tags.length > 0 && !allTagsSelected(tags);
   }, [tags, tool]);
   useEffect(() => {
-    setJob(null);
+    setJob(null); setBusy(false);
     setTool("upscale"); setShareFeedback(null); setSelectedLayer("all"); discarding.current = false;
-    setSelectionRevision(0); lastAutomaticSelection.current = 0; subjectJob.current = null;
+    subjectJob.current = null; setPreviewJob(null);
   }, [picture?.id]);
   useEffect(() => {
     if (!cloud || !id || picture || id.startsWith("asset:") || parameters.get("new") === "1") return;
@@ -190,25 +189,16 @@ export function Studio({ route }: { route: string }) {
   const published = isImageShared(picture);
   const processing = !!job && ["Queued", "Processing"].includes(job.status);
   const separation = useSubjectSeparation(picture && isFox ? { ...picture, foregrounds: foregroundSrcs } : picture,
-    tool === "layers" && isFox, published || busy || processing || !isFox, {
+    tool === "layers" && !published, published || busy || processing, {
       refine: (input, progress) => {
-        if (!selectionClient.current) throw new Error("선택 AI를 준비하고 있습니다. 잠시 후 다시 선택해 주세요.");
+        selectionClient.current ||= new SmartSelectionClient(() => {});
         return selectionClient.current.refine(input, progress);
       },
-      onRefined: () => { setSelectionRevision(value => value + 1); setSelectedLayer("all"); separation.setView("overlay"); },
+      onRefined: () => { setSelectedLayer("all"); separation.setView("overlay"); },
     });
   useEffect(() => {
-    if (tool !== "layers" || !picture || published) return;
-    setSelectionStatus("선택 AI 준비 중…");
-    const client = new SmartSelectionClient(setSelectionStatus); selectionClient.current = client;
-    return () => { client.dispose(); selectionClient.current = null; };
+    return () => { selectionClient.current?.dispose(); selectionClient.current = null; selectionPreview.current?.abort(); };
   }, [tool, picture?.id, published]);
-  useEffect(() => {
-    if (!cloud || !automaticSelection || tool !== "layers" || published || selectionRevision <= lastAutomaticSelection.current || busy || processing || !separation.dirty ||
-      separation.tracing || separation.drawing || separation.polygonPoints || separation.history.operation?.kind === "clear") return;
-    const timer = setTimeout(() => { lastAutomaticSelection.current = selectionRevision; void applySubjectEdits(); }, 650);
-    return () => clearTimeout(timer);
-  }, [automaticSelection, tool, published, selectionRevision, busy, processing, picture?.id, separation.dirty, separation.tracing, separation.drawing, separation.polygonPoints, separation.history.operation]);
   const dirty = separation.dirty ||
     JSON.stringify(normalizedEdit(edit)) !== JSON.stringify(normalizedEdit(picture?.edit)) ||
     name.trim() !== picture?.name || JSON.stringify(tags) !== JSON.stringify(picture ? imageTags(picture) : []);
@@ -337,7 +327,19 @@ export function Studio({ route }: { route: string }) {
     finally { sharePending.current = false; setBusy(false); }
   }
   async function startProcessing() {
-    if (!picture || published || busy || processing || separation.dirty) return;
+    if (!picture || published || busy || processing || separation.tracing || separation.drawing || separation.polygonPoints) return;
+    if (tool === "layers") {
+      setSelectedLayer("all"); separation.setView("overlay");
+      if (separation.hasGuides) { await separation.recognize(); return; }
+      setBusy(true); const controller = new AbortController(); selectionPreview.current = controller;
+      try {
+        const foreground = separation.hasReference ? undefined : await previewSubject(picture, controller.signal, setPreviewJob);
+        controller.signal.throwIfAborted(); await separation.previewAutomatic(foreground);
+      } catch (error) { if (!controller.signal.aborted) toast((error as Error).message); }
+      finally { if (!controller.signal.aborted) { setBusy(false); setPreviewJob(null); } }
+      return;
+    }
+    if (separation.dirty) return;
     setBusy(true);
     try {
       const value = await processProject(
@@ -354,7 +356,7 @@ export function Studio({ route }: { route: string }) {
     }
   }
   async function applySubjectEdits() {
-    if (!picture || published || busy || processing || !isFox || !separation.dirty || separation.drawing || separation.tracing) return;
+    if (!picture || published || busy || processing || !separation.recognized || !separation.dirty || separation.drawing || separation.tracing || separation.polygonPoints) return;
     setBusy(true);
     try {
       const value = await refineSubject(picture, await separation.exportMask());
@@ -477,7 +479,7 @@ export function Studio({ route }: { route: string }) {
       <div className="tool-tabs studio-tool-dock" role="tablist" aria-label="이미지 편집 도구" aria-orientation={compact ? "horizontal" : "vertical"}>
         {tools.map(({ id, name, icon: Icon }) => (
           <button key={id} id={`studio-tool-${id}`} type="button" role="tab"
-            disabled={separation.drawing || separation.tracing || separation.polygonPoints > 0}
+            disabled={busy || separation.drawing || separation.tracing || separation.polygonPoints > 0}
             aria-controls="studio-properties" aria-selected={tool === id}
             tabIndex={tool === id ? 0 : -1}
             onKeyDown={(event) => {
@@ -526,13 +528,15 @@ export function Studio({ route }: { route: string }) {
         {(tool === "upscale" || tool === "layers") && (
           <div className="cloud-processing">
             <button
-              className="button primary full"
+              className={`button primary full ${tool === "layers" ? "separation-action" : ""}`}
               disabled={
                 busy ||
                 !cloud ||
                 !picture.projectId ||
                 processing ||
-                separation.dirty ||
+                (tool === "upscale" && separation.dirty) ||
+                separation.tracing || separation.drawing || separation.polygonPoints > 0 ||
+                (tool === "layers" && !separation.ready) ||
                 (tool === "layers" && capabilities?.layers === false) ||
                 (tool === "upscale" && capabilities?.upscale === false) ||
                 (tool === "upscale" && (!longest || resolution <= longest))
@@ -549,7 +553,7 @@ export function Studio({ route }: { route: string }) {
                 ? "업스케일"
                 : "배경·피사체 분리 시작"}
             </button>
-            {tool === "layers" && !published && <p className="job-state" role="status">{separation.tracing ? separation.smartStatus : selectionStatus}</p>}
+            {tool === "layers" && previewJob && !["Completed", "Failed"].includes(previewJob.status) && <p className="job-state" role="status">{previewJob.status === "Queued" ? "피사체 인식 대기 중" : `피사체 인식 중 · ${previewJob.progress}%`}</p>}
             {tool === "layers" && separation.error && <p className="mask-error" role="alert">{separation.error}</p>}
             {tool === "upscale" && <button className="button secondary full effect-cancel" type="button"
               disabled={busy || processing || !picture.projectId || !picture.jobId}
@@ -568,10 +572,8 @@ export function Studio({ route }: { route: string }) {
         )}
         </fieldset>
         {tool === "layers" && <>
-          {!published && <label className="separation-auto-apply"><input type="checkbox" checked={automaticSelection} disabled={busy || processing}
-            onChange={event => setAutomaticSelection(event.target.checked)} />선택 후 자동으로 레이어 갱신</label>}
-          {!published && <SubjectSeparationControls editor={separation} disabled={busy || processing} hasResult={isFox}
-            canApply={cloud && !!picture.projectId && !!picture.subjectLayerId && capabilities?.layers !== false}
+          {!published && <SubjectSeparationControls editor={separation} disabled={busy || processing} hasResult={!!picture}
+            canApply={cloud && !!picture.projectId && capabilities?.layers !== false}
             apply={() => void applySubjectEdits()}
             selectTool={() => { setSelectedLayer("all"); separation.setView("overlay"); }} />}
           <LayerPreviewSelector value={selectedLayer} change={value => { setSelectedLayer(value); if (value !== "background") separation.setView(value === "subject" ? "cutout" : "overlay"); }}

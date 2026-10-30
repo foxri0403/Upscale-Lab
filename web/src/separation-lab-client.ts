@@ -1,6 +1,7 @@
 import type { Job, Project } from "./api";
 import type { Picture } from "./model";
 import { unspecifiedTag } from "./image-tags";
+import { subjectPreview } from "./subject-preview";
 
 const prefix = "/__separation-lab";
 let session: Promise<{ accessToken: string }> | undefined;
@@ -26,6 +27,11 @@ export async function labJson<T>(path: string, init: RequestInit = {}): Promise<
 export const labPost = <T>(path: string, body: unknown, signal?: AbortSignal) => labJson<T>(path, {
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal,
 });
+export async function labSubjectPreview(projectId: string, signal: AbortSignal, changed: (job: Job) => void) {
+  const image = await (await labRequest(`/api/projects/${projectId}/content`, { signal })).blob();
+  return subjectPreview({ json: labJson, blob: async (path, signal) => (await labRequest(path, { signal })).blob(),
+    remove: path => labRequest(path, { method: "DELETE" }) }, image, signal, changed);
+}
 export type LabPicture = Picture & { objectUrls: string[] };
 export async function labPicture(projectId: string, signal?: AbortSignal): Promise<LabPicture> {
   const project = await labJson<Project>(`/api/projects/${projectId}`, { signal });

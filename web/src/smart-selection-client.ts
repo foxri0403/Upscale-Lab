@@ -18,7 +18,6 @@ export class SmartSelectionClient {
       for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(new Error("선택 AI를 시작하지 못했습니다. 페이지를 새로고침해 주세요.")); }
       this.pending.clear();
     };
-    this.worker.postMessage({ id: 0 });
   }
   refine(input: SmartSelectionInput, progress: (message: string) => void) {
     const id = ++this.id;

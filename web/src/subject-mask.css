@@ -1,7 +1,5 @@
 .mask-error { color: #b42332; font-size: 13px; line-height: 1.6; }
 .studio-editor .photo-settings.separation-controls { margin-top: 22px; }
-.studio-editor .separation-auto-apply { display: flex; align-items: center; gap: 7px; margin: 18px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
-.studio-editor .separation-auto-apply input { width: 14px; min-width: 14px; height: 14px; flex: none; padding: 0; margin: 0; accent-color: var(--primary); }
 .separation-tools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .separation-tools button, .separation-history button { display: flex; justify-content: center; align-items: center; gap: 5px; min-height: 38px; border: 1px solid var(--line); border-radius: 7px; background: white; font-size: 12px; padding: 7px 4px; }
 .separation-tools button.active { border-color: var(--primary); background: var(--tint); color: var(--primary); }
@@ -9,6 +7,8 @@
 .separation-controls output { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 .separation-controls input[type="range"] { display: block; width: 100%; margin-top: 10px; }
 .subject-edit-apply { margin-top: 12px; }
+.button.separation-action { font-family: inherit; font-size: 0.8571429rem; font-weight: 600; }
+.button.subject-edit-apply { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
 .separation-operation { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
 .separation-operation button, .separation-clear { min-height: 36px; border: 1px solid var(--line); border-radius: 7px; background: white; padding: 7px; font-size: 12px; }
 .separation-operation button[aria-pressed="true"] { border-color: var(--primary); color: var(--primary); background: var(--tint); }
