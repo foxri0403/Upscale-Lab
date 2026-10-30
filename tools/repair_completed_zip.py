@@ -19,20 +19,21 @@ def load_adapter_helpers():
     # importing the full adapter would require psd-tools on the local PC.
     adapter = Path(__file__).resolve().parents[1] / 'backend/ai-worker/see_through_adapter.py'
     tree = ast.parse(adapter.read_text(encoding='utf-8'), filename=str(adapter))
-    allowed = {'classify_layer', 'api_layer_type', 'pixel_quality', 'split_disconnected_handwear'}
+    allowed = {'classify_layer', 'api_layer_type', 'pixel_quality', 'split_disconnected_handwear', 'move_eyebrows_above_face', 'normalize_eye_part_order'}
     body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in allowed]
-    if len(body) != 4:
-        raise RuntimeError('Could not load all three trusted adapter helpers')
+    if len(body) != 6:
+        raise RuntimeError('Could not load all required adapter helpers')
     namespace = {'re': re, 'Image': Image, '__name__': 'repair_helpers'}
     exec(compile(ast.Module(body=body, type_ignores=[]), str(adapter), 'exec'), namespace)
     return (namespace['classify_layer'], namespace['api_layer_type'],
-            namespace['pixel_quality'], namespace['split_disconnected_handwear'])
+            namespace['pixel_quality'], namespace['split_disconnected_handwear'],
+            namespace['move_eyebrows_above_face'], namespace['normalize_eye_part_order'])
 
 
 def repair(source: Path, output: Path) -> tuple[int, int]:
     if source.resolve() == output.resolve():
         raise ValueError('Input and output ZIP paths must be different')
-    classify, api_layer_type, pixel_quality, split_arms = load_adapter_helpers()
+    classify, api_layer_type, pixel_quality, split_arms, move_eyebrows, fix_eyes = load_adapter_helpers()
     with zipfile.ZipFile(source) as src:
         manifest = json.loads(src.read('manifest.json'))
         originals = manifest.get('layers', [])
@@ -63,6 +64,9 @@ def repair(source: Path, output: Path) -> tuple[int, int]:
                 prepared.append((original, base_diag, layername, side, cut, img))
             label = ', '.join(side for side, _ in parts)
             print(f'{name}: {layername} -> {label}')
+
+        prepared, moved_eyebrows = move_eyebrows(prepared, name_index=2)
+        prepared, reordered_eyes = fix_eyes(prepared, name_index=2)
 
         if len(prepared) > 64:
             raise ValueError('More than 64 parts after splitting')
@@ -99,7 +103,11 @@ def repair(source: Path, output: Path) -> tuple[int, int]:
         manifest['diagnostics']['postprocess'] = {
             'classificationFixed': True,
             'screenSeparatedHandwearOnly': len(prepared) > len(originals),
-            'note': 'Screen-left/right are not anatomical sides; legs are still grouped. No inferred rigging.',
+            'eyebrowRenderOrderFixed': bool(moved_eyebrows),
+            'eyebrowsMovedAboveFace': moved_eyebrows,
+            'eyeRenderOrderFixed': bool(reordered_eyes),
+            'eyePartsReordered': reordered_eyes,
+            'note': 'Eye white renders below iris, iris below eyelash, all above base face and below front hair. Legs remain grouped; no inferred rigging.',
         }
         output.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as dst:

@@ -93,6 +93,85 @@ def api_layer_type(semantic_type: str) -> str:
     }.get(semantic_type, semantic_type)
 
 
+def move_eyebrows_above_face(parts: list, name_index: int = 0) -> tuple[list, list[str]]:
+    """Make eyebrow artwork visible without putting it in front of hair.
+
+    The See-through PSD may list eyebrow layers BEFORE its opaque base face.
+    The face then covers the eyebrows completely during layer compositing.
+    Move only early eyebrows to just after the final base `face` layer, while
+    preserving their relative order. Do not touch unrelated layers.
+
+    `name_index` identifies where the source layer name lives in each tuple.
+    Returns (reordered_parts, moved_layer_names).
+    """
+    def canonical(value) -> str:
+        return re.sub(r"[^a-z0-9]", "", str(value).casefold())
+
+    items = list(parts)
+    face_indices = [i for i, item in enumerate(items)
+                    if canonical(item[name_index]) == 'face']
+    if not face_indices:
+        return items, []
+    last_face = max(face_indices)
+    early_eyebrows = [i for i, item in enumerate(items)
+                      if i < last_face
+                      and canonical(item[name_index]) in
+                      {'eyebrow', 'eyebrows', 'brow', 'brows'}]
+    if not early_eyebrows:
+        return items, []
+    moved = [items[i] for i in early_eyebrows]
+    other = [item for i, item in enumerate(items) if i not in set(early_eyebrows)]
+    target = max(i for i, item in enumerate(other)
+                 if canonical(item[name_index]) == 'face') + 1
+    adjusted = other[:target] + moved + other[target:]
+    return adjusted, [str(item[name_index]) for item in moved]
+
+
+
+def normalize_eye_part_order(parts: list, name_index: int = 0) -> tuple[list, list[str]]:
+    """Ensure visible eye features render in the correct order over the base face.
+
+    Bottom-to-top: eye white/sclera, iris/pupil, eyelashes/eyeline.
+    The frontal hair remains on top (this does not hallucinate hidden eyes).
+    Parts without a base 'face' layer are left unchanged for safety.
+    Names are taken from the model-produced PSD rather than image content.
+    """
+    def canonical(value) -> str:
+        return re.sub(r"[^a-z0-9]", "", str(value).casefold())
+
+    priority = {
+        'eyewhite': 0, 'sclera': 0, 'eye whites': 0,
+        'iris': 1, 'irides': 1, 'pupil': 1, 'pupils': 1,
+        'eyelash': 2, 'eyelashes': 2, 'eyelid': 2,
+        'eyeline': 2,
+    }
+    # Remove stray whitespace from lookup keys (canonical names are compact).
+    keys = {canonical(k): v for k, v in priority.items()}
+    items = list(parts)
+    if not any(canonical(x[name_index]) == 'face' for x in items):
+        return items, []
+    eye_parts = [(i, item) for i, item in enumerate(items)
+                 if canonical(item[name_index]) in keys]
+    if not eye_parts:
+        return items, []
+    remaining = [item for item in items
+                 if canonical(item[name_index]) not in keys]
+    face_pos = max(i for i, item in enumerate(remaining)
+                   if canonical(item[name_index]) == 'face')
+    # Avoid changing a PSD with a nonstandard foreground-hair-before-face order.
+    if any(canonical(item[name_index]) in {'fronthair', 'bangs'}
+           for item in remaining[:face_pos]):
+        return items, []
+    sorted_eyes = [item for _, item in sorted(
+        eye_parts,
+        key=lambda pair: (keys[canonical(pair[1][name_index])], pair[0]))]
+    updated = remaining[:face_pos + 1] + sorted_eyes + remaining[face_pos + 1:]
+    new_positions = {id(item): i for i, item in enumerate(updated)}
+    changed = [str(item[name_index]) for original_index, item in eye_parts
+               if new_positions[id(item)] != original_index]
+    return updated, changed
+
+
 def pixel_quality(image: Image.Image | None) -> dict | None:
     """Compact quality indicators; no image pixels or private data in metadata.
 
@@ -237,6 +316,13 @@ def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -
                              'raw-fallback' if raw_is_better else 'composite',
                              has_mask, has_clipping))
 
+    prepared, moved_eyebrows = move_eyebrows_above_face(prepared, name_index=0)
+    prepared, reordered_eyes = normalize_eye_part_order(prepared, name_index=0)
+    if reordered_eyes:
+        print('[PSD] fixed eye order: sclera -> iris -> eyelashes; front hair remains above', flush=True)
+    if moved_eyebrows:
+        print('[PSD] fixed render order: eyebrow above base face, below front hair', flush=True)
+
     if not 1 <= len(prepared) <= 64:
         raise ValueError('More than 64 exported parts after conservative splitting')
 
@@ -302,6 +388,10 @@ def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -
             'inputImage': input_quality,
             'layers': diagnoses,
             'warnings': warnings,
+            'renderOrderCorrections': {
+                'eyebrowsMovedAboveFace': moved_eyebrows,
+                'eyePartsReordered': reordered_eyes,
+            },
             'notice': 'Depth and movement are deterministic placeholders, not learned rigging.',
         },
     }
