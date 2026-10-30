@@ -1,0 +1,25 @@
+﻿.header-token-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--border, #bbb4);
+  border-radius: 12px;
+  text-decoration: none;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.header-token-summary:hover {
+  background: var(--surface-hover, rgba(128, 128, 128, 0.08));
+}
+
+@media (max-width: 480px) {
+  .header-token-summary {
+    gap: 5px;
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+}

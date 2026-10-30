@@ -1,3 +1,4 @@
+import "./billing-header.css";
 import {
   createContext,
   useContext,
@@ -13,6 +14,7 @@ import {
   SquarePen,
   PanelsTopLeft,
   Download,
+  Coins,
   ChevronDown,
   LogOut,
   UserRound,
@@ -42,6 +44,7 @@ import {
 import { Studio } from "./Studio";
 import { Devices } from "./Devices";
 import { Downloads } from "./Downloads";
+import { Billing } from "./Billing";
 import { cloud, request, post, type Asset } from "./api";
 import {
   fetchLibrary,
@@ -160,7 +163,44 @@ export function Workspace({
   const toastPointer = useRef({ x: innerWidth / 2, y: innerHeight / 2 });
   const toastSequence = useRef(0);
   const [dialog, setDialog] = useState<"settings" | "downloads" | null>(null);
-  const page = navigation.find((n) => route.startsWith(`/app/${n.slug}`));
+  const [tokenWallet, setTokenWallet] = useState<{
+    plan?: string;
+    totalBalance?: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!cloud) return;
+
+    let active = true;
+
+    const refreshTokens = async () => {
+      try {
+        const wallet = await request<{
+          plan?: string;
+          totalBalance?: number;
+        }>("/api/tokens/me");
+
+        if (active) setTokenWallet(wallet);
+      } catch {
+        if (active) setTokenWallet(null);
+      }
+    };
+
+    void refreshTokens();
+
+    const onFocus = () => { void refreshTokens(); };
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("tokens-updated", onFocus);
+
+    return () => {
+      active = false;
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("tokens-updated", onFocus);
+    };
+  }, [session.id, route]);
+  const page = route.startsWith("/app/billing")
+    ? { slug: "billing", name: "??????", icon: Coins }
+    : navigation.find((n) => route.startsWith(`/app/${n.slug}`));
   function toast(text: string) {
     setMessage({ id: ++toastSequence.current, text, ...toastPointer.current });
   }
@@ -472,6 +512,16 @@ export function Workspace({
           <Brand to="/app/images" />
           <span className="header-section">{page?.name || "Upscale Lab"}</span>
           <div className="header-right">
+            {cloud && tokenWallet && (
+              <Link
+                to="/app/billing"
+                className="header-token-summary"
+              >
+                <span>{tokenWallet.plan ?? "Free"}</span>
+                <Coins size={16} />
+                <span>{tokenWallet.totalBalance ?? 0}</span>
+              </Link>
+            )}
             <details className="account-menu" ref={accountMenu}>
               <summary>
                 <AccountAvatar session={session} />
@@ -510,6 +560,12 @@ export function Workspace({
             ))}
           </nav>
           <div className="sidebar-bottom">
+            <Link
+              to="/app/billing"
+              className={`nav-link ${page?.slug === "billing" ? "selected" : ""}`}
+            >
+              <Coins size={22} /> ??????
+            </Link>
             <button className="nav-link" onClick={() => setDialog("downloads")}>
               <Download size={22} /> 연결 앱 다운로드
             </button>
@@ -534,9 +590,11 @@ export function Workspace({
             <Gallery explore />
           ) : page?.slug === "studio" ? (
             <Studio route={route} />
-          ) : page?.slug === "devices" ? (
-            <Devices />
-          ) : (
+           ) : page?.slug === "devices" ? (
+             <Devices />
+           ) : page?.slug === "billing" ? (
+             <Billing />
+           ) : (
             <Empty text="페이지를 찾을 수 없어요">
               <Link to="/app/images" className="button primary">
                 내 이미지로 이동
