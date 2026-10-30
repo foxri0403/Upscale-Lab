@@ -9,6 +9,7 @@ public sealed class ProcessingJob : BaseEntity
     public int UpscaleFactor { get; set; } = 2;
     public int? TargetLongEdge { get; set; }
     public string? ResultObjectKey { get; set; }
+    public string? SubjectMaskObjectKey { get; set; }
     public int ResultWidth { get; set; }
     public int ResultHeight { get; set; }
     public ProcessingJobStatus Status { get; set; } = ProcessingJobStatus.Queued;

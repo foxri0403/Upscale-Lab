@@ -9,6 +9,7 @@ import "./responsive.css";
 import { cloud, cloudMe, cloudLogout } from "./api";
 import { clearCloudCache } from "./cloud-store";
 import { SharedImage } from "./SharedImage";
+const SeparationLab = import.meta.env.DEV ? React.lazy(() => import("./SeparationLab").then(module => ({ default: module.SeparationLab }))) : undefined;
 
 function Redirect({ to }: { to: string }) {
   useEffect(() => navigate(to, true), [to]);
@@ -54,7 +55,7 @@ function App() {
     };
   }, []);
   useEffect(() => {
-    document.title = `${path.startsWith("/app/") ? ({ images: "내 이미지", explore: "탐색", studio: "작업실", devices: "기기 관리" } as Record<string, string>)[path.split("/")[2]] || "Upscale Lab" : path === "/login" ? "로그인" : path === "/signup" ? "회원가입" : "이미지에 새로운 가능성을"} · Upscale Lab`;
+    document.title = `${import.meta.env.DEV && path === "/lab/separation" ? "피사체 분리 실험실" : path.startsWith("/app/") ? ({ images: "내 이미지", explore: "탐색", studio: "작업실", devices: "기기 관리" } as Record<string, string>)[path.split("/")[2]] || "Upscale Lab" : path === "/login" ? "로그인" : path === "/signup" ? "회원가입" : "이미지에 새로운 가능성을"} · Upscale Lab`;
   }, [path]);
   function logout() {
     clearCloudCache();
@@ -64,6 +65,7 @@ function App() {
     setSession(null);
     navigate("/", true);
   }
+  if (import.meta.env.DEV && path === "/lab/separation" && SeparationLab) return <React.Suspense fallback={<main className="boot-screen">피사체 분리 실험실을 준비하고 있습니다…</main>}><SeparationLab /></React.Suspense>;
   if (path.startsWith("/share/")) return <SharedImage token={path.slice("/share/".length)} />;
   if (!ready)
     return (

@@ -30,6 +30,17 @@ def background_mask(alpha):
     return np.asarray(Image.fromarray(mask).filter(ImageFilter.MaxFilter(radius * 2 + 1)))
 
 
+def read_subject_mask(content, width, height):
+    with Image.open(io.BytesIO(content)) as source:
+        if source.format != "PNG" or source.size != (width, height) or width * height > MAX_PIXELS:
+            raise ValueError("Subject mask must be a full-canvas PNG.")
+        if source.convert("RGBA").getchannel("A").getextrema() != (255, 255):
+            raise ValueError("Subject mask must be opaque grayscale.")
+        alpha = source.convert("L")
+    background_mask(alpha)  # Apply the same foreground/background limits as automatic separation.
+    return alpha
+
+
 def generator_options(config_path):
     from omegaconf import OmegaConf
     # Official big-lama YAML uses ${generator...} references. Resolve this subtree
@@ -59,15 +70,16 @@ class LayerPipeline:
         self.inpainter.load_state_dict(generator, strict=True)
         self.inpainter.eval().cuda()  # FFC/FFT stays FP32; only BiRefNet uses FP16.
 
-    def split(self, image):
+    def split(self, image, alpha=None):
         torch = self.torch
         from torchvision import transforms
         transform = transforms.Compose([transforms.Resize((2048, 2048)), transforms.ToTensor(),
             transforms.Normalize([.485, .456, .406], [.229, .224, .225])])
         with torch.inference_mode():
-            prediction = self.segmenter(transform(image).unsqueeze(0).cuda().half())[-1].sigmoid()
-            alpha = Image.fromarray((prediction[0, 0].float().cpu().numpy() * 255).round().astype(np.uint8))
-            alpha = alpha.resize(image.size, Image.Resampling.LANCZOS)
+            if alpha is None:
+                prediction = self.segmenter(transform(image).unsqueeze(0).cuda().half())[-1].sigmoid()
+                alpha = Image.fromarray((prediction[0, 0].float().cpu().numpy() * 255).round().astype(np.uint8))
+                alpha = alpha.resize(image.size, Image.Resampling.LANCZOS)
             holes = background_mask(alpha)
             # Use the global scene, not independent segmentation tiles. Bound LaMa's VRAM
             # while keeping all original unmasked pixels at their original resolution.

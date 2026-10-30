@@ -791,6 +791,10 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<string>("SubjectMaskObjectKey")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
                     b.Property<int?>("TargetLongEdge")
                         .HasColumnType("integer");
 

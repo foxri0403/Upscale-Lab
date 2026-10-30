@@ -42,6 +42,7 @@ export type Picture = {
   sourceProjectId?: string;
   background?: string;
   foregrounds?: string[];
+  subjectLayerId?: string;
   jobId?: string;
   detailsUntil?: number;
   width?: number;

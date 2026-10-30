@@ -2,7 +2,7 @@ import io
 import unittest
 import numpy as np
 from PIL import Image
-from pipeline import background_mask, png_bytes, read_image
+from pipeline import background_mask, png_bytes, read_image, read_subject_mask
 
 
 class LayerContractTests(unittest.TestCase):
@@ -29,6 +29,21 @@ class LayerContractTests(unittest.TestCase):
     def test_mismatched_dimensions_are_rejected(self):
         with self.assertRaises(ValueError):
             read_image(png_bytes(Image.new("RGB", (20, 30))), 30, 20)
+
+    def test_manual_mask_preserves_soft_edges_and_restored_or_erased_areas(self):
+        mask = Image.new("L", (64, 64), 0)
+        mask.paste(255, (20, 20, 40, 40))
+        mask.putpixel((19, 25), 128)
+        mask.putpixel((30, 30), 0)
+        decoded = read_subject_mask(png_bytes(mask), 64, 64)
+        self.assertEqual(decoded.tobytes(), mask.tobytes())
+        self.assertEqual(background_mask(decoded)[0, 0], 0)
+
+    def test_invalid_manual_masks_are_rejected(self):
+        for mask in [Image.new("L", (64, 64), 0), Image.new("L", (64, 64), 255),
+                     Image.new("RGBA", (64, 64), (255, 255, 255, 0)), Image.new("L", (32, 32), 127)]:
+            with self.assertRaises(ValueError):
+                read_subject_mask(png_bytes(mask), 64, 64)
 
 
 if __name__ == "__main__":

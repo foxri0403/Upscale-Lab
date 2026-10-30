@@ -1,0 +1,38 @@
+PhotoCraft mask brush subset used by Upscale Lab
+
+Upstream: https://github.com/storytold/photocraft
+Pinned revision: 5f9b4391874aabc9deb2fcb905267613e4d93ec8
+Sources:
+- crates/algo/src/matting/brush.rs (segment distance, soft coverage, maximum stroke coverage)
+- crates/algo/src/selection.rs (8-bit Add/Subtract mask combination)
+- crates/algo/src/magnetic.rs (Sobel edges, ridge centres and corridor live-wire search)
+
+Changes: translated the geometry and coverage subset to TypeScript; incremental input,
+sparse canvas-sized tiles, source-coordinate replay, and application-specific limits.
+Magnetic lasso uses a bounded preview field, piecewise corridor searches, typed arrays
+and an approximate tangent term; its traced vectors are replayed at original resolution.
+No upstream UI, model weights, fonts, icons, brand assets, or hosted API clients included.
+This adaptation elects the upstream MIT license option. Other upstream components are
+not incorporated merely because this subset is used.
+
+MIT License
+
+Copyright (c) 2026 ArtCraft Team and the PhotoCraft contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

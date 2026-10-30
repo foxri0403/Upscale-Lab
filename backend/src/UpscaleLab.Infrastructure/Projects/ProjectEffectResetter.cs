@@ -68,7 +68,10 @@ internal static class ProjectEffectResetter
                 var remove = feature == "All" ||
                     (feature == "Upscale" && job.Operation == ProcessingOperation.Upscale) ||
                     (feature == "Layers" && job.Operation == ProcessingOperation.Layers);
-                if (remove) { db.ProcessingJobs.Remove(job); project.ProcessingJobs.Remove(job); continue; }
+                if (remove) {
+                    if (job.SubjectMaskObjectKey is { } maskKey) obsolete.Add(maskKey);
+                    db.ProcessingJobs.Remove(job); project.ProcessingJobs.Remove(job); continue;
+                }
                 if (job.Operation == ProcessingOperation.UpscaleAndLayers)
                     job.Operation = layers ? ProcessingOperation.Upscale : ProcessingOperation.Layers;
                 if (upscale)

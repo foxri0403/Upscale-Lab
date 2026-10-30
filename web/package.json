@@ -11,9 +11,10 @@
     "test": "node --experimental-strip-types --test tests/*.test.mjs"
   },
   "dependencies": {
+    "@huggingface/transformers": "3.8.1",
+    "lucide-react": "^0.468.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "lucide-react": "^0.468.0"
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",

@@ -90,6 +90,31 @@ public sealed class RunPodLayerTests
         Assert.Equal(2, layers.Count); Assert.Equal(1, cloud.Submissions);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ManualMaskIsUploadedAndBoundToCompletionAndRecovery(bool workerSupportsMask)
+    {
+        using var files = new Workspace(); using var s3 = new S3Stub();
+        using var cloud = new Cloud(s3) { EchoMaskHash = workerSupportsMask }; using var http = new HttpClient(cloud);
+        var maskPath = Path.Combine(files.Root, "mask.png");
+        using (var mask = new MagickImage(MagickColors.Black, 40, 60)) mask.Write(maskPath, MagickFormat.Png);
+        var id = Guid.NewGuid(); var processor = Processor(http, s3);
+        var request = new LayerProcessingRequest(files.Input, files.Output, id, SubjectMaskPath: maskPath);
+        if (workerSupportsMask)
+        {
+            Assert.Equal(2, (await processor.ProcessAsync(request, CancellationToken.None)).Count);
+            await processor.ProcessAsync(request, CancellationToken.None);
+            Assert.Equal(1, cloud.Submissions);
+            using (var changed = new MagickImage(MagickColors.White, 40, 60)) changed.Write(maskPath, MagickFormat.Png);
+            await Assert.ThrowsAsync<InvalidDataException>(() => processor.ProcessAsync(request, CancellationToken.None));
+        }
+        else
+            await Assert.ThrowsAsync<InvalidDataException>(() => processor.ProcessAsync(request, CancellationToken.None));
+        Assert.Contains($"cloud-jobs/layers/{id:N}/mask.png", s3.Files.Keys);
+        Assert.Equal(1, cloud.Submissions);
+    }
+
     private static RunPodImageLayerProcessor Processor(HttpClient http, IAmazonS3 s3) => new(http,
         new RunPodOptions { ApiKey = "secret-api-key", LayersEndpointId = "layers", ApiBaseUrl = "https://provider.test/v2/" },
         s3, new S3StorageOptions { S3BucketName = "test" });
@@ -99,6 +124,7 @@ public sealed class RunPodLayerTests
         public readonly List<string?> AuthorizationTokens = [];
         public int Submissions; public bool Opaque; public bool Fail;
         public bool PublishCompletion = true;
+        public bool EchoMaskHash = true;
         public CancellationTokenSource? CancelOnStatus;
         private string? pendingKey;
         private byte[]? pending;
@@ -121,7 +147,8 @@ public sealed class RunPodLayerTests
                 store.Files[prefix + "foreground.png"] = foreground.ToByteArray(MagickFormat.Png);
                 pendingKey = prefix + "complete.json";
                 pending = JsonSerializer.SerializeToUtf8Bytes(new { status = "completed",
-                    jobId = input.GetProperty("job_id").GetString(), inputSha256 = input.GetProperty("input_sha256").GetString(), width = 40, height = 60 });
+                    jobId = input.GetProperty("job_id").GetString(), inputSha256 = input.GetProperty("input_sha256").GetString(), width = 40, height = 60,
+                    maskSha256 = EchoMaskHash && input.TryGetProperty("mask_sha256", out var hash) ? hash.GetString() : null });
                 if (PublishCompletion) store.Files[pendingKey] = pending;
                 return new(HttpStatusCode.OK) { Content = JsonContent.Create(new { id = "remote-id" }) };
             }

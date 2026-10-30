@@ -4,13 +4,13 @@ using UpscaleLab.Application.Projects;
 namespace UpscaleLab.Application.Processing;
 
 public sealed record LayerProcessingRequest(string InputPath, string OutputDirectory, Guid JobId = default,
-    Func<int, CancellationToken, Task>? ReportProgress = null);
+    Func<int, CancellationToken, Task>? ReportProgress = null, string? SubjectMaskPath = null);
 
 public sealed record ProcessProjectRequest(ProcessingOperation Operation = ProcessingOperation.Layers, int UpscaleFactor = 2,
     int? TargetLongEdge = null);
 public sealed record ProjectProcessingRequest(string InputPath, string OutputDirectory, ProcessingOperation Operation,
     int UpscaleFactor, Guid JobId = default, int? TargetLongEdge = null,
-    Func<int, CancellationToken, Task>? ReportProgress = null);
+    Func<int, CancellationToken, Task>? ReportProgress = null, string? SubjectMaskPath = null);
 public sealed record ProjectProcessingResult(IReadOnlyList<ProcessedLayer> Layers, string? ImagePath, int Width, int Height);
 
 // The cloud integration owner implements this boundary; no provider credentials reach clients.
@@ -46,6 +46,8 @@ public interface IProcessingJobQueue
 
 public interface IProjectProcessingService
 {
+    Task<ProcessingStatusResponse> RefineSubjectAsync(Guid userId, Guid projectId, Guid baseLayerId,
+        Stream mask, CancellationToken cancellationToken);
     Task<ProcessingStatusResponse> StartAsync(Guid userId, Guid projectId, CancellationToken cancellationToken);
     Task<ProcessingStatusResponse> StartAsync(Guid userId, Guid projectId, ProcessProjectRequest request, CancellationToken cancellationToken);
     Task<UpscaleLab.Application.Images.DownloadUrlResponse> GetResultUrlAsync(Guid userId, Guid projectId, Guid jobId, CancellationToken cancellationToken);

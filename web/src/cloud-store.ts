@@ -62,6 +62,7 @@ export function projectPicture(p: Project): Picture {
     },
     created: p.createdAt,
     background,
+    subjectLayerId: p.layers?.find(layer => layer.layerType !== "Background")?.id,
     foregrounds: p.layers
       ?.filter((l) => l.layerType !== "Background")
       .sort((a, b) => a.layerOrder - b.layerOrder)
@@ -327,4 +328,12 @@ export async function processProject(
     operation,
     ...(operation === "Upscale" ? { targetLongEdge } : {}),
   });
+}
+
+export async function refineSubject(picture: Picture, mask: Blob) {
+  if (!picture.projectId) throw new Error("원본 프로젝트를 불러온 뒤 분리해 주세요.");
+  const body = new FormData();
+  body.append("baseLayerId", picture.subjectLayerId || "00000000-0000-0000-0000-000000000000");
+  body.append("mask", mask, "subject-mask.png");
+  return request<Job>(`/api/projects/${picture.projectId}/subject-mask`, { method: "POST", body });
 }

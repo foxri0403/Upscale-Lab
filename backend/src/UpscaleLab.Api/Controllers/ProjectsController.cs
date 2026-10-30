@@ -113,6 +113,19 @@ public sealed class ProjectsController(
         return Accepted(response);
     }
 
+    [HttpPost("{projectId:guid}/subject-mask")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(ImageFormatPolicy.MaxRequestBytes)]
+    public async Task<ActionResult<ProcessingStatusResponse>> RefineSubject(
+        Guid projectId, [FromForm] Guid baseLayerId, IFormFile mask, CancellationToken ct)
+    {
+        if (mask.Length is <= 0 or > ImageFormatPolicy.MaxUploadBytes ||
+            !string.Equals(mask.ContentType, "image/png", StringComparison.OrdinalIgnoreCase))
+            return ValidationProblem("피사체 마스크는 50MB 이하의 PNG여야 합니다.");
+        await using var stream = mask.OpenReadStream();
+        return Accepted(await processingService.RefineSubjectAsync(User.GetRequiredUserId(), projectId, baseLayerId, stream, ct));
+    }
+
     [HttpPost("{projectId:guid}/jobs/{jobId:guid}/download-url")]
     public async Task<ActionResult<DownloadUrlResponse>> ResultUrl(Guid projectId, Guid jobId, CancellationToken ct) =>
         Ok(await processingService.GetResultUrlAsync(User.GetRequiredUserId(), projectId, jobId, ct));

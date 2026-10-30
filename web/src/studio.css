@@ -94,7 +94,7 @@
 .studio-editor .subject-layer { transition: none; transform: translate3d(var(--motion-x, 0px), var(--motion-y, 0px), 0); }
 .studio-editor .motion-active .subject-layer { will-change: transform; }
 .studio-canvas-viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #f2f4f9; border-radius: 8px; }
-.studio-canvas-center { position: absolute; inset: 26px 0 0 26px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.studio-canvas-center { position: absolute; inset: 26px 0 0 26px; display: block; overflow: auto; touch-action: none; }
 .studio-editor .canvas-stage {
   flex: none;
   min-height: 0;

@@ -22,14 +22,25 @@ public sealed class ProjectProcessingService(
     public Task<ProcessingStatusResponse> StartAsync(Guid userId, Guid projectId, CancellationToken cancellationToken) =>
         StartAsync(userId, projectId, new ProcessProjectRequest(), cancellationToken);
 
-    public async Task<ProcessingStatusResponse> StartAsync(Guid userId, Guid projectId,
-        ProcessProjectRequest request, CancellationToken cancellationToken)
+    public Task<ProcessingStatusResponse> StartAsync(Guid userId, Guid projectId,
+        ProcessProjectRequest request, CancellationToken cancellationToken) =>
+        StartCoreAsync(userId, projectId, request, null, null, cancellationToken);
+
+    public Task<ProcessingStatusResponse> RefineSubjectAsync(Guid userId, Guid projectId, Guid baseLayerId,
+        Stream mask, CancellationToken cancellationToken) =>
+        StartCoreAsync(userId, projectId, new(), baseLayerId, mask, cancellationToken);
+
+    private async Task<ProcessingStatusResponse> StartCoreAsync(Guid userId, Guid projectId,
+        ProcessProjectRequest request, Guid? baseLayerId, Stream? mask, CancellationToken cancellationToken)
     {
         var project = await dbContext.LiveLayerProjects
             .Include(x => x.ProcessingJobs)
             .Include(x => x.OriginalImage)
+            .Include(x => x.Layers)
             .SingleOrDefaultAsync(x => x.Id == projectId && x.UserId == userId, cancellationToken)
             ?? throw new NotFoundException("프로젝트를 찾을 수 없습니다.");
+
+        if (ProjectDraftState.IsDiscarded(project.SavedEditJson)) throw new NotFoundException("프로젝트를 찾을 수 없습니다.");
 
         if (!Enum.IsDefined(request.Operation) || request.UpscaleFactor is not (2 or 4))
             throw new ValidationException("지원하는 작업 종류와 배율(2 또는 4)을 선택하세요.");
@@ -61,10 +72,30 @@ public sealed class ProjectProcessingService(
             UpscaleFactor = request.TargetLongEdge is int target
                 ? UpscaleResolution.NativeScale(project.OriginalImage.OriginalWidth, project.OriginalImage.OriginalHeight, target)
                 : request.UpscaleFactor };
+        if (mask != null)
+        {
+            // Guid.Empty denotes a first manual selection, and is valid only before layers exist.
+            var firstSelection = baseLayerId == Guid.Empty && project.Layers.Count == 0;
+            if (!firstSelection && (!project.Layers.Any(x => x.Id == baseLayerId && x.LayerType != LayerType.Background) ||
+                !project.Layers.Any(x => x.LayerType == LayerType.Background)))
+                throw new ConflictException("분리 결과가 변경되었습니다. 최신 결과를 불러온 뒤 수정해 주세요.");
+            var latestImage = project.ProcessingJobs.Where(x => x.Status == ProcessingJobStatus.Completed && x.ResultObjectKey != null)
+                .OrderByDescending(x => x.CreatedAt).FirstOrDefault();
+            var width = latestImage?.ResultWidth ?? project.OriginalImage.OriginalWidth;
+            var height = latestImage?.ResultHeight ?? project.OriginalImage.OriginalHeight;
+            using var normalized = await SubjectMask.ReadAsync(mask, width, height, cancellationToken);
+            job.SubjectMaskObjectKey = $"users/{userId:N}/projects/{projectId:N}/masks/{job.Id:N}.png";
+            await storageService.UploadAsync(normalized, job.SubjectMaskObjectKey, "image/png", cancellationToken);
+        }
         project.Status = ProjectStatus.Processing;
         project.FailureReason = null;
         dbContext.ProcessingJobs.Add(job);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        try { await dbContext.SaveChangesAsync(cancellationToken); }
+        catch
+        {
+            if (job.SubjectMaskObjectKey is { } key) await TryDeleteAsync(key);
+            throw;
+        }
         await queue.EnqueueAsync(job.Id, cancellationToken);
         return MapStatus(job);
     }
@@ -162,6 +193,13 @@ public sealed class ProjectProcessingService(
             }
 
             job.Progress = 15;
+            string? maskPath = null;
+            if (job.SubjectMaskObjectKey is { } maskKey)
+            {
+                maskPath = Path.Combine(workspace, "subject-mask.png");
+                await using var maskFile = File.Create(maskPath);
+                await storageService.DownloadAsync(maskKey, maskFile, cancellationToken);
+            }
             if (job.TargetLongEdge is int requestedEdge)
             {
                 var originalInfo = new MagickImageInfo(inputPath);
@@ -175,7 +213,7 @@ public sealed class ProjectProcessingService(
                     job.TargetLongEdge, async (progress, ct) => {
                         job.Progress = Math.Clamp(progress, 15, 75);
                         await dbContext.SaveChangesAsync(ct);
-                    }),
+                    }, maskPath),
                 cancellationToken);
             var hasLayers = job.Operation != ProcessingOperation.Upscale;
             var hasImage = job.Operation != ProcessingOperation.Layers;
