@@ -1,5 +1,4 @@
-import { Coins } from "lucide-react";
-import { Billing } from "./Billing";
+import "./billing-header.css";
 import {
   createContext,
   useContext,
@@ -15,6 +14,7 @@ import {
   SquarePen,
   PanelsTopLeft,
   Download,
+  Coins,
   ChevronDown,
   LogOut,
   UserRound,
@@ -45,6 +45,7 @@ import {
 import { Studio } from "./Studio";
 import { Devices } from "./Devices";
 import { Downloads } from "./Downloads";
+import { Billing } from "./Billing";
 import { cloud, request, post, type Asset } from "./api";
 import {
   fetchLibrary,
@@ -176,7 +177,48 @@ export function Workspace({
   const toastPointer = useRef({ x: innerWidth / 2, y: innerHeight / 2 });
   const toastSequence = useRef(0);
   const [dialog, setDialog] = useState<"settings" | "downloads" | null>(null);
-  const page = navigation.find((n) => route.startsWith(`/app/${n.slug}`));
+  const [tokenWallet, setTokenWallet] = useState<{
+    plan?: string;
+    monthlyBalance?: number;
+    purchasedBalance?: number;
+    totalBalance?: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!cloud) return;
+
+    let active = true;
+
+    const refreshTokens = async () => {
+      try {
+        const wallet = await request<{
+          plan?: string;
+          monthlyBalance?: number;
+    purchasedBalance?: number;
+    totalBalance?: number;
+        }>("/api/tokens/me");
+
+        if (active) setTokenWallet(wallet);
+      } catch {
+        if (active) setTokenWallet(null);
+      }
+    };
+
+    void refreshTokens();
+
+    const onFocus = () => { void refreshTokens(); };
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("tokens-updated", onFocus);
+
+    return () => {
+      active = false;
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("tokens-updated", onFocus);
+    };
+  }, [session.id, route]);
+  const page = route.startsWith("/app/billing")
+    ? { slug: "billing", name: "토큰·요금제", icon: Coins }
+    : navigation.find((n) => route.startsWith(`/app/${n.slug}`));
   function toast(text: string) {
     setMessage({ id: ++toastSequence.current, text, ...toastPointer.current });
   }
@@ -489,6 +531,26 @@ export function Workspace({
           <Brand to="/app/images" />
           <span className="header-section">{page?.name || "Upscale Lab"}</span>
           <div className="header-right">
+            {cloud && tokenWallet && (
+              <details className="header-token-menu">
+                <summary className="header-token-summary">
+                  <span>{tokenWallet.plan ?? "-"}</span>
+                  <Coins size={16} />
+                  <span>{tokenWallet.totalBalance ?? 0}</span>
+                  <ChevronDown size={14} />
+                </summary>
+                <div className="header-token-dropdown">
+                  <strong>내 토큰 정보</strong>
+                  <div><span>현재 요금제</span><b>{tokenWallet.plan ?? "-"}</b></div>
+                  <div><span>월 제공 토큰 잔액</span><b>{tokenWallet.monthlyBalance ?? 0}</b></div>
+                  <div><span>구매 토큰 잔액</span><b>{tokenWallet.purchasedBalance ?? 0}</b></div>
+                  <div className="token-dropdown-total">
+                    <span>총 잔여 토큰</span>
+                    <b>{tokenWallet.totalBalance ?? 0}</b>
+                  </div>
+                </div>
+              </details>
+            )}
             <details className="account-menu" ref={accountMenu}>
               <summary aria-label="내 계정">
                 <AccountAvatar session={session} />
@@ -531,6 +593,13 @@ export function Workspace({
             ))}
           </nav>
           <div className="sidebar-bottom">
+            <Link
+              to="/app/billing"
+              className={`nav-link ${page?.slug === "billing" ? "selected" : ""}`}
+              onClick={() => { if (compact) setSidebar(false); }}
+            >
+              <Coins size={22} /> 토큰·요금제
+            </Link>
             <button className="nav-link" onClick={() => { if (compact) setSidebar(false); setDialog("downloads"); }}>
               <Download size={22} /> 연결 앱 다운로드
             </button>
