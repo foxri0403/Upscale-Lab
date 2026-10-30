@@ -771,7 +771,7 @@ export function Billing() {
           </div>
 
           <p style={{ marginTop: 28, opacity: 0.7, fontSize: 13 }}>
-            현재 토큰 구매는 테스트 결제 전용입니다. Plus·Pro 정기구독과 실제 결제는 아직 비활성화되어 있습니다.
+            현재 토큰 구매와 정기 구독은 테스트 결제 전용입니다.
           </p>
         </>
       )}

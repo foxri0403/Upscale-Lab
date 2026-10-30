@@ -199,7 +199,7 @@ export function Workspace({
     };
   }, [session.id, route]);
   const page = route.startsWith("/app/billing")
-    ? { slug: "billing", name: "??????", icon: Coins }
+    ? { slug: "billing", name: "토큰·요금제", icon: Coins }
     : navigation.find((n) => route.startsWith(`/app/${n.slug}`));
   function toast(text: string) {
     setMessage({ id: ++toastSequence.current, text, ...toastPointer.current });
@@ -564,7 +564,7 @@ export function Workspace({
               to="/app/billing"
               className={`nav-link ${page?.slug === "billing" ? "selected" : ""}`}
             >
-              <Coins size={22} /> ??????
+              <Coins size={22} /> 토큰·요금제
             </Link>
             <button className="nav-link" onClick={() => setDialog("downloads")}>
               <Download size={22} /> 연결 앱 다운로드
