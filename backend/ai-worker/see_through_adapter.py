@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -19,27 +20,77 @@ from psd_tools.constants import ColorMode
 
 
 def classify_layer(name: str) -> str:
-    normalized = name.casefold().replace('-', '_').replace(' ', '_')
-    groups = (
-        (("background", "bg"), "Background"),
-        (("back_hair", "backhair", "rear_hair", "behind_hair"), "BackHair"),
-        (("front_hair", "fronthair", "bang", "fringe"), "FrontHair"),
-        (("eyebrow", "brow"), "Eyebrow"),
-        (("eye", "iris", "pupil", "eyelash"), "Eye"),
-        (("mouth", "lip"), "Mouth"),
-        (("nose",), "Nose"),
-        (("face", "head", "ear"), "Face"),
-        (("hair",), "Hair"),
-        (("cloth", "dress", "shirt", "skirt", "sleeve", "pants"), "Clothes"),
-        (("accessory", "ribbon", "hat", "glasses", "jewelry"), "Accessory"),
-        (("body", "skin", "arm", "hand", "leg", "foot"), "Body"),
-        (("front", "foreground"), "FrontPart"),
-        (("back",), "BackPart"),
-    )
-    for tokens, kind in groups:
-        if any(token in normalized for token in tokens):
-            return kind
+    """Classify semantic PSD layer names without substring collisions.
+
+    The existing API expects its established layerType vocabulary.  In
+    particular, `topwear` must not match the substring `ear` (Face).
+    """
+    # Separate words consistently, including names like `FrontHair`.
+    words = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name.strip())
+    normalized = re.sub(r"[^a-z0-9]+", "_", words.casefold()).strip("_")
+    if not normalized:
+        return "Other"
+    tokens = set(normalized.split("_"))
+    compact = normalized.replace("_", "")
+
+    # The exact names emitted by See-through take priority.
+    explicit = {
+        "topwear": "Clothes", "bottomwear": "Clothes",
+        "legwear": "Clothes", "handwear": "Clothes",
+        "upperwear": "Clothes", "outerwear": "Clothes",
+        "backhair": "BackHair", "rearhair": "BackHair",
+        "fronthair": "FrontHair", "bangs": "FrontHair",
+        "neck": "Body", "ears": "Face", "ear": "Face",
+        "irides": "Eye", "iris": "Eye", "eyewhite": "Eye",
+        "eyelash": "Eye", "eyebrow": "Eyebrow",
+        "crown": "Accessory", "wand": "Accessory",
+        "staff": "Accessory", "headgear": "Accessory",
+        "hand": "Body", "fist": "Body", "arm": "Body",
+    }
+    if compact in explicit:
+        return explicit[compact]
+
+    # Token matches instead of `word in name`: prevents topwear -> ear.
+    if "background" in tokens or "bg" in tokens:
+        return "Background"
+    if ("hair" in tokens and tokens.intersection({"back", "rear", "behind"})) or "backhair" in tokens:
+        return "BackHair"
+    if ("hair" in tokens and tokens.intersection({"front", "bang", "fringe"})) or tokens.intersection({"fringe", "bang", "bangs", "fronthair"}):
+        return "FrontHair"
+    if tokens.intersection({"eyebrow", "eyebrows", "brow", "brows"}):
+        return "Eyebrow"
+    if tokens.intersection({"eye", "eyes", "iris", "irides", "pupil", "eyelash", "eyelashes", "eyewhite", "sclera"}):
+        return "Eye"
+    if tokens.intersection({"mouth", "lip", "lips"}):
+        return "Mouth"
+    if "nose" in tokens:
+        return "Nose"
+    if tokens.intersection({"face", "head", "ear", "ears"}):
+        return "Face"
+    if "hair" in tokens:
+        return "Hair"
+    if tokens.intersection({"cloth", "clothes", "clothing", "dress", "shirt", "skirt", "sleeve", "pants", "jacket", "coat", "topwear", "bottomwear", "upperwear", "outerwear"}):
+        return "Clothes"
+    if tokens.intersection({"accessory", "ribbon", "hat", "glasses", "jewelry", "crown", "wand", "staff", "star", "headgear"}):
+        return "Accessory"
+    if tokens.intersection({"body", "skin", "arm", "arms", "hand", "hands", "fist", "leg", "legs", "foot", "feet", "neck"}):
+        return "Body"
+    if "foreground" in tokens or "front" in tokens:
+        return "FrontPart"
+    if "back" in tokens:
+        return "BackPart"
     return "Other"
+
+
+# The 2026-10-26 ASP.NET Core LayerType enum only understands these 9 values:
+# Background, BackPart, Body, FrontPart, Hair, Face, Clothes, Accessory, Other.
+# Preserve fine-grained labels separately for future automatic rigging.
+def api_layer_type(semantic_type: str) -> str:
+    return {
+        'BackHair': 'Hair', 'FrontHair': 'Hair',
+        'Eye': 'Face', 'Eyebrow': 'Face',
+        'Mouth': 'Face', 'Nose': 'Face',
+    }.get(semantic_type, semantic_type)
 
 
 def pixel_quality(image: Image.Image | None) -> dict | None:
@@ -81,6 +132,64 @@ def render_full_canvas(image: Image.Image, layer, canvas_size: tuple[int, int]) 
     return result
 
 
+def split_disconnected_handwear(image: Image.Image) -> tuple[list[tuple[str, Image.Image]], int | None]:
+    """Conservatively split *visually disconnected* left/right sleeve+hand regions.
+
+    Treat 'left' and 'right' as screen coordinates, NOT anatomical sides.
+    Only split when a >=12-pixel EMPTY COLUMN GAP separates two substantial
+    visible regions. No model inference or guessing hidden arm boundaries.
+    Other input types must not call this function.
+    """
+    rgba = image.convert('RGBA')
+    alpha = rgba.getchannel('A')
+    bbox = alpha.getbbox()
+    if not bbox:
+        return [('whole', rgba)], None
+    x0, y0, x1, y1 = bbox
+    if x1 - x0 < 60:
+        return [('whole', rgba)], None
+
+    counts = [0] * rgba.width
+    px = alpha.load()
+    for y in range(y0, y1):
+        for x in range(x0, x1):
+            if px[x, y] >= 16:
+                counts[x] += 1
+
+    total = sum(counts)
+    if total < 4000:
+        return [('whole', rgba)], None
+
+    gaps = []
+    x = x0
+    while x < x1:
+        if counts[x]:
+            x += 1
+            continue
+        start = x
+        while x < x1 and counts[x] == 0:
+            x += 1
+        finish = x
+        left_pixels = sum(counts[x0:start])
+        right_pixels = sum(counts[finish:x1])
+        if (finish - start >= 12
+                and min(left_pixels, right_pixels) >= 1500
+                and min(left_pixels, right_pixels) / total >= 0.15):
+            gaps.append((finish - start, start, finish))
+    if not gaps:
+        return [('whole', rgba)], None
+
+    _, gap_start, gap_end = max(gaps)
+    split_x = (gap_start + gap_end) // 2
+    screen_left = rgba.copy()
+    screen_left.paste((0, 0, 0, 0), (split_x, 0, rgba.width, rgba.height))
+    screen_right = rgba.copy()
+    screen_right.paste((0, 0, 0, 0), (0, 0, split_x, rgba.height))
+    if not screen_left.getchannel('A').getbbox() or not screen_right.getchannel('A').getbbox():
+        return [('whole', rgba)], None
+    return [('screenLeft', screen_left), ('screenRight', screen_right)], split_x
+
+
 def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -> list[dict]:
     layers_dir = output / 'layers'
     layers_dir.mkdir(parents=True, exist_ok=True)
@@ -95,19 +204,16 @@ def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -
     if not 1 <= len(extracted) <= 64:
         raise ValueError('See-through PSD must have between 1 and 64 visible pixel layers')
 
-    manifest = []
-    diagnoses = []
-    denominator = max(1, len(extracted) - 1)
-    for order, (layer, composite) in enumerate(extracted):
+    # First select the correct PSD color/alpha image. Then split only handwear
+    # parts that have two disconnected screen-left/right regions.
+    prepared = []
+    for layer, composite in extracted:
         try:
             raw = layer.topil()
         except (ValueError, NotImplementedError):
             raw = None
         composite_quality = pixel_quality(composite)
         raw_quality = pixel_quality(raw)
-        # Trust the composited result by default, because it applies PSD masks.
-        # Use source pixels only when the composite is clearly defective and
-        # raw pixels are both colored and transparent, with no external masks.
         has_mask = bool(layer.has_mask()) or bool(layer.has_vector_mask())
         has_clipping = bool(layer.has_clip_layers())
         raw_is_better = bool(
@@ -119,14 +225,34 @@ def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -
             and not has_mask and not has_clipping
         )
         selected = raw if raw_is_better else composite
+        full = render_full_canvas(selected, layer, (psd.width, psd.height))
+        layer_name = layer.name or ''
+        if layer_name.casefold().replace(' ', '').replace('_', '') == 'handwear':
+            pieces, split_x = split_disconnected_handwear(full)
+        else:
+            pieces, split_x = [('whole', full)], None
+        for side, piece in pieces:
+            prepared.append((layer_name, piece, side, split_x,
+                             composite_quality, raw_quality,
+                             'raw-fallback' if raw_is_better else 'composite',
+                             has_mask, has_clipping))
+
+    if not 1 <= len(prepared) <= 64:
+        raise ValueError('More than 64 exported parts after conservative splitting')
+
+    manifest, diagnoses = [], []
+    denominator = max(1, len(prepared) - 1)
+    for order, (name, result, side, split_x, composite_quality, raw_quality,
+                export_method, has_mask, has_clipping) in enumerate(prepared):
         filename = f'{order:03d}.png'
-        result = render_full_canvas(selected, layer, (psd.width, psd.height))
         result.save(layers_dir / filename, format='PNG')
         final_quality = pixel_quality(result)
         depth = order / denominator
+        semantic_type = classify_layer(name)
         manifest.append({
             'file': f'layers/{filename}',
-            'layerType': classify_layer(layer.name or ''),
+            'layerType': api_layer_type(semantic_type),
+            'semanticLayerType': semantic_type,
             'layerOrder': order,
             'depth': depth,
             'positionX': 0.0,
@@ -136,18 +262,25 @@ def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -
             'movementX': round(4.0 + depth * 20.0, 3),
             'movementY': round(3.0 + depth * 16.0, 3),
         })
-        diagnoses.append({
+        diag = {
             'file': f'layers/{filename}',
-            'sourceLayerName': layer.name or '',
+            'sourceLayerName': name,
+            'semanticLayerType': semantic_type,
             'composite': composite_quality,
             'rawPixels': raw_quality,
             'export': final_quality,
-            'exportMethod': 'raw-fallback' if raw_is_better else 'composite',
+            'exportMethod': export_method,
             'hasMask': has_mask,
             'hasClipping': has_clipping,
-        })
-        print(f'[PSD] part={order:03d} method={diagnoses[-1]["exportMethod"]} '
-              f'composite={composite_quality} raw={raw_quality} final={final_quality}', flush=True)
+        }
+        if side != 'whole':
+            diag['splitFrom'] = name
+            diag['splitScreenSide'] = side
+            diag['splitColumn'] = split_x
+            diag['splitMethod'] = 'disconnected-alpha-horizontal-gap'
+        diagnoses.append(diag)
+        print(f'[PSD] exported part={order:03d} source={name} side={side} '
+              f'quality={final_quality}', flush=True)
 
     all_gray = all(row['export']['visibleColoredPercent'] == 0 for row in diagnoses)
     all_opaque = all(not row['export']['hasTransparency'] for row in diagnoses)
