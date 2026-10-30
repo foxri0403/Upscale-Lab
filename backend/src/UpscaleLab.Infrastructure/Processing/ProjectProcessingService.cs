@@ -9,6 +9,7 @@ using UpscaleLab.Application.Upscaling;
 using UpscaleLab.Domain.Entities;
 using UpscaleLab.Domain.Enums;
 using UpscaleLab.Infrastructure.Database;
+using UpscaleLab.Infrastructure.Tokens;
 
 namespace UpscaleLab.Infrastructure.Processing;
 
@@ -17,6 +18,7 @@ public sealed class ProjectProcessingService(
     IStorageService storageService,
     IProjectImageProcessor processor,
     IProcessingJobQueue queue,
+    ITokenService tokenService,
     ILogger<ProjectProcessingService> logger) : IProjectProcessingService
 {
     public Task<ProcessingStatusResponse> StartAsync(Guid userId, Guid projectId, CancellationToken cancellationToken) =>
@@ -63,8 +65,26 @@ public sealed class ProjectProcessingService(
                 : request.UpscaleFactor };
         project.Status = ProjectStatus.Processing;
         project.FailureReason = null;
-        dbContext.ProcessingJobs.Add(job);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        // 작업 생성과 토큰 예약을 하나의 트랜잭션으로 처리
+        await using (var transaction =
+            await dbContext.Database.BeginTransactionAsync(cancellationToken))
+        {
+            dbContext.ProcessingJobs.Add(job);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (request.Operation == ProcessingOperation.Upscale)
+            {
+                if (request.TargetLongEdge is not int targetEdge)
+                    throw new ValidationException(
+                        "업스케일링 목표 해상도(FHD/QHD/4K)가 필요합니다.");
+
+                await tokenService.ReserveAsync(
+                    userId, job.Id, targetEdge, cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+
         await queue.EnqueueAsync(job.Id, cancellationToken);
         return MapStatus(job);
     }
@@ -133,8 +153,19 @@ public sealed class ProjectProcessingService(
         var ownerId = job.Project.UserId;
         if (ProjectDraftState.IsDiscarded(job.Project.SavedEditJson))
         {
-            job.Status = ProcessingJobStatus.Failed; job.CompletedAt = DateTime.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
+            job.Status = ProcessingJobStatus.Failed;
+            job.CompletedAt = DateTime.UtcNow;
+
+            await using (var transaction =
+                await dbContext.Database.BeginTransactionAsync(cancellationToken))
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+
+                if (job.Operation == ProcessingOperation.Upscale)
+                    await tokenService.RefundAsync(job.Id, cancellationToken);
+
+                await transaction.CommitAsync(cancellationToken);
+            }
             await Projects.DraftProjectCleanup.DiscardAsync(dbContext, storageService, ownerId, job.ProjectId, false, cancellationToken);
             return;
         }
@@ -285,7 +316,17 @@ public sealed class ProjectProcessingService(
             job.ErrorMessage = null;
             job.Project.Status = ProjectStatus.Completed;
             job.Project.FailureReason = null;
-            await dbContext.SaveChangesAsync(cancellationToken);
+
+            await using (var transaction =
+                await dbContext.Database.BeginTransactionAsync(cancellationToken))
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+
+                if (job.Operation == ProcessingOperation.Upscale)
+                    await tokenService.CompleteAsync(job.Id, cancellationToken);
+
+                await transaction.CommitAsync(cancellationToken);
+            }
 
             foreach (var oldKey in oldKeys)
             {
@@ -319,7 +360,17 @@ public sealed class ProjectProcessingService(
             job.CompletedAt = DateTime.UtcNow;
             job.Project.Status = ProjectStatus.Failed;
             job.Project.FailureReason = message;
-            await dbContext.SaveChangesAsync(CancellationToken.None);
+
+            await using (var transaction =
+                await dbContext.Database.BeginTransactionAsync(CancellationToken.None))
+            {
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+
+                if (job.Operation == ProcessingOperation.Upscale)
+                    await tokenService.RefundAsync(job.Id, CancellationToken.None);
+
+                await transaction.CommitAsync(CancellationToken.None);
+            }
         }
         finally
         {

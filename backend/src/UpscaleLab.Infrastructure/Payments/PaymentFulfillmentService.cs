@@ -1,0 +1,119 @@
+using Microsoft.EntityFrameworkCore;
+using UpscaleLab.Domain.Entities;
+using UpscaleLab.Domain.Payments;
+using UpscaleLab.Infrastructure.Database;
+using UpscaleLab.Infrastructure.Tokens;
+
+namespace UpscaleLab.Infrastructure.Payments;
+
+public sealed class PaymentFulfillmentService(ApplicationDbContext db)
+{
+    // 토스페이먼츠 서버에서 검증한 결과만 전달해야 한다.
+    // 클라이언트가 보낸 값을 그대로 전달하면 안 된다.
+    public async Task<bool> FulfillTokenPurchaseAsync(
+        Guid userId,
+        TossPaymentResult verifiedPayment,
+        CancellationToken ct)
+    {
+        if (verifiedPayment.Status != "DONE")
+            throw new InvalidOperationException(
+                "결제가 완료되지 않았습니다.");
+
+        if (string.IsNullOrWhiteSpace(verifiedPayment.PaymentKey))
+            throw new InvalidOperationException(
+                "결제 키가 올바르지 않습니다.");
+
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction =
+                await db.Database.BeginTransactionAsync(ct);
+
+            // 주문 행을 잠가 동일 주문의 동시 지급 방지
+            var order = await db.PaymentOrders
+                .FromSqlInterpolated($"""
+                    SELECT * FROM payment_orders
+                    WHERE "OrderId" = {verifiedPayment.OrderId}
+                    FOR UPDATE
+                    """)
+                .SingleOrDefaultAsync(ct);
+
+            if (order == null || order.UserId != userId)
+                throw new InvalidOperationException(
+                    "본인의 주문을 찾을 수 없습니다.");
+
+            if (order.SubscriptionId is not null ||
+                order.BillingPeriodStartUtc is not null)
+                throw new InvalidOperationException(
+                    "구독 주문은 토큰 구매 정산으로 처리할 수 없습니다.");
+
+            if (order.Amount != verifiedPayment.TotalAmount)
+                throw new InvalidOperationException(
+                    "결제 금액이 주문 금액과 다릅니다.");
+
+            if (order.Status == PaymentOrderStatus.Paid)
+            {
+                if (order.PaymentKey != verifiedPayment.PaymentKey)
+                    throw new InvalidOperationException(
+                        "다른 결제 키로 완료된 주문입니다.");
+
+                return false;
+            }
+
+            if (order.Status is not (
+                PaymentOrderStatus.Pending or
+                PaymentOrderStatus.Confirming))
+                throw new InvalidOperationException(
+                    "지급할 수 없는 주문 상태입니다.");
+
+            if (order.PaymentKey != null &&
+                order.PaymentKey != verifiedPayment.PaymentKey)
+                throw new InvalidOperationException(
+                    "주문의 결제 키가 일치하지 않습니다.");
+
+            var product = PaymentCatalog.Get(order.ProductCode);
+
+            if (product.Price != order.Amount || product.IsSubscription)
+                throw new InvalidOperationException(
+                    "토큰 구매 상품 정보가 올바르지 않습니다.");
+
+            var now = DateTime.UtcNow;
+            var period = TokenService.CurrentPeriodUtc();
+
+            // 지갑이 없는 사용자에게 Free 기본 지갑 생성
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO user_token_wallets
+                    ("Id", "UserId", "Plan", "Balance",
+                     "PurchasedBalance", "PeriodStartUtc",
+                     "CreatedAt", "UpdatedAt")
+                VALUES
+                    ({Guid.NewGuid()}, {userId}, 'Free', 10,
+                     0, {period}, {now}, {now})
+                ON CONFLICT ("UserId") DO NOTHING
+                """, ct);
+
+            // 추가 구매 토큰만 증가.
+            // 기존 월간 토큰은 변경하지 않는다.
+            var updated = await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE user_token_wallets
+                SET "PurchasedBalance" =
+                        "PurchasedBalance" + {product.Tokens},
+                    "UpdatedAt" = {now}
+                WHERE "UserId" = {userId}
+                """, ct);
+
+            if (updated != 1)
+                throw new InvalidOperationException(
+                    "토큰 지갑 업데이트에 실패했습니다.");
+
+            order.PaymentKey = verifiedPayment.PaymentKey;
+            order.Status = PaymentOrderStatus.Paid;
+            order.PaidAt = now;
+
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+
+            return true;
+        });
+    }
+}
