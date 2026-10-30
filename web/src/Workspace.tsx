@@ -99,7 +99,6 @@ const navigation = [
   { slug: "explore", name: "탐색", icon: Search },
   { slug: "studio", name: "작업실", icon: SquarePen },
   { slug: "devices", name: "기기 관리", icon: PanelsTopLeft },
-  { slug: "billing", name: "토큰·요금제", icon: Coins },
 ];
 export function Workspace({
   session: initialSession,
