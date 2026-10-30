@@ -18,6 +18,7 @@ from PIL import Image, ImageFilter
 import numpy as np
 from psd_tools import PSDImage
 from psd_tools.constants import ColorMode
+from generic_quality_refiner import refine_layer_generic
 
 
 def classify_layer(name: str) -> str:
@@ -409,6 +410,107 @@ def postprocess_layer_rgba(image: Image.Image, source_name: str = "") -> tuple[I
             int(np.count_nonzero(original_alpha))), 5)
     return Image.fromarray(arr, mode="RGBA"), stats
 
+def refine_legwear_v2(image: Image.Image, source_name: str = '') -> tuple[Image.Image, dict]:
+    """Remove bright, near-neutral 'background ghosts' INSIDE two dark pant legs.
+
+    See-through may paint the white background between black trousers as an
+    *opaque gray triangle*.  Simply dropping weak-alpha pixels (v1) cannot
+    remove it.  v2 looks for TWO independently dark, opaque leg rails over a
+    long continuous vertical interval.  It clears only gray/neutral pixels
+    strictly in the gap, never dark trouser pixels or colored clothing.
+
+    This conservative operation is disabled for all other layer names and for
+    colored/light trousers without the necessary two-rail evidence.  It is
+    NOT a generative reconstruction or automatic leg rigging algorithm.
+    """
+    canonical = re.sub(r'[^a-z0-9]', '', source_name.casefold())
+    stats = {'applied': False, 'sourceName': source_name, 'version': 'leg-gap-gray-v2',
+             'removedGrayGhostPixels': 0, 'candidateRows': 0,
+             'validatedRows': 0, 'reason': 'not-legwear'}
+    if canonical != 'legwear':
+        return image, stats
+    rgba = image.convert('RGBA')
+    arr = np.array(rgba, dtype=np.uint8, copy=True)
+    alpha = arr[:, :, 3]
+    ys, xs = np.where(alpha >= 80)
+    if len(xs) == 0:
+        stats['reason'] = 'empty'; return rgba, stats
+    x0, x1, y0, y1 = int(xs.min()), int(xs.max()) + 1, int(ys.min()), int(ys.max()) + 1
+    width, height = x1-x0, y1-y0
+    if width < 120 or height < 200:
+        stats['reason'] = 'small-shape'; return rgba, stats
+
+    rgb = arr[:, :, :3].astype(np.int16)
+    luminance = rgb.mean(axis=2)
+    chroma = rgb.max(axis=2) - rgb.min(axis=2)
+    min_run = max(12, width // 42)
+    min_gap = max(9, width // 75)
+    rows = []
+    for y in range(y0 + int(height * .12), y1):
+        # Opaque DARK pixels, not light-blue edge highlights or see-through gray.
+        dark = (alpha[y, x0:x1] >= 215) & (luminance[y, x0:x1] <= 65)
+        # Bridge isolated antialiasing pixel holes within each dark rail.
+        mask = np.convolve(np.pad(dark.astype(np.uint8), (2, 2)),
+                           np.ones(5, dtype=np.uint8), mode='valid') >= 3
+        edges = np.diff(np.pad(mask.astype(np.int8), (1, 1)))
+        starts, ends = np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)
+        runs = [(x0 + int(a), x0 + int(b)) for a, b in zip(starts, ends)
+                if b-a >= min_run]
+        candidates = []
+        for left, right in zip(runs, runs[1:]):
+            lo, hi = left[1] + 2, right[0] - 2
+            if hi - lo < min_gap:
+                continue
+            # Gray pixels with moderate or strong opacity are specifically
+            # the failure v1 couldn't correct. Colored or dark art is spared.
+            ghost = ((luminance[y, lo:hi] >= 92)
+                     & (chroma[y, lo:hi] <= 35)
+                     & (alpha[y, lo:hi] >= 35))
+            n = int(np.count_nonzero(ghost))
+            if n >= max(5, int((hi-lo)*.12)):
+                candidates.append((n, lo, hi))
+        if candidates:
+            n, lo, hi = max(candidates)
+            rows.append((y, lo, hi, n))
+    stats['candidateRows'] = len(rows)
+    if not rows:
+        stats['reason'] = 'no-two-rail-gray-gap'; return rgba, stats
+
+    # Require >=30 successive scanlines. A single gray stripe or outfit
+    # decoration must never turn into a hole.
+    groups = []
+    for row in rows:
+        if not groups or row[0] > groups[-1][-1][0] + 2:
+            groups.append([])
+        groups[-1].append(row)
+    best = max(groups, key=len)
+    required = max(30, int(height * .07))
+    if len(best) < required:
+        stats['reason'] = 'insufficient-contiguous-rows'; return rgba, stats
+    stats['validatedRows'] = len(best)
+
+    modifications = []
+    for y, lo, hi, _ in best:
+        selected = ((luminance[y, lo:hi] >= 92)
+                    & (chroma[y, lo:hi] <= 35)
+                    & (alpha[y, lo:hi] >= 35))
+        if np.any(selected):
+            modifications.append((y, lo, hi, selected))
+    changed = sum(int(sel.sum()) for _, _, _, sel in modifications)
+    # Avoid overaggressive modifications on unrelated art.
+    visible_pixels = int(np.count_nonzero(alpha >= 8))
+    if changed > visible_pixels * 0.15 or changed > width*height*.10:
+        stats['reason'] = 'excessive-change-guard'; return rgba, stats
+    for y, lo, hi, selected in modifications:
+        alpha[y, lo:hi][selected] = 0
+        # Avoid RGB halos if the compositing client mishandles alpha.
+        arr[y, lo:hi, :3][selected] = 0
+    stats['applied'] = bool(changed)
+    stats['removedGrayGhostPixels'] = changed
+    stats['reason'] = 'fixed-gray-gap' if changed else 'no-change'
+    return Image.fromarray(arr, mode='RGBA'), stats
+
+
 def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -> list[dict]:
     layers_dir = output / 'layers'
     layers_dir.mkdir(parents=True, exist_ok=True)
@@ -471,11 +573,18 @@ def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -
     for order, (name, result, side, split_x, composite_quality, raw_quality,
                 export_method, has_mask, has_clipping) in enumerate(prepared):
         filename = f'{order:03d}.png'
+        semantic_type = classify_layer(name)
         result, cleanup_stats = postprocess_layer_rgba(result, name)
+        # v3 applies a safe generic cleanup without erasing ambiguous white/grey art.
+        # v1 already boosts facial alpha, so don't boost again here.
+        result, generic_stats = refine_layer_generic(
+            result, source_name=name, semantic_type=semantic_type,
+            boost_features=False,
+        )
+        result, refine_stats = refine_legwear_v2(result, name)
         result.save(layers_dir / filename, format='PNG')
         final_quality = pixel_quality(result)
         depth = order / denominator
-        semantic_type = classify_layer(name)
         manifest.append({
             'file': f'layers/{filename}',
             'layerType': api_layer_type(semantic_type),
@@ -498,6 +607,8 @@ def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -
             'export': final_quality,
             'exportMethod': export_method,
             'qualityCleanup': cleanup_stats,
+            'qualityRefinementV3Generic': generic_stats,
+            'qualityRefinementV2': refine_stats,
             'hasMask': has_mask,
             'hasClipping': has_clipping,
         }
@@ -531,8 +642,8 @@ def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -
             'layers': diagnoses,
             'warnings': warnings,
             'qualityPostprocess': {
-                'version': 'conservative-v1',
-                'note': 'No learned reconstruction; single-pixel cleanup and conditional leg-gap mask only.',
+                'version': 'generic-v3-safe + conservative-v2',
+                'note': 'v1 cleanup, general v3 safe cleanup, plus guarded v2 legwear cleanup; no learned reconstruction. Ambiguous bright/grey regions remain unchanged.',
             },
             'renderOrderCorrections': {
                 'eyebrowsMovedAboveFace': moved_eyebrows,

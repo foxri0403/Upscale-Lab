@@ -29,6 +29,7 @@ RUN python /opt/worker/patch_safetensors_loading.py \
 
 # Use the newly committed diagnostic handler.
 COPY see_through_adapter.py /opt/worker/see_through_adapter.py
+COPY generic_quality_refiner.py /opt/worker/generic_quality_refiner.py
 COPY runpod-see-through/handler.py /opt/worker/handler.py
 COPY runpod-see-through/requirements-worker.txt /opt/worker/requirements-worker.txt
 RUN pip install --no-cache-dir -r /opt/worker/requirements-worker.txt
