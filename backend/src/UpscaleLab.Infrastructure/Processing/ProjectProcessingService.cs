@@ -14,9 +14,11 @@ namespace UpscaleLab.Infrastructure.Processing;
 
 public sealed class ProjectProcessingService(
     ApplicationDbContext dbContext,
+    IDbContextFactory<ApplicationDbContext> dbContextFactory,
     IStorageService storageService,
     IProjectImageProcessor processor,
     IProcessingJobQueue queue,
+    UpscaleLab.Infrastructure.Tokens.ITokenService tokenService,
     ILogger<ProjectProcessingService> logger) : IProjectProcessingService
 {
     public Task<ProcessingStatusResponse> StartAsync(Guid userId, Guid projectId, CancellationToken cancellationToken) =>
@@ -89,13 +91,90 @@ public sealed class ProjectProcessingService(
         }
         project.Status = ProjectStatus.Processing;
         project.FailureReason = null;
-        dbContext.ProcessingJobs.Add(job);
-        try { await dbContext.SaveChangesAsync(cancellationToken); }
-        catch
+
+        if (job.Operation == ProcessingOperation.Upscale)
         {
-            if (job.SubjectMaskObjectKey is { } key) await TryDeleteAsync(key);
-            throw;
+            if (request.TargetLongEdge is not int targetEdge)
+                throw new ValidationException(
+                    "업스케일링 목표 해상도(FHD/QHD/4K)가 필요합니다.");
+
+            await using var strategyDb =
+                await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+            var strategy = strategyDb.Database.CreateExecutionStrategy();
+
+            await strategy.ExecuteAsync(async () =>
+            {
+                await using var retryDb =
+                    await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+                await using var transaction =
+                    await retryDb.Database.BeginTransactionAsync(cancellationToken);
+
+                // 같은 작업 ID가 이미 저장되어 있다면 재예약하지 않는다.
+                var existing = await retryDb.ProcessingJobs
+                    .AsNoTracking()
+                    .AnyAsync(x => x.Id == job.Id, cancellationToken);
+
+                if (existing)
+                {
+                    var reservationExists = await retryDb.TokenTransactions
+                        .AsNoTracking()
+                        .AnyAsync(
+                            x => x.ProcessingJobId == job.Id
+                                && x.UserId == userId,
+                            cancellationToken);
+
+                    if (!reservationExists)
+                    {
+                        throw new InvalidOperationException(
+                            "업스케일링 작업은 존재하지만 토큰 예약 거래가 없습니다.");
+                    }
+
+                    // 작업과 거래가 모두 존재하면 동일 작업을 다시 예약하지 않는다.
+                    return;
+                }
+
+                var retryProject = await retryDb.LiveLayerProjects
+                    .SingleAsync(x => x.Id == projectId && x.UserId == userId,
+                        cancellationToken);
+
+                retryProject.Status = ProjectStatus.Processing;
+                retryProject.FailureReason = null;
+
+                retryDb.ProcessingJobs.Add(new ProcessingJob
+                {
+                    Id = job.Id,
+                    ProjectId = job.ProjectId,
+                    Operation = job.Operation,
+                    UpscaleFactor = job.UpscaleFactor,
+                    TargetLongEdge = job.TargetLongEdge
+                });
+
+                await retryDb.SaveChangesAsync(cancellationToken);
+
+                var retryTokenService =
+                    new UpscaleLab.Infrastructure.Tokens.TokenService(retryDb);
+
+                await retryTokenService.ReserveAsync(
+                    userId, job.Id, targetEdge, cancellationToken);
+
+                await transaction.CommitAsync(cancellationToken);
+            });
         }
+        else
+        {
+            // 기존 배경 분리 및 피사체 보정 처리
+            dbContext.ProcessingJobs.Add(job);
+            try { await dbContext.SaveChangesAsync(cancellationToken); }
+            catch
+            {
+                if (job.SubjectMaskObjectKey is { } key)
+                    await TryDeleteAsync(key);
+                throw;
+            }
+        }
+
         await queue.EnqueueAsync(job.Id, cancellationToken);
         return MapStatus(job);
     }
@@ -165,7 +244,22 @@ public sealed class ProjectProcessingService(
         if (ProjectDraftState.IsDiscarded(job.Project.SavedEditJson))
         {
             job.Status = ProcessingJobStatus.Failed; job.CompletedAt = DateTime.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
+            if (job.Operation == ProcessingOperation.Upscale)
+            {
+                var strategy = dbContext.Database.CreateExecutionStrategy();
+                await strategy.ExecuteAsync(async () =>
+                {
+                    await using var transaction =
+                        await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    await tokenService.RefundAsync(job.Id, cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                });
+            }
+            else
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
             await Projects.DraftProjectCleanup.DiscardAsync(dbContext, storageService, ownerId, job.ProjectId, false, cancellationToken);
             return;
         }
@@ -323,7 +417,95 @@ public sealed class ProjectProcessingService(
             job.ErrorMessage = null;
             job.Project.Status = ProjectStatus.Completed;
             job.Project.FailureReason = null;
-            await dbContext.SaveChangesAsync(cancellationToken);
+            if (job.Operation == ProcessingOperation.Upscale)
+            {
+                await using var strategyDb =
+                    await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+                var strategy = strategyDb.Database.CreateExecutionStrategy();
+
+                await strategy.ExecuteAsync(async () =>
+                {
+                    await using var retryDb =
+                        await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+                    await using var transaction =
+                        await retryDb.Database.BeginTransactionAsync(cancellationToken);
+
+                    var lockedJob = await retryDb.ProcessingJobs
+                        .FromSqlInterpolated($"""
+                            SELECT * FROM processing_jobs
+                            WHERE "Id" = {job.Id}
+                            FOR UPDATE
+                            """)
+                        .SingleAsync(cancellationToken);
+
+                    if (lockedJob.Status == ProcessingJobStatus.Completed)
+                        return;
+
+                    if (lockedJob.Status == ProcessingJobStatus.Failed)
+                        throw new InvalidOperationException(
+                            $"실패 처리된 작업 {job.Id}을 완료 처리할 수 없습니다.");
+
+                    var lockedProject = await retryDb.LiveLayerProjects
+                        .SingleAsync(x => x.Id == lockedJob.ProjectId,
+                            cancellationToken);
+
+                    lockedJob.ResultObjectKey = imageResultKey;
+                    lockedJob.ResultWidth = processed.Width;
+                    lockedJob.ResultHeight = processed.Height;
+                    lockedJob.Status = ProcessingJobStatus.Completed;
+                    lockedJob.Progress = 100;
+                    lockedJob.CompletedAt = DateTime.UtcNow;
+                    lockedJob.ErrorMessage = null;
+
+                    lockedProject.Status = ProjectStatus.Completed;
+                    lockedProject.FailureReason = null;
+
+                    // 기존 업스케일링 레이어 보존 기능 유지
+                    if (hasLayers)
+                    {
+                        var existingLayers = await retryDb.ImageLayers
+                            .Where(x => x.ProjectId == job.ProjectId)
+                            .ToListAsync(cancellationToken);
+
+                        retryDb.ImageLayers.RemoveRange(existingLayers);
+
+                        foreach (var layer in newLayers)
+                        {
+                            retryDb.ImageLayers.Add(new ImageLayer
+                            {
+                                ProjectId = layer.ProjectId,
+                                LayerType = layer.LayerType,
+                                LayerOrder = layer.LayerOrder,
+                                ImageUrl = layer.ImageUrl,
+                                ObjectKey = layer.ObjectKey,
+                                Depth = layer.Depth,
+                                PositionX = layer.PositionX,
+                                PositionY = layer.PositionY,
+                                Rotation = layer.Rotation,
+                                Scale = layer.Scale,
+                                MovementX = layer.MovementX,
+                                MovementY = layer.MovementY
+                            });
+                        }
+                    }
+
+                    await retryDb.SaveChangesAsync(cancellationToken);
+
+                    var retryTokenService =
+                        new UpscaleLab.Infrastructure.Tokens.TokenService(retryDb);
+
+                    await retryTokenService.CompleteAsync(
+                        job.Id, cancellationToken);
+
+                    await transaction.CommitAsync(cancellationToken);
+                });
+            }
+            else
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
 
             foreach (var oldKey in oldKeys)
             {
@@ -344,10 +526,60 @@ public sealed class ProjectProcessingService(
         catch (Exception exception)
         {
             logger.LogError(exception, "LiveLayer processing job {JobId} failed", jobId);
-            foreach (var uploadedKey in uploadedKeys)
+
+            // 업스케일링 정산 커밋이 이미 성공했을 수 있으므로
+            // 실제 DB 상태를 먼저 확인한다.
+            if (job.Operation == ProcessingOperation.Upscale)
             {
-                await TryDeleteAsync(uploadedKey);
+                dbContext.ChangeTracker.Clear();
+
+                var persistedStatus = await dbContext.ProcessingJobs
+                    .AsNoTracking()
+                    .Where(x => x.Id == jobId)
+                    .Select(x => (ProcessingJobStatus?)x.Status)
+                    .SingleOrDefaultAsync(CancellationToken.None);
+
+                if (persistedStatus == ProcessingJobStatus.Completed)
+                {
+                    logger.LogWarning(
+                        "Upscale job {JobId} already completed; skipping failure settlement.",
+                        jobId);
+                    return;
+                }
+
+                // 예약 거래 상태를 확인한다.
+                // 이미 확정된 토큰은 실패 처리 과정에서 환불하지 않는다.
+                var transactionStatus = await dbContext.TokenTransactions
+                    .AsNoTracking()
+                    .Where(x => x.ProcessingJobId == jobId)
+                    .Select(x => x.Status)
+                    .SingleOrDefaultAsync(CancellationToken.None);
+
+                if (transactionStatus == UpscaleLab.Domain.Entities.TokenTransactionStatus.Completed)
+                {
+                    logger.LogWarning(
+                        "Upscale job {JobId} has completed token settlement; skipping failure handling.",
+                        jobId);
+                    return;
+                }
+
+                if (transactionStatus != UpscaleLab.Domain.Entities.TokenTransactionStatus.Reserved)
+                {
+                    throw new InvalidOperationException(
+                        $"업스케일링 작업 {jobId}의 토큰 예약 상태를 확인할 수 없습니다. 자동 실패 처리와 환불을 중단합니다.");
+                }
             }
+
+            // 기존 레이어 처리의 정리 순서는 유지한다.
+            // 업스케일링 결과물은 DB 실패 정산이 끝나기 전에는 삭제하지 않는다.
+            if (job.Operation != ProcessingOperation.Upscale)
+            {
+                foreach (var uploadedKey in uploadedKeys)
+                {
+                    await TryDeleteAsync(uploadedKey);
+                }
+            }
+
             dbContext.ChangeTracker.Clear();
             job = await dbContext.ProcessingJobs.Include(x => x.Project).SingleAsync(x => x.Id == jobId, CancellationToken.None);
             var message = $"이미지 처리에 실패했습니다. 작업 ID: {jobId}";
@@ -357,7 +589,87 @@ public sealed class ProjectProcessingService(
             job.CompletedAt = DateTime.UtcNow;
             job.Project.Status = ProjectStatus.Failed;
             job.Project.FailureReason = message;
-            await dbContext.SaveChangesAsync(CancellationToken.None);
+            var upscaleFailureCommitted = false;
+
+            if (job.Operation == ProcessingOperation.Upscale)
+            {
+                await using var strategyDb =
+                    await dbContextFactory.CreateDbContextAsync(CancellationToken.None);
+
+                var strategy = strategyDb.Database.CreateExecutionStrategy();
+
+                upscaleFailureCommitted = await strategy.ExecuteAsync(async () =>
+                {
+                    await using var retryDb =
+                        await dbContextFactory.CreateDbContextAsync(CancellationToken.None);
+
+                    await using var transaction =
+                        await retryDb.Database.BeginTransactionAsync(CancellationToken.None);
+
+                    // 작업 행을 잠그고 실제 저장된 상태를 확인한다.
+                    var lockedJob = await retryDb.ProcessingJobs
+                        .FromSqlInterpolated($"""
+                            SELECT * FROM processing_jobs
+                            WHERE "Id" = {jobId}
+                            FOR UPDATE
+                            """)
+                        .SingleAsync(CancellationToken.None);
+
+                    if (lockedJob.Status == ProcessingJobStatus.Completed ||
+                        lockedJob.Status == ProcessingJobStatus.Failed)
+                        return false;
+
+                    var tokenStatus = await retryDb.TokenTransactions
+                        .AsNoTracking()
+                        .Where(x => x.ProcessingJobId == jobId)
+                        .Select(x => (TokenTransactionStatus?)x.Status)
+                        .SingleOrDefaultAsync(CancellationToken.None);
+
+                    if (tokenStatus != TokenTransactionStatus.Reserved)
+                        throw new InvalidOperationException(
+                            $"작업 {jobId}의 토큰 거래가 Reserved 상태가 아닙니다.");
+
+                    var lockedProject = await retryDb.LiveLayerProjects
+                        .SingleAsync(x => x.Id == lockedJob.ProjectId,
+                            CancellationToken.None);
+
+                    lockedJob.Status = ProcessingJobStatus.Failed;
+                    lockedJob.ResultObjectKey = null;
+                    lockedJob.ResultWidth = 0;
+                    lockedJob.ResultHeight = 0;
+                    lockedJob.ErrorMessage = message;
+                    lockedJob.CompletedAt = DateTime.UtcNow;
+
+                    lockedProject.Status = ProjectStatus.Failed;
+                    lockedProject.FailureReason = message;
+
+                    await retryDb.SaveChangesAsync(CancellationToken.None);
+
+                    var retryTokenService =
+                        new UpscaleLab.Infrastructure.Tokens.TokenService(retryDb);
+
+                    await retryTokenService.RefundAsync(
+                        jobId, CancellationToken.None);
+
+                    await transaction.CommitAsync(CancellationToken.None);
+                    return true;
+                });
+            }
+            else
+            {
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+            }
+
+            // 업스케일링은 실패 상태와 환불이 커밋된 뒤에만
+            // 이번 작업에서 업로드한 결과물을 정리한다.
+            if (job.Operation == ProcessingOperation.Upscale &&
+                upscaleFailureCommitted)
+            {
+                foreach (var uploadedKey in uploadedKeys)
+                {
+                    await TryDeleteAsync(uploadedKey);
+                }
+            }
         }
         finally
         {

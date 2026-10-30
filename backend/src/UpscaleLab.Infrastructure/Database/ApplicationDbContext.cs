@@ -1,12 +1,17 @@
 using Microsoft.EntityFrameworkCore;
 using UpscaleLab.Domain.Entities;
 using UpscaleLab.Domain.Enums;
+using UpscaleLab.Domain.Tokens;
 
 namespace UpscaleLab.Infrastructure.Database;
 
 public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
+    public DbSet<PaymentOrder> PaymentOrders => Set<PaymentOrder>();
+    public DbSet<UserSubscription> UserSubscriptions => Set<UserSubscription>();
+    public DbSet<UserTokenWallet> UserTokenWallets => Set<UserTokenWallet>();
+    public DbSet<TokenTransaction> TokenTransactions => Set<TokenTransaction>();
     public DbSet<AuthSession> AuthSessions => Set<AuthSession>();
     public DbSet<AccountCleanupTask> AccountCleanupTasks => Set<AccountCleanupTask>();
     public DbSet<Device> Devices => Set<Device>();
@@ -30,6 +35,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         base.OnModelCreating(modelBuilder);
 
         ConfigureUser(modelBuilder);
+        ConfigureTokens(modelBuilder);
+        ConfigurePayments(modelBuilder);
+        ConfigureSubscriptions(modelBuilder);
         AccountModelConfiguration.Configure(modelBuilder);
         var session = modelBuilder.Entity<AuthSession>();
         session.ToTable("auth_sessions");
@@ -74,6 +82,152 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         entity.HasIndex(x => x.Email).IsUnique();
         entity.HasIndex(x => x.Username).IsUnique();
     }
+
+    private static void ConfigureTokens(ModelBuilder modelBuilder)
+    {
+        var wallet = modelBuilder.Entity<UserTokenWallet>();
+
+        wallet.ToTable("user_token_wallets");
+        wallet.HasKey(x => x.Id);
+        wallet.Property(x => x.Plan)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .HasDefaultValue(SubscriptionPlan.Free);
+        wallet.Property(x => x.Balance).HasDefaultValue(10);
+        wallet.Property(x => x.PurchasedBalance).HasDefaultValue(0);
+        wallet.Property(x => x.PeriodStartUtc).IsRequired();
+        wallet.HasIndex(x => x.UserId).IsUnique();
+
+        wallet.ToTable(t =>
+            t.HasCheckConstraint(
+                "CK_user_token_wallets_balance",
+                "\"Balance\" >= 0"));
+
+        wallet.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var transaction = modelBuilder.Entity<TokenTransaction>();
+
+        transaction.ToTable("token_transactions");
+        transaction.HasKey(x => x.Id);
+        transaction.Property(x => x.Status)
+            .HasConversion<string>()
+            .HasMaxLength(20);
+        transaction.Property(x => x.Amount).IsRequired();
+        transaction.Property(x => x.MonthlyAmount).HasDefaultValue(0);
+        transaction.Property(x => x.PurchasedAmount).HasDefaultValue(0);
+        transaction.HasIndex(x => x.ProcessingJobId).IsUnique();
+        transaction.HasIndex(x => new { x.UserId, x.CreatedAt });
+
+        transaction.ToTable(t =>
+            t.HasCheckConstraint(
+                "CK_token_transactions_amount",
+                "\"Amount\" > 0"));
+
+        transaction.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        transaction.HasOne(x => x.ProcessingJob)
+            .WithMany()
+            .HasForeignKey(x => x.ProcessingJobId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+
+
+    private static void ConfigurePayments(ModelBuilder modelBuilder)
+    {
+        var order = modelBuilder.Entity<PaymentOrder>();
+
+        order.ToTable("payment_orders");
+        order.HasKey(x => x.Id);
+
+        order.Property(x => x.OrderId)
+            .HasMaxLength(64).IsRequired();
+
+        order.Property(x => x.ProductCode)
+            .HasMaxLength(40).IsRequired();
+
+        order.Property(x => x.Amount).IsRequired();
+
+        order.Property(x => x.Status)
+            .HasConversion<string>()
+            .HasMaxLength(20);
+
+        order.Property(x => x.PaymentKey)
+            .HasMaxLength(200);
+
+        order.HasIndex(x => x.OrderId).IsUnique();
+        order.HasIndex(x => x.PaymentKey).IsUnique();
+        order.HasIndex(x => new { x.UserId, x.CreatedAt });
+
+        order.ToTable(t => t.HasCheckConstraint(
+            "CK_payment_orders_amount",
+            @"""Amount"" > 0"));
+
+        order.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+
+
+    private static void ConfigureSubscriptions(ModelBuilder modelBuilder)
+    {
+        var subscription = modelBuilder.Entity<UserSubscription>();
+
+        subscription.ToTable("user_subscriptions");
+        subscription.HasKey(x => x.Id);
+
+        subscription.Property(x => x.Plan)
+            .HasConversion<string>()
+            .HasMaxLength(20);
+
+        subscription.Property(x => x.Status)
+            .HasConversion<string>()
+            .HasMaxLength(20);
+
+        subscription.Property(x => x.CustomerKey)
+            .HasMaxLength(100)
+            .IsRequired();
+
+        subscription.Property(x => x.BillingKeyCiphertext)
+            .HasMaxLength(2048);
+
+        subscription.HasIndex(x => x.UserId).IsUnique();
+        subscription.HasIndex(x => x.CustomerKey).IsUnique();
+        subscription.HasIndex(x => x.NextBillingAtUtc);
+
+        var subscriptionPayment = modelBuilder.Entity<PaymentOrder>();
+
+        subscriptionPayment
+            .HasIndex(x => new
+            {
+                x.SubscriptionId,
+                x.BillingPeriodStartUtc
+            })
+            .IsUnique()
+            .HasFilter(
+                "\"SubscriptionId\" IS NOT NULL AND " +
+                "\"BillingPeriodStartUtc\" IS NOT NULL");
+
+        subscriptionPayment
+            .HasOne<UserSubscription>()
+            .WithMany()
+            .HasForeignKey(x => x.SubscriptionId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+
+        subscription.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+
+
 
     private static void ConfigureDevice(ModelBuilder modelBuilder)
     {

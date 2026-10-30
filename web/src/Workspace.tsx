@@ -1,3 +1,5 @@
+import { Coins } from "lucide-react";
+import { Billing } from "./Billing";
 import {
   createContext,
   useContext,
@@ -96,6 +98,7 @@ const navigation = [
   { slug: "explore", name: "탐색", icon: Search },
   { slug: "studio", name: "작업실", icon: SquarePen },
   { slug: "devices", name: "기기 관리", icon: PanelsTopLeft },
+  { slug: "billing", name: "토큰·요금제", icon: Coins },
 ];
 export function Workspace({
   session: initialSession,
@@ -554,6 +557,8 @@ export function Workspace({
             <Studio route={route} />
           ) : page?.slug === "devices" ? (
             <Devices />
+          ) : page?.slug === "billing" ? (
+            <Billing />
           ) : (
             <Empty text="페이지를 찾을 수 없어요">
               <Link to="/app/images" className="button primary">
