@@ -14,7 +14,8 @@ from pathlib import Path
 import subprocess
 import sys
 
-from PIL import Image
+from PIL import Image, ImageFilter
+import numpy as np
 from psd_tools import PSDImage
 from psd_tools.constants import ColorMode
 
@@ -269,6 +270,145 @@ def split_disconnected_handwear(image: Image.Image) -> tuple[list[tuple[str, Ima
     return [('screenLeft', screen_left), ('screenRight', screen_right)], split_x
 
 
+
+# Post-processing v1 is intentionally conservative.  It should never be used
+# as a substitute for learned segmentation, anatomical rigging or inpainting.
+# NumPy is already installed by the pretrained See-through/torch environment.
+def postprocess_layer_rgba(image: Image.Image, source_name: str = "") -> tuple[Image.Image, dict]:
+    """Clean isolated alpha specks and improve small facial feature visibility.
+
+    The exported full-canvas RGBA dimensions and original colors are retained.
+    Weakly opaque single-pixel specks with no neighboring opaque content are
+    removed. Tiny isolated dark holes may be repaired in solid paint only.
+    Legwear is treated separately: when a convincing low-confidence gap divides
+    the TWO opaque legs, remove model hallucination between those legs.
+    Never hard-threshold arbitrary layer borders or blur the whole image.
+    """
+    rgba = image.convert("RGBA")
+    arr = np.asarray(rgba, dtype=np.uint8).copy()
+    alpha = arr[:, :, 3].copy()
+    original_alpha = alpha.copy()
+    canonical = re.sub(r"[^a-z0-9]", "", source_name.casefold())
+    h, w = alpha.shape
+    mask = alpha > 0
+    ys, xs = np.nonzero(mask)
+    if len(xs) == 0:
+        return rgba, {"applied": False, "reason": "empty-layer", "changedAlphaPixels": 0}
+
+    # Work only within the true nontransparent bounding rectangle.
+    x0, x1 = int(xs.min()), int(xs.max()) + 1
+    y0, y1 = int(ys.min()), int(ys.max()) + 1
+    stats = {"applied": True, "sourceName": source_name, "removedSpecklePixels": 0,
+             "repairedPinholes": 0, "boostedFeaturePixels": 0,
+             "legGapRows": 0, "legGapRemovedPixels": 0}
+
+    # A standalone, weak pixel cannot be a meaningful edge, but do not remove
+    # singleton eyebrow/eyelash/iris/mouth/nose features.
+    features = {"eyebrow", "eyelash", "eyewhite", "irides", "iris",
+                "mouth", "nose", "eyelid", "eyeline"}
+    if canonical not in features:
+        core = (alpha[y0:y1, x0:x1] >= 48)
+        p = np.pad(core, ((1, 1), (1, 1)), mode="constant")
+        neighbors = np.zeros(core.shape, dtype=bool)
+        for dy in range(3):
+            for dx in range(3):
+                if dy == 1 and dx == 1:
+                    continue
+                neighbors |= p[dy:dy + core.shape[0], dx:dx + core.shape[1]]
+        sub = alpha[y0:y1, x0:x1]
+        speckle = (sub > 0) & (sub < 48) & (~neighbors)
+        stats["removedSpecklePixels"] = int(speckle.sum())
+        sub[speckle] = 0
+
+    # Restore 1-pixel pinholes only when fully surrounded by solid paint.
+    # Interpolate RGBA from reliable immediate neighbors, no hallucinated shape.
+    if canonical not in features and (y1-y0) > 2 and (x1-x0) > 2:
+        a = alpha[y0:y1, x0:x1]
+        center = a[1:-1, 1:-1]
+        solid = ((center == 0) & (a[:-2, 1:-1] >= 244)
+                 & (a[2:, 1:-1] >= 244)
+                 & (a[1:-1, :-2] >= 244)
+                 & (a[1:-1, 2:] >= 244))
+        if np.any(solid):
+            patch = arr[y0:y1, x0:x1]
+            rgb = patch[:, :, :3].astype(np.uint16)
+            estimated = (rgb[:-2, 1:-1] + rgb[2:, 1:-1] +
+                         rgb[1:-1, :-2] + rgb[1:-1, 2:]) // 4
+            patch[1:-1, 1:-1, :3][solid] = estimated[solid].astype(np.uint8)
+            center[solid] = 245
+            stats["repairedPinholes"] = int(solid.sum())
+
+    # A slight boost for small facial features, while preserving shape and
+    # already opaque pixels. Do not use strong erosion, closing or dilation.
+    if canonical in features:
+        eligible = (alpha >= 24) & (alpha <= 190)
+        boosted = np.minimum(255, alpha.astype(np.uint16) +
+                             np.minimum(12, np.rint(alpha.astype(np.float32) * 0.10).astype(np.uint16)))
+        newvals = boosted.astype(np.uint8)
+        stats["boostedFeaturePixels"] = int(np.count_nonzero(eligible & (newvals != alpha)))
+        alpha[eligible] = newvals[eligible]
+
+    # The See-through legwear mask sometimes paints a translucent gray triangle
+    # in the otherwise empty space BETWEEN legs. Only clean it if robust, long
+    # left/right opaque silhouettes can be identified. Never attempt to split
+    # connected pant legs, which requires a separate segmentation step.
+    if canonical == "legwear" and (y1-y0) >= 150 and (x1-x0) >= 80:
+        candidates = []
+        y_start = y0 + int((y1-y0) * 0.34)
+        min_run = max(12, int((x1-x0) * 0.04))
+        min_gap = max(14, int((x1-x0) * 0.035))
+        for y in range(y_start, y1):
+            opaque = alpha[y, x0:x1] >= 230
+            change = np.diff(np.pad(opaque.astype(np.int8), (1, 1)))
+            starts = np.flatnonzero(change == 1) + x0
+            ends = np.flatnonzero(change == -1) + x0
+            runs = [(int(s), int(e)) for s, e in zip(starts, ends)
+                    if e-s >= min_run]
+            if len(runs) != 2:
+                continue
+            left, right = runs
+            gap_start, gap_end = left[1], right[0]
+            if gap_end-gap_start < min_gap:
+                continue
+            mid = alpha[y, gap_start:gap_end]
+            if mid.size and mid.max() < 230:
+                candidates.append((y, gap_start, gap_end))
+        # Require a series of clear left/right silhouettes, not isolated rows.
+        required = max(24, int((y1-y_start)*0.12))
+        # Process only a contiguous, long gap sequence; a few accidental
+        # two-run scanlines must not erase actual clothing in other poses.
+        groups = []
+        for entry in candidates:
+            if not groups or entry[0] != groups[-1][-1][0] + 1:
+                groups.append([])
+            groups[-1].append(entry)
+        longest = max(groups, key=len, default=[])
+        if len(longest) >= required:
+            first_y = longest[0][0]
+            # A progressive fade avoids a visible flat cutoff at the top of
+            # the detected gap; at its bottom the spurious mask is removed.
+            feather_rows = max(20, min(90, int((y1-y0) * 0.12)))
+            for y, lo, hi in longest:
+                lo2, hi2 = lo+2, hi-2
+                if hi2 <= lo2:
+                    continue
+                view = alpha[y, lo2:hi2]
+                old = view.copy()
+                strength = min(1.0, max(0.0, (y-first_y)/feather_rows))
+                alpha[y, lo2:hi2] = np.rint(view * (1.0-strength)).astype(np.uint8)
+                stats["legGapRemovedPixels"] += int(np.count_nonzero(old != alpha[y, lo2:hi2]))
+                stats["legGapRows"] += 1
+
+    # RGB is preserved except for repaired pinholes. Normalize fully
+    # transparent pixels to avoid misleading white rectangles in some viewers.
+    arr[:, :, 3] = alpha
+    transparent = alpha == 0
+    arr[transparent, :3] = 0
+    stats["changedAlphaPixels"] = int(np.count_nonzero(alpha != original_alpha))
+    stats["changedAlphaFraction"] = round(stats["changedAlphaPixels"] / max(1,
+            int(np.count_nonzero(original_alpha))), 5)
+    return Image.fromarray(arr, mode="RGBA"), stats
+
 def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -> list[dict]:
     layers_dir = output / 'layers'
     layers_dir.mkdir(parents=True, exist_ok=True)
@@ -331,6 +471,7 @@ def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -
     for order, (name, result, side, split_x, composite_quality, raw_quality,
                 export_method, has_mask, has_clipping) in enumerate(prepared):
         filename = f'{order:03d}.png'
+        result, cleanup_stats = postprocess_layer_rgba(result, name)
         result.save(layers_dir / filename, format='PNG')
         final_quality = pixel_quality(result)
         depth = order / denominator
@@ -356,6 +497,7 @@ def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -
             'rawPixels': raw_quality,
             'export': final_quality,
             'exportMethod': export_method,
+            'qualityCleanup': cleanup_stats,
             'hasMask': has_mask,
             'hasClipping': has_clipping,
         }
@@ -388,6 +530,10 @@ def export_psd(psd: PSDImage, output: Path, input_quality: dict | None = None) -
             'inputImage': input_quality,
             'layers': diagnoses,
             'warnings': warnings,
+            'qualityPostprocess': {
+                'version': 'conservative-v1',
+                'note': 'No learned reconstruction; single-pixel cleanup and conditional leg-gap mask only.',
+            },
             'renderOrderCorrections': {
                 'eyebrowsMovedAboveFace': moved_eyebrows,
                 'eyePartsReordered': reordered_eyes,
