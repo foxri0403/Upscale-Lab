@@ -165,6 +165,8 @@ export function Workspace({
   const [dialog, setDialog] = useState<"settings" | "downloads" | null>(null);
   const [tokenWallet, setTokenWallet] = useState<{
     plan?: string;
+    monthlyBalance?: number;
+    purchasedBalance?: number;
     totalBalance?: number;
   } | null>(null);
 
@@ -177,7 +179,9 @@ export function Workspace({
       try {
         const wallet = await request<{
           plan?: string;
-          totalBalance?: number;
+          monthlyBalance?: number;
+    purchasedBalance?: number;
+    totalBalance?: number;
         }>("/api/tokens/me");
 
         if (active) setTokenWallet(wallet);
@@ -513,14 +517,24 @@ export function Workspace({
           <span className="header-section">{page?.name || "Upscale Lab"}</span>
           <div className="header-right">
             {cloud && tokenWallet && (
-              <Link
-                to="/app/billing"
-                className="header-token-summary"
-              >
-                <span>{tokenWallet.plan ?? "Free"}</span>
-                <Coins size={16} />
-                <span>{tokenWallet.totalBalance ?? 0}</span>
-              </Link>
+              <details className="header-token-menu">
+                <summary className="header-token-summary">
+                  <span>{tokenWallet.plan ?? "-"}</span>
+                  <Coins size={16} />
+                  <span>{tokenWallet.totalBalance ?? 0}</span>
+                  <ChevronDown size={14} />
+                </summary>
+                <div className="header-token-dropdown">
+                  <strong>내 토큰 정보</strong>
+                  <div><span>현재 요금제</span><b>{tokenWallet.plan ?? "-"}</b></div>
+                  <div><span>월 제공 토큰 잔액</span><b>{tokenWallet.monthlyBalance ?? 0}</b></div>
+                  <div><span>구매 토큰 잔액</span><b>{tokenWallet.purchasedBalance ?? 0}</b></div>
+                  <div className="token-dropdown-total">
+                    <span>총 잔여 토큰</span>
+                    <b>{tokenWallet.totalBalance ?? 0}</b>
+                  </div>
+                </div>
+              </details>
             )}
             <details className="account-menu" ref={accountMenu}>
               <summary>
