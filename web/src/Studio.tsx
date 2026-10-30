@@ -342,6 +342,7 @@ export function Studio({ route }: { route: string }) {
       );
       subjectJob.current = null;
       setJob(value);
+      if (tool === "upscale") window.dispatchEvent(new Event("tokens-updated"));
     } catch (e) {
       toast((e as Error).message);
     } finally {
@@ -388,12 +389,14 @@ export function Studio({ route }: { route: string }) {
               else { separation.reload(true); setSelectedLayer("all"); separation.setView("overlay"); }
             }
             setJob(status);
+            if (status.operation === "Upscale") window.dispatchEvent(new Event("tokens-updated"));
             toast(status.operation === "Layers" ? refined ? "선택한 피사체와 배경 레이어를 갱신했습니다." : "분리 결과를 확인하고 중앙 이미지에서 바로 수정해 주세요." : "이미지 처리를 완료했습니다.");
           }
         } else {
           setJob(status);
           if (status.status === "Failed")
             toast(status.errorMessage || "이미지 처리에 실패했습니다.");
+          if (status.status === "Failed" && status.operation === "Upscale") window.dispatchEvent(new Event("tokens-updated"));
         }
       } catch (e) {
         if (alive) {

@@ -1,5 +1,5 @@
 using ImageMagick;
-
+using UpscaleLab.Application.Upscaling;
 using UpscaleLab.Application.Processing;
 using UpscaleLab.Application.Storage;
 using UpscaleLab.Domain.Enums;
@@ -45,16 +45,13 @@ public sealed class RunPodProjectImageProcessor(
             request.OutputDirectory,
             $"upscaled_{request.JobId:N}.png");
 
-        // Preserve the studio's tiled 4K path alongside the deployed FHD/QHD worker contract.
-        if (request.TargetLongEdge == 3840)
+                if (request.TargetLongEdge is not (1920 or 2560 or 3840))
         {
-            var result = await base64Service.UpscaleToResolutionAsync(request.InputPath, 3840,
-                outputPath, cancellationToken, request.ReportProgress);
-            return new ProjectProcessingResult(Array.Empty<ProcessedLayer>(), result.FilePath,
-                result.Width, result.Height);
+            throw new ArgumentException(
+                "FHD, QHD, 4K 중 하나를 선택해야 합니다.");
         }
 
-        // 기존 Base64 전송 방식: GPU 출력 픽셀 제한에 맞춰 입력만 축소
+        // Base64 전송 방식: RunPod v5가 FHD/QHD/4K 전체 이미지를 직접 처리
         if (!options.UseS3Transfer)
         {
             string? temporaryInputPath = null;
@@ -187,43 +184,53 @@ public sealed class RunPodProjectImageProcessor(
     }
 
     private static string? PrepareRunPodInput(
-        string inputPath,
-        string outputDirectory,
-        int upscaleFactor)
+    string inputPath,
+    string outputDirectory,
+    int upscaleFactor)
+{
+    const long maxInputPixels = 1_000_000;
+    const long maxInputBytes = 2L * 1024 * 1024;
+
+    if (!File.Exists(inputPath))
+        throw new FileNotFoundException(
+            "Input image not found.", inputPath);
+
+    var info = new MagickImageInfo(inputPath);
+
+    var originalPixels = (long)info.Width * info.Height;
+    var originalBytes = new FileInfo(inputPath).Length;
+
+    if (originalPixels <= 0)
+        throw new InvalidDataException(
+            "원본 이미지 해상도가 올바르지 않습니다.");
+
+    if (originalPixels <= maxInputPixels &&
+        originalBytes <= maxInputBytes)
+        return null;
+
+    Directory.CreateDirectory(outputDirectory);
+
+    var temporaryPath = Path.Combine(
+        outputDirectory,
+        $"runpod_input_{Guid.NewGuid():N}.jpg");
+
+    try
     {
-        const long maxSafeOutputPixels = 3_600_000;
+        using var image = new MagickImage(inputPath);
 
-        if (upscaleFactor is not (2 or 4))
-            throw new ArgumentOutOfRangeException(nameof(upscaleFactor));
+        image.AutoOrient();
 
-        var info = new MagickImageInfo(inputPath);
-        var originalPixels = (long)info.Width * info.Height;
-        var scaleSquared = (long)upscaleFactor * upscaleFactor;
-
-        if (originalPixels <= 0)
-            throw new InvalidDataException(
-                "원본 이미지 해상도가 올바르지 않습니다.");
-
-        if (originalPixels * scaleSquared <= maxSafeOutputPixels)
-            return null;
-
-        var maxInputPixels = maxSafeOutputPixels / scaleSquared;
-        var ratio = Math.Sqrt((double)maxInputPixels / originalPixels);
-
-        var width = Math.Max(1,
-            (int)Math.Floor(info.Width * ratio));
-        var height = Math.Max(1,
-            (int)Math.Floor(info.Height * ratio));
-
-        Directory.CreateDirectory(outputDirectory);
-
-        var temporaryPath = Path.Combine(
-            outputDirectory,
-            $"runpod_input_{Guid.NewGuid():N}.png");
-
-        try
+        if ((long)image.Width * image.Height > maxInputPixels)
         {
-            using var image = new MagickImage(inputPath);
+            var ratio = Math.Sqrt(
+                (double)maxInputPixels /
+                ((long)image.Width * image.Height));
+
+            var width = Math.Max(1,
+                (int)Math.Floor(image.Width * ratio));
+
+            var height = Math.Max(1,
+                (int)Math.Floor(image.Height * ratio));
 
             image.Resize(new MagickGeometry(
                 (uint)width,
@@ -231,58 +238,62 @@ public sealed class RunPodProjectImageProcessor(
             {
                 IgnoreAspectRatio = true
             });
-
-            image.Format = MagickFormat.Png;
-            image.Write(temporaryPath);
-
-            return temporaryPath;
         }
-        catch
-        {
-            if (File.Exists(temporaryPath))
-                File.Delete(temporaryPath);
-            throw;
-        }
+
+        image.Format = MagickFormat.Jpeg;
+        image.Quality = 85;
+        image.Strip();
+        image.Write(temporaryPath);
+
+        if (new FileInfo(temporaryPath).Length > maxInputBytes)
+            throw new InvalidOperationException(
+                "RunPod 입력 이미지가 2MB를 초과합니다.");
+
+        return temporaryPath;
     }
-
-    private static ProjectProcessingResult CreateUpscaleResult(
-        ProjectProcessingRequest request,
-        string outputPath,
-        int resultWidth,
-        int resultHeight)
+    catch
     {
-        if (request.TargetLongEdge is 1920 or 2560)
-        {
-            var original = new MagickImageInfo(request.InputPath);
-            var longEdge = Math.Max((long)original.Width, (long)original.Height);
+        if (File.Exists(temporaryPath))
+            File.Delete(temporaryPath);
 
-            if (longEdge == 0)
-                throw new InvalidDataException("원본 이미지 크기가 올바르지 않습니다.");
-
-            var target = request.TargetLongEdge.Value;
-            var width = Math.Max(1,
-                (int)Math.Round((double)original.Width * target / longEdge));
-            var height = Math.Max(1,
-                (int)Math.Round((double)original.Height * target / longEdge));
-
-            using var image = new MagickImage(outputPath);
-            image.Resize(new MagickGeometry((uint)width, (uint)height)
-            {
-                IgnoreAspectRatio = true
-            });
-            image.Format = MagickFormat.Png;
-            image.Write(outputPath);
-
-            resultWidth = (int)image.Width;
-            resultHeight = (int)image.Height;
-        }
-
-        return new ProjectProcessingResult(
-            Array.Empty<ProcessedLayer>(),
-            outputPath,
-            resultWidth,
-            resultHeight);
+        throw;
     }
+}
+
+
+private static ProjectProcessingResult CreateUpscaleResult(
+    ProjectProcessingRequest request,
+    string outputPath,
+    int resultWidth,
+    int resultHeight)
+{
+    if (request.TargetLongEdge is int target)
+    {
+        using var original = new MagickImage(request.InputPath);
+        original.AutoOrient();
+
+        var expected = UpscaleResolution.Dimensions(
+            (int)original.Width,
+            (int)original.Height,
+            target);
+
+        if (resultWidth != expected.Width ||
+            resultHeight != expected.Height)
+        {
+            throw new InvalidDataException(
+                $"RunPod 결과 해상도 불일치: " +
+                $"예상 {expected.Width}x{expected.Height}, " +
+                $"실제 {resultWidth}x{resultHeight}");
+        }
+    }
+
+    return new ProjectProcessingResult(
+        Array.Empty<ProcessedLayer>(),
+        outputPath,
+        resultWidth,
+        resultHeight);
+}
+
 
     private async Task TryDeleteTemporaryAsync(string objectKey)
     {

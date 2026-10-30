@@ -102,17 +102,8 @@ public sealed class RunPodResolutionTests
 
                 var input = document.RootElement.GetProperty("input");
 
-                var targetEdge = input
-                    .GetProperty("target_long_edge").GetInt32();
-
-                LastResolution = targetEdge switch
-                {
-                    1920 => "FHD",
-                    2560 => "QHD",
-                    3840 => "4K",
-                    _ => throw new InvalidOperationException(
-                        $"Unsupported resolution: {targetEdge}")
-                };
+                LastResolution = input
+                    .GetProperty("resolution").GetString();
 
                 var imageBytes = Convert.FromBase64String(
                     input.GetProperty("image_base64").GetString()!);

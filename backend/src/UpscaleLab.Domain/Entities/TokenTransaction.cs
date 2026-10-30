@@ -11,7 +11,7 @@ public sealed class TokenTransaction : BaseEntity
 {
     public Guid UserId { get; set; }
 
-    public Guid ProcessingJobId { get; set; }
+    public Guid? ProcessingJobId { get; set; }
 
     public int Amount { get; set; }
     public int MonthlyAmount { get; set; }
@@ -26,5 +26,5 @@ public sealed class TokenTransaction : BaseEntity
 
     public User User { get; set; } = null!;
 
-    public ProcessingJob ProcessingJob { get; set; } = null!;
+    public ProcessingJob? ProcessingJob { get; set; }
 }

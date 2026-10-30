@@ -48,6 +48,11 @@ internal sealed class WorkflowClock : TimeProvider
 
 internal static class WorkflowData
 {
+    public static IDbContextFactory<ApplicationDbContext> Factory { get; } = new InMemoryOnlyFactory();
+    private sealed class InMemoryOnlyFactory : IDbContextFactory<ApplicationDbContext>
+    {
+        public ApplicationDbContext CreateDbContext() => throw new InvalidOperationException("InMemory tests must not enter PostgreSQL retry transactions.");
+    }
     public static ApplicationDbContext Db() => new(new DbContextOptionsBuilder<ApplicationDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString())
         .ConfigureWarnings(w => w.Ignore(

@@ -44,6 +44,8 @@ var jwt = new JwtOptions { Secret = Convert.ToHexString(RandomNumberGenerator.Ge
 builder.Services.AddSingleton(jwt); builder.Services.AddSingleton(storage); builder.Services.AddSingleton(runpod);
 builder.Services.AddSingleton(journal); builder.Services.AddSingleton<IAmazonS3>(s3); builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddDbContext<ApplicationDbContext>(options => options.UseInMemoryDatabase("separation-lab-" + journal.UserId));
+builder.Services.AddDbContextFactory<ApplicationDbContext>(options => options.UseInMemoryDatabase("separation-lab-" + journal.UserId), ServiceLifetime.Scoped);
+builder.Services.AddScoped<UpscaleLab.Infrastructure.Tokens.ITokenService, UpscaleLab.Infrastructure.Tokens.TokenService>();
 builder.Services.AddScoped<IStorageService, LabStorage>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IProjectProcessingService, ProjectProcessingService>();

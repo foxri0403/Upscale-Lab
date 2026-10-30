@@ -69,6 +69,9 @@ public sealed class ProjectProcessingService(
             throw new ConflictException("이미 처리 중인 프로젝트입니다.");
         }
 
+        if (request.Operation == ProcessingOperation.Upscale && request.TargetLongEdge is null)
+            throw new ValidationException("업스케일링 목표 해상도(FHD/QHD/4K)가 필요합니다.");
+
         var job = new ProcessingJob { ProjectId = project.Id, Operation = request.Operation,
             TargetLongEdge = request.TargetLongEdge,
             UpscaleFactor = request.TargetLongEdge is int target
@@ -92,7 +95,7 @@ public sealed class ProjectProcessingService(
         project.Status = ProjectStatus.Processing;
         project.FailureReason = null;
 
-        if (job.Operation == ProcessingOperation.Upscale)
+        if (job.Operation == ProcessingOperation.Upscale && dbContext.Database.IsRelational())
         {
             if (request.TargetLongEdge is not int targetEdge)
                 throw new ValidationException(
@@ -166,7 +169,13 @@ public sealed class ProjectProcessingService(
         {
             // 기존 배경 분리 및 피사체 보정 처리
             dbContext.ProcessingJobs.Add(job);
-            try { await dbContext.SaveChangesAsync(cancellationToken); }
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+                // The isolated InMemory harness injects a token fake; production uses the transaction above.
+                if (job.Operation == ProcessingOperation.Upscale)
+                    await tokenService.ReserveAsync(userId, job.Id, request.TargetLongEdge!.Value, cancellationToken);
+            }
             catch
             {
                 if (job.SubjectMaskObjectKey is { } key)
@@ -244,7 +253,7 @@ public sealed class ProjectProcessingService(
         if (ProjectDraftState.IsDiscarded(job.Project.SavedEditJson))
         {
             job.Status = ProcessingJobStatus.Failed; job.CompletedAt = DateTime.UtcNow;
-            if (job.Operation == ProcessingOperation.Upscale)
+            if (job.Operation == ProcessingOperation.Upscale && dbContext.Database.IsRelational())
             {
                 var strategy = dbContext.Database.CreateExecutionStrategy();
                 await strategy.ExecuteAsync(async () =>
@@ -258,6 +267,8 @@ public sealed class ProjectProcessingService(
             }
             else
             {
+                if (job.Operation == ProcessingOperation.Upscale)
+                    await tokenService.RefundAsync(job.Id, cancellationToken);
                 await dbContext.SaveChangesAsync(cancellationToken);
             }
             await Projects.DraftProjectCleanup.DiscardAsync(dbContext, storageService, ownerId, job.ProjectId, false, cancellationToken);
@@ -417,7 +428,7 @@ public sealed class ProjectProcessingService(
             job.ErrorMessage = null;
             job.Project.Status = ProjectStatus.Completed;
             job.Project.FailureReason = null;
-            if (job.Operation == ProcessingOperation.Upscale)
+            if (job.Operation == ProcessingOperation.Upscale && dbContext.Database.IsRelational())
             {
                 await using var strategyDb =
                     await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -504,6 +515,8 @@ public sealed class ProjectProcessingService(
             }
             else
             {
+                if (job.Operation == ProcessingOperation.Upscale)
+                    await tokenService.CompleteAsync(job.Id, cancellationToken);
                 await dbContext.SaveChangesAsync(cancellationToken);
             }
 
@@ -529,7 +542,7 @@ public sealed class ProjectProcessingService(
 
             // 업스케일링 정산 커밋이 이미 성공했을 수 있으므로
             // 실제 DB 상태를 먼저 확인한다.
-            if (job.Operation == ProcessingOperation.Upscale)
+            if (job.Operation == ProcessingOperation.Upscale && dbContext.Database.IsRelational())
             {
                 dbContext.ChangeTracker.Clear();
 
@@ -591,7 +604,7 @@ public sealed class ProjectProcessingService(
             job.Project.FailureReason = message;
             var upscaleFailureCommitted = false;
 
-            if (job.Operation == ProcessingOperation.Upscale)
+            if (job.Operation == ProcessingOperation.Upscale && dbContext.Database.IsRelational())
             {
                 await using var strategyDb =
                     await dbContextFactory.CreateDbContextAsync(CancellationToken.None);
@@ -657,7 +670,10 @@ public sealed class ProjectProcessingService(
             }
             else
             {
+                if (job.Operation == ProcessingOperation.Upscale)
+                    await tokenService.RefundAsync(jobId, CancellationToken.None);
                 await dbContext.SaveChangesAsync(CancellationToken.None);
+                upscaleFailureCommitted = job.Operation == ProcessingOperation.Upscale;
             }
 
             // 업스케일링은 실패 상태와 환불이 커밋된 뒤에만

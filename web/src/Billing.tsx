@@ -476,7 +476,7 @@ export function Billing() {
 
         setSubscriptionMessage(
           "테스트 구독 결제가 완료되었습니다. " +
-          "요금제가 활성화되고 월 제공 토큰이 지급되었습니다."
+          "요금제가 활성화되고 주 제공 토큰이 지급되었습니다."
         );
       } catch (e) {
         setError(
@@ -615,7 +615,7 @@ export function Billing() {
                 <strong style={{ fontSize: 25 }}>{wallet?.plan ?? "확인 불가"}</strong>
               </div>
               <div>
-                <div style={{ opacity: 0.7 }}>월 제공 토큰 잔액</div>
+                <div style={{ opacity: 0.7 }}>주 제공 토큰 잔액</div>
                 <strong style={{ fontSize: 25 }}>{wallet ? monthly : "-"}</strong>
               </div>
               <div>
@@ -646,7 +646,7 @@ export function Billing() {
               <ShieldCheck size={24} />
               <h3>Free</h3>
               <p><strong style={{ fontSize: 24 }}>무료</strong></p>
-              <p>월 10토큰 제공</p>
+              <p>주 10토큰 제공</p>
               <button type="button" disabled>기본 요금제</button>
             </article>
 
@@ -662,7 +662,7 @@ export function Billing() {
                   <strong style={{ fontSize: 24 }}>{formatPrice(product.price)}</strong>
                   <span> / 월</span>
                 </p>
-                <p>월 {product.tokens}토큰 제공</p>
+                <p>주 {product.tokens}토큰 제공</p>
                 <button
                   type="button"
                   disabled={

@@ -542,7 +542,7 @@ export function Workspace({
                 <div className="header-token-dropdown">
                   <strong>내 토큰 정보</strong>
                   <div><span>현재 요금제</span><b>{tokenWallet.plan ?? "-"}</b></div>
-                  <div><span>월 제공 토큰 잔액</span><b>{tokenWallet.monthlyBalance ?? 0}</b></div>
+                  <div><span>주 제공 토큰 잔액</span><b>{tokenWallet.monthlyBalance ?? 0}</b></div>
                   <div><span>구매 토큰 잔액</span><b>{tokenWallet.purchasedBalance ?? 0}</b></div>
                   <div className="token-dropdown-total">
                     <span>총 잔여 토큰</span>
@@ -596,7 +596,6 @@ export function Workspace({
             <Link
               to="/app/billing"
               className={`nav-link ${page?.slug === "billing" ? "selected" : ""}`}
-              onClick={() => { if (compact) setSidebar(false); }}
             >
               <Coins size={22} /> 토큰·요금제
             </Link>

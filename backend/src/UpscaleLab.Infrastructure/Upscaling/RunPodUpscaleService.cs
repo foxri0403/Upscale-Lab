@@ -163,6 +163,13 @@ public sealed class RunPodUpscaleService(
                 operation = "upscale",
                 scale,
                 target_long_edge = targetLongEdge,
+                resolution = targetLongEdge switch
+                {
+                    1920 => "FHD",
+                    2560 => "QHD",
+                    3840 => "4K",
+                    _ => throw new ArgumentOutOfRangeException(nameof(targetLongEdge))
+                },
                 image_base64 = imageBase64
             }
         });
@@ -228,15 +235,15 @@ public sealed class RunPodUpscaleService(
                     throw new InvalidOperationException(
                         "RunPod output image is missing.");
 
-                // 현재 Worker의 PNG 응답 제한: 5MB
-                if (resultBase64.Length > 7 * 1024 * 1024)
+                // RunPod 출력 PNG 최대 허용 크기: 32MiB
+                if (resultBase64.Length > ((32 * 1024 * 1024 + 2) / 3) * 4)
                     throw new InvalidOperationException(
                         "RunPod output exceeds test size limit.");
 
                 byte[] resultBytes =
                     Convert.FromBase64String(resultBase64);
 
-                if (resultBytes.Length > 5 * 1024 * 1024 ||
+                if (resultBytes.Length > 32 * 1024 * 1024 ||
                     resultBytes.Length < 8 ||
                     !resultBytes.AsSpan(0, 8).SequenceEqual(
                         new byte[]

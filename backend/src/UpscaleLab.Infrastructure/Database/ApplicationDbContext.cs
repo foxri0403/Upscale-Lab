@@ -71,18 +71,6 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
-    private static void ConfigureUser(ModelBuilder modelBuilder)
-    {
-        var entity = modelBuilder.Entity<User>();
-        entity.ToTable("users");
-        entity.HasKey(x => x.Id);
-        entity.Property(x => x.Email).HasMaxLength(320).IsRequired();
-        entity.Property(x => x.Username).HasMaxLength(50).IsRequired();
-        entity.Property(x => x.PasswordHash).HasMaxLength(200).IsRequired();
-        entity.HasIndex(x => x.Email).IsUnique();
-        entity.HasIndex(x => x.Username).IsUnique();
-    }
-
     private static void ConfigureTokens(ModelBuilder modelBuilder)
     {
         var wallet = modelBuilder.Entity<UserTokenWallet>();
@@ -134,9 +122,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         transaction.HasOne(x => x.ProcessingJob)
             .WithMany()
             .HasForeignKey(x => x.ProcessingJobId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .OnDelete(DeleteBehavior.SetNull);
     }
-
 
     private static void ConfigurePayments(ModelBuilder modelBuilder)
     {
@@ -173,7 +160,6 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.UserId)
             .OnDelete(DeleteBehavior.Restrict);
     }
-
 
     private static void ConfigureSubscriptions(ModelBuilder modelBuilder)
     {
@@ -227,7 +213,17 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .OnDelete(DeleteBehavior.Cascade);
     }
 
-
+    private static void ConfigureUser(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<User>();
+        entity.ToTable("users");
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.Email).HasMaxLength(320).IsRequired();
+        entity.Property(x => x.Username).HasMaxLength(50).IsRequired();
+        entity.Property(x => x.PasswordHash).HasMaxLength(200).IsRequired();
+        entity.HasIndex(x => x.Email).IsUnique();
+        entity.HasIndex(x => x.Username).IsUnique();
+    }
 
     private static void ConfigureDevice(ModelBuilder modelBuilder)
     {

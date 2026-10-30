@@ -33,8 +33,8 @@ public sealed class SubjectMaskRefinementTests
         return new MemoryStream(image.ToByteArray(MagickFormat.Png));
     }
     private static ProjectProcessingService Service(UpscaleLab.Infrastructure.Database.ApplicationDbContext db,
-        WorkflowStore store, CaptureProcessor processor, ProcessingJobQueue? queue = null) =>
-        new(db, store, processor, queue ?? new(), NullLogger<ProjectProcessingService>.Instance);
+        WorkflowStore store, CaptureProcessor processor, ProcessingJobQueue? queue = null, FakeTokenService? tokens = null) =>
+        new(db, WorkflowData.Factory, store, processor, queue ?? new(), tokens ?? new FakeTokenService(), NullLogger<ProjectProcessingService>.Instance);
 
     [Fact]
     public async Task FirstManualSelectionCreatesLayersAndCannotOverwriteExistingLayersWithEmptyBase()
@@ -43,12 +43,13 @@ public sealed class SubjectMaskRefinementTests
         db.Add(project); await db.SaveChangesAsync();
         var store = new WorkflowStore(); using var source = new MagickImage(MagickColors.Red, 10, 10);
         store.Files["source.png"] = source.ToByteArray(MagickFormat.Png);
-        var processor = new CaptureProcessor(); var service = Service(db, store, processor);
+        var processor = new CaptureProcessor(); var tokens = new FakeTokenService(); var service = Service(db, store, processor, tokens: tokens);
         using var mask = Mask();
         var job = await service.RefineSubjectAsync(project.UserId, project.Id, Guid.Empty, mask, Ct);
         await service.ExecuteAsync(job.JobId, Ct);
         Assert.Equal(ProcessingJobStatus.Completed, (await service.GetStatusAsync(project.UserId, project.Id, Ct)).Status);
         Assert.Equal(2, await db.ImageLayers.CountAsync()); Assert.Equal(128, processor.SoftAlpha);
+        Assert.Equal(0, tokens.ReservedCount); Assert.Equal(0, tokens.CompletedCount); Assert.Equal(0, tokens.RefundedCount);
         using var staleMask = Mask();
         await Assert.ThrowsAsync<ConflictException>(() => service.RefineSubjectAsync(project.UserId, project.Id, Guid.Empty, staleMask, Ct));
     }

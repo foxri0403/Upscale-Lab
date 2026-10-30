@@ -73,7 +73,7 @@ public sealed class StudioWorkflowTests
         var project = WorkflowData.Project(Guid.NewGuid()); db.Add(project); await db.SaveChangesAsync();
         using (var image = new MagickImage(MagickColors.Blue, 10, 10)) store.Files["source.png"] = image.ToByteArray(MagickFormat.Png);
         var processor = new PipelineProcessor();
-        var processing = new ProjectProcessingService(db, store, processor, new ProcessingJobQueue(), new FakeTokenService(), NullLogger<ProjectProcessingService>.Instance);
+        var processing = new ProjectProcessingService(db, WorkflowData.Factory, store, processor, new ProcessingJobQueue(), new FakeTokenService(), NullLogger<ProjectProcessingService>.Instance);
         foreach (var operation in layersFirst ? new[] { ProcessingOperation.Layers, ProcessingOperation.Upscale } : new[] { ProcessingOperation.Upscale, ProcessingOperation.Layers })
         {
             var job = await processing.StartAsync(project.UserId, project.Id, new(operation, 2,

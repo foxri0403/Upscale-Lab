@@ -18,6 +18,26 @@ public static class TokenPolicy
             _ => throw new ArgumentOutOfRangeException(nameof(plan))
         };
 
+    public static int WeeklyAllowance(SubscriptionPlan plan) =>
+        MonthlyAllowance(plan);
+
+    // 각 사용자 지급 시작 시각으로부터 7일 단위로 계산한다.
+    public static DateTime WeeklyPeriodStart(
+        DateTime startUtc, DateTime nowUtc)
+    {
+        if (startUtc.Kind != DateTimeKind.Utc ||
+            nowUtc.Kind != DateTimeKind.Utc)
+            throw new ArgumentException("UTC 시간이 필요합니다.");
+
+        if (nowUtc < startUtc)
+            return startUtc;
+
+        var weeks = (nowUtc - startUtc).Ticks /
+                    TimeSpan.FromDays(7).Ticks;
+
+        return startUtc.AddDays(weeks * 7);
+    }
+
     public static int UpscaleCost(int targetLongEdge) =>
         targetLongEdge switch
         {

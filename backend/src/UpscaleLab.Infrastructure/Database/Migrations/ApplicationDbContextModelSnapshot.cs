@@ -744,6 +744,72 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.ToTable("optimized_images", (string)null);
                 });
 
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.PaymentOrder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Amount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("BillingPeriodStartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OrderId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("PaidAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PaymentKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ProductCode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid?>("SubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrderId")
+                        .IsUnique();
+
+                    b.HasIndex("PaymentKey")
+                        .IsUnique();
+
+                    b.HasIndex("SubscriptionId", "BillingPeriodStartUtc")
+                        .IsUnique()
+                        .HasFilter("\"SubscriptionId\" IS NOT NULL AND \"BillingPeriodStartUtc\" IS NOT NULL");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.ToTable("payment_orders", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_payment_orders_amount", "\"Amount\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("UpscaleLab.Domain.Entities.ProcessingJob", b =>
                 {
                     b.Property<Guid>("Id")
@@ -815,6 +881,61 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.HasIndex("ProjectId", "CreatedAt");
 
                     b.ToTable("processing_jobs", (string)null);
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.TokenTransaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Amount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("MonthlyAmount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime>("PeriodStartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ProcessingJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("PurchasedAmount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProcessingJobId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.ToTable("token_transactions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_token_transactions_amount", "\"Amount\" > 0");
+                        });
                 });
 
             modelBuilder.Entity("UpscaleLab.Domain.Entities.User", b =>
@@ -909,6 +1030,111 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .IsUnique();
 
                     b.ToTable("user_settings", (string)null);
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.UserSubscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BillingKeyCiphertext")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<bool>("CancelAtPeriodEnd")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CurrentPeriodEndUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CurrentPeriodStartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CustomerKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("NextBillingAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Plan")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerKey")
+                        .IsUnique();
+
+                    b.HasIndex("NextBillingAtUtc");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("user_subscriptions", (string)null);
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.UserTokenWallet", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Balance")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(10);
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("PeriodStartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Plan")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("Free");
+
+                    b.Property<int>("PurchasedBalance")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("user_token_wallets", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_user_token_wallets_balance", "\"Balance\" >= 0");
+                        });
                 });
 
             modelBuilder.Entity("UpscaleLab.Domain.Entities.WallpaperAsset", b =>
@@ -1213,6 +1439,22 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.Navigation("Image");
                 });
 
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.PaymentOrder", b =>
+                {
+                    b.HasOne("UpscaleLab.Domain.Entities.UserSubscription", null)
+                        .WithMany()
+                        .HasForeignKey("SubscriptionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UpscaleLab.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("UpscaleLab.Domain.Entities.ProcessingJob", b =>
                 {
                     b.HasOne("UpscaleLab.Domain.Entities.LiveLayerProject", "Project")
@@ -1224,11 +1466,51 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.TokenTransaction", b =>
+                {
+                    b.HasOne("UpscaleLab.Domain.Entities.ProcessingJob", "ProcessingJob")
+                        .WithMany()
+                        .HasForeignKey("ProcessingJobId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("UpscaleLab.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ProcessingJob");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("UpscaleLab.Domain.Entities.UserSetting", b =>
                 {
                     b.HasOne("UpscaleLab.Domain.Entities.User", "User")
                         .WithOne("Setting")
                         .HasForeignKey("UpscaleLab.Domain.Entities.UserSetting", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.UserSubscription", b =>
+                {
+                    b.HasOne("UpscaleLab.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.UserTokenWallet", b =>
+                {
+                    b.HasOne("UpscaleLab.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
