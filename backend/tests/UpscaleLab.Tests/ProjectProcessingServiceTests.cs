@@ -29,12 +29,12 @@ public sealed class ProjectProcessingServiceTests
         db.Add(project); await db.SaveChangesAsync();
         var store = new WorkflowStore(); Original(store);
         var processor = new TestProcessor();
-        var service = new ProjectProcessingService(db, store, processor, new ProcessingJobQueue(), NullLogger<ProjectProcessingService>.Instance);
-        var started = await service.StartAsync(project.UserId, project.Id, new(ProcessingOperation.Upscale, 2), Ct);
+        var service = new ProjectProcessingService(db, store, processor, new ProcessingJobQueue(), new FakeTokenService(), NullLogger<ProjectProcessingService>.Instance);
+        var started = await service.StartAsync(project.UserId, project.Id, new(ProcessingOperation.Upscale, TargetLongEdge: 1920), Ct);
         await service.ExecuteAsync(started.JobId, Ct);
         var status = await service.GetStatusAsync(project.UserId, project.Id, Ct);
         Assert.Equal(ProcessingJobStatus.Completed, status.Status);
-        Assert.Equal(20, status.ResultWidth);
+        Assert.Equal(1920, status.ResultWidth);
         Assert.True(status.HasImageResult);
         Assert.Equal("existing.png", (await db.ImageLayers.SingleAsync()).ObjectKey);
         Assert.NotEmpty((await service.GetResultUrlAsync(project.UserId, project.Id, started.JobId, Ct)).Url);
@@ -50,8 +50,8 @@ public sealed class ProjectProcessingServiceTests
         db.Add(project); await db.SaveChangesAsync();
         var store = new WorkflowStore(); Original(store);
         var processor = new TestProcessor { WrongDimensions = true };
-        var service = new ProjectProcessingService(db, store, processor, new ProcessingJobQueue(), NullLogger<ProjectProcessingService>.Instance);
-        var job = await service.StartAsync(project.UserId, project.Id, new(ProcessingOperation.Upscale, 2), Ct);
+        var service = new ProjectProcessingService(db, store, processor, new ProcessingJobQueue(), new FakeTokenService(), NullLogger<ProjectProcessingService>.Instance);
+        var job = await service.StartAsync(project.UserId, project.Id, new(ProcessingOperation.Upscale, TargetLongEdge: 1920), Ct);
         await service.ExecuteAsync(job.JobId, Ct);
         var result = await db.ProcessingJobs.SingleAsync();
         Assert.Equal(ProcessingJobStatus.Failed, result.Status);
@@ -66,7 +66,7 @@ public sealed class ProjectProcessingServiceTests
         await using var db = WorkflowData.Db();
         var project = WorkflowData.Project(Guid.NewGuid()); db.Add(project); await db.SaveChangesAsync();
         var service = new ProjectProcessingService(db, new WorkflowStore(), new TestProcessor { Enabled = false },
-            new ProcessingJobQueue(), NullLogger<ProjectProcessingService>.Instance);
+            new ProcessingJobQueue(), new FakeTokenService(), NullLogger<ProjectProcessingService>.Instance);
         await Assert.ThrowsAsync<ConfigurationException>(() => service.StartAsync(project.UserId, project.Id, new(ProcessingOperation.Upscale), Ct));
         Assert.Empty(await db.ProcessingJobs.ToListAsync());
     }
@@ -79,13 +79,15 @@ public sealed class ProjectProcessingServiceTests
         project.OriginalImage.OriginalWidth = 1920; project.OriginalImage.OriginalHeight = 1080;
         db.Add(project); await db.SaveChangesAsync();
         var store = new WorkflowStore(); Original(store, 1920, 1080);
-        var service = new ProjectProcessingService(db, store, new TestProcessor(), new ProcessingJobQueue(), NullLogger<ProjectProcessingService>.Instance);
+        var service = new ProjectProcessingService(db, store, new TestProcessor(), new ProcessingJobQueue(), new FakeTokenService(), NullLogger<ProjectProcessingService>.Instance);
         var request = new ProcessProjectRequest(ProcessingOperation.Upscale, TargetLongEdge: 2560);
         var job = await service.StartAsync(project.UserId, project.Id, request, Ct);
         Assert.Equal(2560, job.TargetLongEdge);
         await service.ExecuteAsync(job.JobId, Ct);
         var saved = await service.GetStatusAsync(project.UserId, project.Id, Ct);
-        Assert.Equal(ProcessingJobStatus.Completed, saved.Status);
+        Assert.True(
+            saved.Status == ProcessingJobStatus.Completed,
+            $"작업 실패: {saved.ErrorMessage}");
         Assert.Equal(2560, saved.ResultWidth); Assert.Equal(1440, saved.ResultHeight);
         Assert.Equal(2560, saved.TargetLongEdge);
         await Assert.ThrowsAsync<ConflictException>(() => service.StartAsync(project.UserId, project.Id, request, Ct));
@@ -104,7 +106,7 @@ public sealed class ProjectProcessingServiceTests
         await using var db = WorkflowData.Db(); var project = WorkflowData.Project(Guid.NewGuid());
         project.OriginalImage.OriginalWidth = 1920; project.OriginalImage.OriginalHeight = 1080;
         db.Add(project); await db.SaveChangesAsync();
-        var service = new ProjectProcessingService(db, new WorkflowStore(), new TestProcessor(), new ProcessingJobQueue(), NullLogger<ProjectProcessingService>.Instance);
+        var service = new ProjectProcessingService(db, new WorkflowStore(), new TestProcessor(), new ProcessingJobQueue(), new FakeTokenService(), NullLogger<ProjectProcessingService>.Instance);
         await Assert.ThrowsAsync<ValidationException>(() => service.StartAsync(project.UserId, project.Id,
             new(operation, TargetLongEdge: edge), Ct));
         Assert.Empty(await db.ProcessingJobs.ToListAsync());
@@ -116,7 +118,7 @@ public sealed class ProjectProcessingServiceTests
         await using var db = WorkflowData.Db(); var project = WorkflowData.Project(Guid.NewGuid());
         db.Add(project); await db.SaveChangesAsync();
         var store = new WorkflowStore(); Original(store);
-        var service = new ProjectProcessingService(db, store, new TestProcessor { WrongDimensions = true }, new ProcessingJobQueue(), NullLogger<ProjectProcessingService>.Instance);
+        var service = new ProjectProcessingService(db, store, new TestProcessor { WrongDimensions = true }, new ProcessingJobQueue(), new FakeTokenService(), NullLogger<ProjectProcessingService>.Instance);
         var job = await service.StartAsync(project.UserId, project.Id, new(ProcessingOperation.Upscale, TargetLongEdge: 1920), Ct);
         await service.ExecuteAsync(job.JobId, Ct);
         Assert.Equal(ProcessingJobStatus.Failed, (await service.GetStatusAsync(project.UserId, project.Id, Ct)).Status);

@@ -49,7 +49,10 @@ internal sealed class WorkflowClock : TimeProvider
 internal static class WorkflowData
 {
     public static ApplicationDbContext Db() => new(new DbContextOptionsBuilder<ApplicationDbContext>()
-        .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        .UseInMemoryDatabase(Guid.NewGuid().ToString())
+        .ConfigureWarnings(w => w.Ignore(
+            Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+        .Options);
     public static Device Device(Guid userId) => new() { UserId = userId, Platform = DevicePlatform.Windows,
         DeviceName = "Desktop", ScreenWidth = 1920, ScreenHeight = 1080, AspectRatio = "16:9" };
     public static LiveLayerProject Project(Guid userId) => new() { UserId = userId, Title = "Source",
