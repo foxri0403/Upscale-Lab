@@ -1,7 +1,9 @@
 """RunPod Serverless worker for inference using published See-through weights.
 
-No training occurs. Large assets are transferred with short-lived S3 pre-signed URLs
-provided by the trusted Upscale Lab backend, NOT in RunPod JSON responses.
+Diagnostic-only update:
+- Preserve character_layers_pretrained, S3 GET/PUT, and model adapter behavior.
+- Return a safe failure stage and error type without exposing presigned URLs.
+- Do not log exception messages or tracebacks that may contain credentials.
 """
 from __future__ import annotations
 
@@ -89,33 +91,72 @@ def _create_output_archive(output_directory: Path, archive: Path) -> int:
     return len(paths)
 
 
+def _safe_failure(stage: str, exc: BaseException) -> dict:
+    """Report only allowlisted diagnostics; no exception strings or signed URLs."""
+    result = {
+        "status": "failed",
+        "message": f"Pretrained layer inference failed ({type(exc).__name__})",
+        "stage": stage,
+        "error_type": type(exc).__name__,
+    }
+    errno = getattr(exc, "errno", None)
+    if isinstance(errno, int):
+        result["errno"] = errno
+    if isinstance(exc, subprocess.CalledProcessError):
+        result["return_code"] = exc.returncode
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        result["http_status"] = exc.response.status_code
+    print(
+        "[SeeThrough diagnostic] "
+        + " ".join(f"{key}={result[key]}" for key in ("stage", "error_type", "errno", "return_code", "http_status") if key in result),
+        flush=True,
+    )
+    return result
+
+
 def handle(event: dict) -> dict:
     payload = event.get("input", {})
     if not isinstance(payload, dict) or payload.get("operation") != "character_layers_pretrained":
         return {"status": "failed", "message": "Unsupported inference operation"}
+
+    stage = "validate_input_url"
     try:
         input_url = _check_s3_url(payload.get("input_url"))
+        stage = "validate_output_url"
         output_url = _check_s3_url(payload.get("output_url"))
+
+        stage = "verify_installation"
         repository = Path(os.environ.get("SEE_THROUGH_REPOSITORY", "/opt/see-through")).resolve()
         adapter = Path(os.environ.get("UPSCALE_LAB_ADAPTER", "/opt/worker/see_through_adapter.py")).resolve()
         if not (repository / "inference/scripts/inference_psd.py").is_file() or not adapter.is_file():
-            return {"status": "failed", "message": "Pretrained See-through installation is missing"}
+            return {"status": "failed", "message": "Pretrained See-through installation is missing", "stage": stage}
 
+        stage = "create_temporary_directory"
         with tempfile.TemporaryDirectory(prefix="upscale-lab-parts-") as tmp:
             root = Path(tmp)
             source = root / "source"
             png = root / "input.png"
             output = root / "result"
             archive = root / "layers.zip"
+
+            stage = "download_input"
             _download_image(input_url, source)
+
+            stage = "convert_image"
             _prepare_png(source, png)
+
+            stage = "run_inference"
             subprocess.run(
                 [sys.executable, str(adapter), "--repository", str(repository),
                  "--input", str(png), "--output", str(output)],
                 cwd=str(repository), check=True,
                 timeout=int(os.environ.get("SEE_THROUGH_INFERENCE_TIMEOUT_SECONDS", "1800")),
             )
+
+            stage = "archive_layers"
             count = _create_output_archive(output, archive)
+
+            stage = "upload_output"
             with archive.open("rb") as stream:
                 result = requests.put(
                     output_url, data=stream,
@@ -126,8 +167,7 @@ def handle(event: dict) -> dict:
             return {"status": "completed", "layer_count": count}
     except (ValueError, OSError, requests.RequestException, subprocess.CalledProcessError,
             subprocess.TimeoutExpired, json.JSONDecodeError, KeyError) as exc:
-        # Never include signed URLs, raw exception text, or credentials in worker output.
-        return {"status": "failed", "message": f"Pretrained layer inference failed ({type(exc).__name__})"}
+        return _safe_failure(stage, exc)
 
 
 if __name__ == "__main__":
