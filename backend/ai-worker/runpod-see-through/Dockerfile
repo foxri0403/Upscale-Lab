@@ -1,5 +1,5 @@
 # Build from backend/ai-worker as the Docker build context:
-# docker build -f runpod-see-through/Dockerfile -t upscale-lab-see-through:pretrained .
+# docker build -f runpod-see-through/Dockerfile -t upscale-lab-see-through:diagnostics-safetensors .
 # Dedicated endpoint; do NOT replace the existing upscaler image.
 FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -18,6 +18,16 @@ RUN git clone --depth 1 https://github.com/shitagaki-lab/see-through.git /opt/se
     && cd /opt/see-through \
     && pip install --no-cache-dir -r requirements.txt \
     && ln -s /opt/see-through/common/assets /opt/see-through/assets
+
+# Keep the original targeted LayerDiff/Marigold safetensors patch (v2).
+# The patch intentionally fails the image build if upstream files differ.
+COPY runpod-see-through/patch_safetensors_loading.py /opt/worker/patch_safetensors_loading.py
+RUN python /opt/worker/patch_safetensors_loading.py \
+    && python -m py_compile \
+       /opt/see-through/common/utils/inference_utils.py \
+       /opt/see-through/inference/scripts/inference_psd.py
+
+# Use the newly committed diagnostic handler.
 COPY see_through_adapter.py /opt/worker/see_through_adapter.py
 COPY runpod-see-through/handler.py /opt/worker/handler.py
 COPY runpod-see-through/requirements-worker.txt /opt/worker/requirements-worker.txt
