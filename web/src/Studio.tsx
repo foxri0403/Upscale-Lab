@@ -30,7 +30,7 @@ import {
 } from "./model";
 import { Modal, Notice, Busy, Empty, Link } from "./ui";
 import { cloud, request, post, type Job } from "./api";
-import { detailPicture, discardDraft, loadProjectPicture, processProject, previewSubject, refineSubject, resetProjectEffects, saveImageEdit } from "./cloud-store";
+import { detailPicture, discardDraft, loadProjectPicture, processProject, refineSubject, resetProjectEffects, saveImageEdit } from "./cloud-store";
 import { useUnsavedWarning } from "./use-unsaved-warning";
 import { LayerPreviewSelector } from "./LayerPreviewSelector";
 import { LayerMotionControls } from "./LayerMotionControls";
@@ -119,8 +119,7 @@ export function Studio({ route }: { route: string }) {
   const [target, setTarget] = useState("pc/monitor1");
   const [job, setJob] = useState<Job | null>(null);
   const [capabilities, setCapabilities] = useState<{ upscale: boolean; layers: boolean } | null>(null);
-  const selectionClient = useRef<SmartSelectionClient | null>(null), selectionPreview = useRef<AbortController | null>(null);
-  const [previewJob, setPreviewJob] = useState<Job | null>(null);
+  const selectionClient = useRef<SmartSelectionClient | null>(null);
   const subjectJob = useRef<string | null>(null);
   useEffect(() => { settingsScroll.current?.scrollTo(0, 0); }, [tool, picture?.id]);
   useEffect(() => {
@@ -141,7 +140,7 @@ export function Studio({ route }: { route: string }) {
   useEffect(() => {
     setJob(null); setBusy(false);
     setTool("upscale"); setShareFeedback(null); setSelectedLayer("all"); discarding.current = false;
-    subjectJob.current = null; setPreviewJob(null);
+    subjectJob.current = null;
   }, [picture?.id]);
   useEffect(() => {
     if (!cloud || !id || picture || id.startsWith("asset:") || parameters.get("new") === "1") return;
@@ -197,7 +196,7 @@ export function Studio({ route }: { route: string }) {
       onRefined: () => { setSelectedLayer("all"); separation.setView("overlay"); },
     });
   useEffect(() => {
-    return () => { selectionClient.current?.dispose(); selectionClient.current = null; selectionPreview.current?.abort(); };
+    return () => { selectionClient.current?.dispose(); selectionClient.current = null; };
   }, [tool, picture?.id, published]);
   const dirty = separation.dirty ||
     JSON.stringify(normalizedEdit(edit)) !== JSON.stringify(normalizedEdit(picture?.edit)) ||
@@ -250,7 +249,7 @@ export function Studio({ route }: { route: string }) {
   }
   async function resetEffects(feature: "All" | "Upscale" | "Layers") {
     if (!picture || published || busy || processing) return;
-    if (separation.dirty) { toast("수정 사항을 적용하거나 선택 초기화를 눌러 주세요."); return; }
+    if (separation.dirty) { toast("배경·피사체 분리 시작으로 선택을 적용하거나 선택 초기화를 눌러 주세요."); return; }
     setBusy(true);
     try {
       const nextEdit = feature === "All" ? { ...defaultEdit }
@@ -268,7 +267,7 @@ export function Studio({ route }: { route: string }) {
   const draft = picture ? { ...picture, name: name.trim(), tags, genre: (tags[0] || unspecifiedTag) as Genre, edit } : null;
   async function save(silent = false) {
     if (!picture || published || saving.current || busy) return false;
-    if (separation.dirty) { toast("수정 사항 적용을 눌러 선택 영역을 먼저 적용해 주세요."); return false; }
+    if (separation.dirty) { toast("배경·피사체 분리 시작을 눌러 선택 영역을 먼저 적용해 주세요."); return false; }
     if (!name.trim()) { toast("이미지 이름을 입력해 주세요."); return false; }
     saving.current = true;
     setBusy(true);
@@ -331,16 +330,9 @@ export function Studio({ route }: { route: string }) {
     if (tool === "layers") {
       if (separation.startLocked) return;
       setSelectedLayer("all"); separation.setView("overlay");
-      if (separation.hasGuides) { await separation.recognize(); return; }
-      setBusy(true); const controller = new AbortController(); selectionPreview.current = controller;
-      try {
-        const foreground = separation.hasReference ? undefined : await previewSubject(picture, controller.signal, setPreviewJob);
-        controller.signal.throwIfAborted(); await separation.previewAutomatic(foreground);
-      } catch (error) { if (!controller.signal.aborted) toast((error as Error).message); }
-      finally { if (!controller.signal.aborted) { setBusy(false); setPreviewJob(null); } }
-      return;
+      if (separation.dirty && separation.recognized) { await applySubjectEdits(); return; }
     }
-    if (separation.dirty) return;
+    if (tool !== "layers" && separation.dirty) return;
     setBusy(true);
     try {
       const value = await processProject(
@@ -393,7 +385,7 @@ export function Studio({ route }: { route: string }) {
             const refined = subjectJob.current === status.jobId;
             if (status.operation === "Layers") {
               if (refined) { separation.markApplied(); subjectJob.current = null; }
-              else { separation.reload(); setSelectedLayer("all"); separation.setView("overlay"); }
+              else { separation.reload(true); setSelectedLayer("all"); separation.setView("overlay"); }
             }
             setJob(status);
             toast(status.operation === "Layers" ? refined ? "선택한 피사체와 배경 레이어를 갱신했습니다." : "분리 결과를 확인하고 중앙 이미지에서 바로 수정해 주세요." : "이미지 처리를 완료했습니다.");
@@ -554,7 +546,6 @@ export function Studio({ route }: { route: string }) {
                 ? "업스케일"
                 : "배경·피사체 분리 시작"}
             </button>
-            {tool === "layers" && previewJob && !["Completed", "Failed"].includes(previewJob.status) && <p className="job-state" role="status">{previewJob.status === "Queued" ? "피사체 인식 대기 중" : `피사체 인식 중 · ${previewJob.progress}%`}</p>}
             {tool === "layers" && separation.error && <p className="mask-error" role="alert">{separation.error}</p>}
             {tool === "upscale" && <button className="button secondary full effect-cancel" type="button"
               disabled={busy || processing || !picture.projectId || !picture.jobId}
@@ -574,8 +565,6 @@ export function Studio({ route }: { route: string }) {
         </fieldset>
         {tool === "layers" && <>
           {!published && <SubjectSeparationControls editor={separation} disabled={busy || processing} hasResult={!!picture}
-            canApply={cloud && !!picture.projectId && capabilities?.layers !== false}
-            apply={() => void applySubjectEdits()}
             selectTool={() => { setSelectedLayer("all"); separation.setView("overlay"); }} />}
           <LayerPreviewSelector value={selectedLayer} change={value => { setSelectedLayer(value); if (value !== "background") separation.setView(value === "subject" ? "cutout" : "overlay"); }}
             ready={isFox} original={picture.src} background={backgroundSrc} foregrounds={foregroundSrcs} />

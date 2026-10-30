@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Download, Hand, ImagePlus, Layers3, LoaderCircle, Scan, Sparkles } from "lucide-react";
 import type { Job, Project } from "./api";
 import { SubjectSeparationCanvas, SubjectSeparationControls, useSubjectSeparation } from "./SubjectSeparation";
-import { labJson, labPicture, labPost, labRequest, labSubjectPreview, releaseLabPicture, waitForLabJob, type LabPicture } from "./separation-lab-client";
+import { labJson, labPicture, labPost, labRequest, releaseLabPicture, waitForLabJob, type LabPicture } from "./separation-lab-client";
 import { validateImageUpload } from "./image-upload";
 import { previewStageStyle } from "./StudioPreview";
 import { usePreviewPan } from "./use-preview-pan";
@@ -24,7 +24,7 @@ export function SeparationLab() {
   const editor = useSubjectSeparation(picture, !!picture, busy || pan.canPan, {
     refine: (input, progress) => { smartClient.current ||= new SmartSelectionClient(() => {}); return smartClient.current.refine(input, progress); },
     onRefined: () => {
-      setMessage("선택 결과를 확인한 뒤 수정 사항 적용을 눌러 레이어를 갱신하세요.");
+      setMessage("선택 결과를 확인한 뒤 배경·피사체 분리 시작을 눌러 레이어를 갱신하세요.");
     },
   });
   const width = picture?.width || 1536, height = picture?.height || 1024;
@@ -55,29 +55,21 @@ export function SeparationLab() {
     } catch (e) { if (!controller.signal.aborted) setError((e as Error).message); }
     finally { if (!controller.signal.aborted) setBusy(false); if (input.current) input.current.value = ""; }
   }
-  async function process(manual: boolean) {
-    if (!picture?.projectId || busy || editor.tracing || editor.drawing || editor.polygonPoints) return;
-    if (!manual) {
-      if (editor.startLocked) return;
-      setView("selection"); setHand(false);
-      if (editor.hasGuides) { await editor.recognize(); return; }
-      setBusy(true); setError(""); active.current?.abort(); const controller = new AbortController(); active.current = controller;
-      try {
-        const foreground = editor.hasReference ? undefined : await labSubjectPreview(picture.projectId, controller.signal, setJob);
-        controller.signal.throwIfAborted(); await editor.previewAutomatic(foreground);
-      } catch (e) { if (!controller.signal.aborted) setError((e as Error).message); }
-      finally { if (!controller.signal.aborted) { setBusy(false); setJob(undefined); } }
-      return;
-    }
-    if (!editor.dirty || !editor.recognized) return;
+  async function process() {
+    if (!picture?.projectId || busy || !editor.ready || editor.startLocked || editor.tracing || editor.drawing || editor.polygonPoints) return;
+    const manual = editor.dirty && editor.recognized;
+    setView("selection"); setHand(false);
     setBusy(true); setJob(undefined); setError(""); active.current?.abort(); const controller = new AbortController(); active.current = controller;
     try {
-      const form = new FormData(); form.append("mask", await editor.exportMask(), "subject-mask.png"); form.append("baseLayerId", picture.subjectLayerId || "00000000-0000-0000-0000-000000000000");
-      const started = await labJson<Job>(`/api/projects/${picture.projectId}/subject-mask`, { method: "POST", body: form, signal: controller.signal });
+      let started: Job;
+      if (manual) {
+        const form = new FormData(); form.append("mask", await editor.exportMask(), "subject-mask.png"); form.append("baseLayerId", picture.subjectLayerId || "00000000-0000-0000-0000-000000000000");
+        started = await labJson<Job>(`/api/projects/${picture.projectId}/subject-mask`, { method: "POST", body: form, signal: controller.signal });
+      } else started = await labPost<Job>(`/api/projects/${picture.projectId}/process`, { operation: "Layers" }, controller.signal);
       setJob(started); setMessage(manual ? "선택 영역으로 피사체와 배경을 다시 만들고 있습니다." : "피사체를 인식하고 가려진 배경을 채우고 있습니다.");
       await waitForLabJob(picture.projectId, controller.signal, setJob);
       replace(await labPicture(picture.projectId, controller.signal));
-      editor.markApplied();
+      if (manual) editor.markApplied(); else editor.reload(true);
       setMessage(manual ? "AI가 찾은 피사체 경계로 두 레이어를 갱신했습니다. 배경·합성 보기도 확인해 보세요." : "자동 분리를 마쳤습니다. 브러시나 올가미로 대략 표시하면 AI가 피사체 경계를 다시 찾습니다.");
     } catch (e) { if (!controller.signal.aborted) { setError((e as Error).message); setMessage("기존 결과와 수정 중인 선택 영역은 유지됩니다."); } }
     finally { if (!controller.signal.aborted) setBusy(false); }
@@ -123,11 +115,11 @@ export function SeparationLab() {
       </section>
       <aside className="lab-sidebar">
         <section className="lab-card"><span className="lab-step">01</span><h2>이미지 준비</h2><p>{picture?.name || "수정할 사진 한 장을 선택하세요."}</p><input ref={input} type="file" accept="image/*" hidden onChange={e => void open(e.target.files?.[0])} /><button className="button secondary full" disabled={busy || connection !== "ready"} onClick={() => input.current?.click()}><ImagePlus size={17} />{picture ? "다른 이미지 선택" : "이미지 선택"}</button>{picture && <button className="lab-sample" disabled={busy} onClick={() => void sample()}>여우 샘플 열기</button>}</section>
-        <section className="lab-card"><span className="lab-step">02</span><h2>피사체 자동 분리</h2><p>피사체를 인식해 투명한 전경과 채워진 배경으로 나눕니다.</p><button className="button primary full" disabled={!picture || busy || !editor.ready || editor.startLocked || editor.drawing || editor.tracing || editor.polygonPoints > 0 || connection !== "ready"} onClick={() => void process(false)}><Scan size={18} />배경·피사체 분리 시작</button>{busy && job && <div className="lab-progress"><progress value={job.progress} max="100" /><span>{job.status === "Queued" ? "GPU 작업 대기 중" : `분리 처리 중 · ${job.progress}%`}</span></div>}</section>
+        <section className="lab-card"><span className="lab-step">02</span><h2>피사체 자동 분리</h2><p>피사체를 인식해 투명한 전경과 채워진 배경으로 나눕니다.</p><button className="button primary full separation-action" disabled={!picture || busy || !editor.ready || editor.startLocked || editor.drawing || editor.tracing || editor.polygonPoints > 0 || connection !== "ready"} onClick={() => void process()}><Scan size={18} />배경·피사체 분리 시작</button>{busy && job && <div className="lab-progress"><progress value={job.progress} max="100" /><span>{job.status === "Queued" ? "GPU 작업 대기 중" : `분리 처리 중 · ${job.progress}%`}</span></div>}</section>
         <section className="lab-card lab-edit"><span className="lab-step">03</span><h2>선택 영역 수정</h2>
-          <SubjectSeparationControls editor={editor} disabled={busy} hasResult={!!picture} canApply={!!picture?.projectId}
-            apply={() => void process(true)} selectTool={() => { setView("selection"); setHand(false); }} />
-          {editor.dirty && <p className="lab-pending"><Sparkles size={14} />{editor.tracing ? "선택한 범위에서 피사체를 인식하고 있습니다." : editor.recognized ? "수정 사항 적용을 눌러 레이어를 갱신하세요." : "피사체 다시 분리로 그린 영역에서 피사체를 찾으세요."}</p>}
+          <SubjectSeparationControls editor={editor} disabled={busy} hasResult={!!picture}
+            selectTool={() => { setView("selection"); setHand(false); }} />
+          {editor.dirty && <p className="lab-pending"><Sparkles size={14} />{editor.tracing ? "선택한 범위에서 피사체를 인식하고 있습니다." : editor.recognized ? "배경·피사체 분리 시작을 눌러 레이어를 갱신하세요." : "선택한 영역으로 피사체 적용을 눌러 그린 영역에서 피사체를 찾으세요."}</p>}
         </section>
         <section className="lab-card"><h2>결과 확인</h2><div className="lab-exports"><button disabled={!separated || busy || editor.dirty} onClick={() => void download("subject")}><Download size={15} />피사체 PNG</button><button disabled={!separated || busy || editor.dirty} onClick={() => void download("background")}><Download size={15} />배경 PNG</button><button disabled={!separated || busy || editor.drawing || editor.tracing} onClick={() => void download("mask")}><Download size={15} />선택 마스크</button></div><button className="lab-cleanup" disabled={busy || editor.dirty || !picture} onClick={() => void cleanup()}>테스트 파일 정리</button></section>
       </aside>

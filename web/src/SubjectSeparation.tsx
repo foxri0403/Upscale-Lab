@@ -12,7 +12,7 @@ type Operation = { kind: "brush"; stroke: MaskStroke } | { kind: "lasso"; points
 type Active = { pointerId: number; points: MaskPoint[]; mode: MaskStroke["mode"]; painter?: MaskStrokePainter; stroke?: MaskStroke; startPointCount?: number; closePolygon?: boolean };
 type Session = {
   source: HTMLImageElement; subjects: HTMLImageElement[]; initial: HTMLCanvasElement; mask: HTMLCanvasElement;
-  reference: HTMLCanvasElement; hasReference: boolean; preview: HTMLCanvasElement; started: boolean; toolEdits: boolean;
+  reference: HTMLCanvasElement; preview: HTMLCanvasElement;
   scratch: HTMLCanvasElement; operations: Operation[]; cursor: number; active: Active | null; magnetic?: MagneticLasso;
   polygon?: { points: MaskPoint[]; mode: MaskStroke["mode"] };
 };
@@ -54,6 +54,7 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
   const canvas = useRef<HTMLCanvasElement | null>(null), session = useRef<Session | null>(null);
   const cursorElement = useRef<HTMLSpanElement | null>(null);
   const frame = useRef(0), generation = useRef(0), loaded = useRef("");
+  const revealApplied = useRef<string | null>(null);
   const [ready, setReady] = useState(false), [error, setError] = useState("");
   const [mode, setMode] = useState<"brush" | "eraser" | "lasso">("brush");
   const [size, setSize] = useState(30);
@@ -144,8 +145,12 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
       const preview = board(mask.width, mask.height), pc = preview.getContext("2d")!;
       pc.fillStyle = "black"; pc.fillRect(0, 0, preview.width, preview.height);
       if (!smartRef.current) pc.drawImage(initial, 0, 0);
-      session.current = { source, subjects, initial, mask, reference: initial, hasReference: subjects.length > 0, preview, started: false, toolEdits: false,
-        scratch: board(mask.width, mask.height), operations: [], cursor: 0, active: null };
+      const appliedResult: Operation | null = revealApplied.current === picture.id && subjects.length ? { kind: "smart", mask: initial } : null;
+      revealApplied.current = null;
+      if (appliedResult) pc.drawImage(initial, 0, 0);
+      session.current = { source, subjects, initial, mask, reference: initial, preview,
+        scratch: board(mask.width, mask.height), operations: appliedResult ? [appliedResult] : [], cursor: appliedResult ? 1 : 0, active: null };
+      if (appliedResult) { setHistory({ cursor: 1, length: 1, operation: appliedResult }); setApplied(appliedResult); }
       loaded.current = key; setSize(Math.max(1, Math.min(1000, Math.round(Math.max(source.naturalWidth, source.naturalHeight) * (smartRef.current ? .18 : .025)))));
       setReady(true); schedule();
     })().catch(e => { if (alive) setError(e.message || "이미지를 불러오지 못했습니다."); }).finally(() => urls.forEach(url => URL.revokeObjectURL(url)));
@@ -232,7 +237,7 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
         op = { kind: "lasso", mode: a.mode, points: path.map(p => ({ x: p.x / sx, y: p.y / sy })) };
       }
       if (gen !== generation.current || disabledRef.current) return;
-      s.toolEdits = true; s.operations = [...s.operations.slice(0, s.cursor), op]; s.cursor++;
+      s.operations = [...s.operations.slice(0, s.cursor), op]; s.cursor++;
       if (smartRef.current) {
         if (op.kind === "lasso") fillSelectionGuide(s.preview.getContext("2d")!, op.points, op.mode, s.mask.width / s.source.naturalWidth, s.mask.height / s.source.naturalHeight);
         setHistory({ cursor: s.cursor, length: s.operations.length, operation: op }); schedule();
@@ -271,29 +276,13 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
       }
       const output = board(s.mask.width, s.mask.height), context = output.getContext("2d")!, pixels = context.createImageData(output.width, output.height);
       for (let i = 0; i < prior.length; i++) { pixels.data[i * 4] = pixels.data[i * 4 + 1] = pixels.data[i * 4 + 2] = prior[i]; pixels.data[i * 4 + 3] = 255; }
-      context.putImageData(pixels, 0, 0); s.started = true; s.operations = [...s.operations.slice(0, s.cursor), { kind: "smart", mask: output }]; s.cursor++; replay(); smart.onRefined?.();
+      context.putImageData(pixels, 0, 0); s.operations = [...s.operations.slice(0, s.cursor), { kind: "smart", mask: output }]; s.cursor++; replay(); smart.onRefined?.();
     } catch (e) { if (gen === generation.current) { setError((e as Error).message); replay(); } }
     finally { if (gen === generation.current) setTracing(false); }
   }
-  async function previewAutomatic(foreground?: Blob) {
-    const s = session.current, gen = generation.current; if (!s || !ready || tracing || s.active || s.polygon) return;
-    setError("");
-    if (foreground) {
-      const url = URL.createObjectURL(foreground);
-      try {
-        const image = await loadImage(url);
-        if (gen !== generation.current) return;
-        if (image.naturalWidth !== s.source.naturalWidth || image.naturalHeight !== s.source.naturalHeight) throw new Error("인식 결과의 원본 크기가 일치하지 않습니다.");
-        s.reference = subjectMask([image], s.mask.width, s.mask.height); s.hasReference = true;
-      } finally { URL.revokeObjectURL(url); }
-    }
-    if (!s.hasReference) throw new Error("먼저 피사체를 인식해 주세요.");
-    const mask = board(s.mask.width, s.mask.height); mask.getContext("2d")!.drawImage(s.reference, 0, 0);
-    s.started = true; s.operations = [...s.operations.slice(0, s.cursor), { kind: "smart", mask }]; s.cursor++; replay(); smartRef.current?.onRefined?.();
-  }
   async function exportMask() {
     const s = session.current; if (!s || !ready || tracing || s.active || s.polygon) throw new Error("선택 영역을 완성한 뒤 분리해 주세요.");
-    if (smartRef.current && s.operations[s.cursor - 1]?.kind !== "smart") throw new Error("피사체 다시 분리로 선택 결과를 확인한 뒤 적용해 주세요.");
+    if (smartRef.current && s.operations[s.cursor - 1]?.kind !== "smart") throw new Error("선택한 영역으로 피사체 적용을 눌러 선택 결과를 확인한 뒤 분리해 주세요.");
     const native = subjectMask(s.subjects, s.source.naturalWidth, s.source.naturalHeight), c = native.getContext("2d")!;
     const operations = s.operations.slice(0, s.cursor);
     if (smartRef.current) applyOperation(c, operations.at(-1)!, 1, 1);
@@ -313,14 +302,15 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
       event.preventDefault(); void commit(s, { pointerId: -1, points: s.polygon.points, mode: s.polygon.mode });
     }
   }
-  function reset() { const s = session.current; if (!s || drawing || tracing) return; cancelPolygon(); s.operations = []; s.cursor = 0; s.toolEdits = false; replay(); smartRef.current?.onRefined?.(); }
+  function reset() { const s = session.current; if (!s || drawing || tracing) return; cancelPolygon(); s.operations = []; s.cursor = 0; replay(); smartRef.current?.onRefined?.(); }
+  const hasGuides = history.operation?.kind === "brush" || history.operation?.kind === "lasso";
   return { ready, error, mode, setMode: (value: typeof mode) => { cancelPolygon(); setMode(value); },
     size, setSize, history, drawing, tracing, polygonPoints, view, setView, cursorElement, smart: !!smart, smartStatus,
     dirty: history.operation !== applied || drawing || tracing || polygonPoints > 0, exportMask, reset,
-    startLocked: !!session.current?.started && !!session.current?.toolEdits,
-    recognize, previewAutomatic, hasGuides: history.operation?.kind === "brush" || history.operation?.kind === "lasso",
-    recognized: !smart || history.operation?.kind === "smart", hasReference: !!session.current?.hasReference,
-    markApplied: () => { const s = session.current; if (s) setApplied(s.operations[s.cursor - 1] || null); }, reload: () => setEpoch(value => value + 1),
+    startLocked: hasGuides, recognize, hasGuides,
+    recognized: !smart || history.operation?.kind === "smart",
+    markApplied: () => { const s = session.current; if (s) setApplied(s.operations[s.cursor - 1] || null); },
+    reload: (showResult = false) => { revealApplied.current = showResult ? picture?.id || null : null; setEpoch(value => value + 1); },
     undo: () => { const s = session.current; if (s?.polygon) cancelPolygon(); else if (s && s.cursor > 0) { s.cursor--; replay(); smartRef.current?.onRefined?.(); } },
     redo: () => { const s = session.current; if (s && s.cursor < s.operations.length) { s.cursor++; replay(); smartRef.current?.onRefined?.(); } },
     bindCanvas: (target: HTMLCanvasElement | null) => { canvas.current = target; if (target) schedule(); },
@@ -328,9 +318,8 @@ export function useSubjectSeparation(picture: Picture | undefined, enabled: bool
       onPointerCancel: (e: PointerEvent<HTMLCanvasElement>) => void finish(e, true), onLostPointerCapture: (e: PointerEvent<HTMLCanvasElement>) => void finish(e, true), onPointerLeave: hideCursor } };
 }
 export type SubjectSeparation = ReturnType<typeof useSubjectSeparation>;
-export function SubjectSeparationControls({ editor, disabled, hasResult, selectTool, apply, canApply, applyLabel = "수정 사항 적용" }: {
+export function SubjectSeparationControls({ editor, disabled, hasResult, selectTool }: {
   editor: SubjectSeparation; disabled: boolean; hasResult: boolean; selectTool: () => void;
-  apply: () => void; canApply: boolean; applyLabel?: string;
 }) {
   return <fieldset className="separation-controls photo-settings" disabled={disabled || !hasResult || !editor.ready || editor.drawing || editor.tracing}>
     <h3>작업 도구</h3><div className="separation-tools" role="group" aria-label="피사체 선택 도구">
@@ -343,8 +332,7 @@ export function SubjectSeparationControls({ editor, disabled, hasResult, selectT
     <div className="separation-history"><button type="button" aria-label="선택 실행 취소" disabled={!editor.history.cursor && !editor.polygonPoints} onClick={editor.undo}><Undo2 size={17} /></button>
       <button type="button" aria-label="선택 다시 실행" disabled={editor.history.cursor === editor.history.length} onClick={editor.redo}><Redo2 size={17} /></button>
       <button type="button" disabled={!editor.dirty} onClick={editor.reset}><RotateCcw size={15} />선택 초기화</button></div>
-    <button type="button" className="separation-refine" disabled={!editor.hasGuides || editor.polygonPoints > 0} onClick={() => { selectTool(); void editor.recognize(); }}>피사체 다시 분리</button>
-    <button type="button" className="button full separation-action subject-edit-apply" disabled={!canApply || !editor.dirty || !editor.recognized || editor.polygonPoints > 0} onClick={apply}>{applyLabel}</button>
+    <button type="button" className="button full separation-action subject-edit-apply" disabled={!editor.hasGuides || editor.polygonPoints > 0} onClick={() => { selectTool(); void editor.recognize(); }}>선택한 영역으로 피사체 적용</button>
   </fieldset>;
 }
 export function SubjectSeparationCanvas({ editor, disabled, filter }: { editor: SubjectSeparation; disabled: boolean; filter: string }) {

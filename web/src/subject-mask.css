@@ -9,7 +9,6 @@
 .subject-edit-apply { margin-top: 12px; }
 .button.separation-action { font-family: inherit; font-size: 0.8571429rem; font-weight: 600; }
 .button.subject-edit-apply { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
-.separation-refine { min-height: 36px; border: 1px solid var(--line); border-radius: 7px; background: white; padding: 7px; font-size: 12px; width: 100%; margin-top: 8px; color: var(--muted); }
 .separation-tool-hint { margin: 10px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .separation-history { display: grid; grid-template-columns: 38px 38px minmax(0, 1fr); gap: 6px; margin-top: 15px; }
 .separation-board { position: absolute; inset: 0; overflow: hidden; background: repeating-conic-gradient(#e2e5ed 0% 25%, #fff 0% 50%) 0 0 / 20px 20px; }
