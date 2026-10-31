@@ -1,0 +1,87 @@
+using Microsoft.EntityFrameworkCore;
+using UpscaleLab.Domain.Entities;
+using UpscaleLab.Domain.Payments;
+using UpscaleLab.Domain.Tokens;
+using UpscaleLab.Infrastructure.Database;
+
+namespace UpscaleLab.Infrastructure.Payments;
+
+public sealed class SubscriptionRenewalOrderService(
+    ApplicationDbContext db)
+{
+    public async Task<PaymentOrder?> GetOrCreateDueOrderAsync(
+        Guid subscriptionId,
+        CancellationToken ct)
+    {
+        await using var tx =
+            await db.Database.BeginTransactionAsync(ct);
+
+        // 동일 구독의 주문 생성을 직렬화한다.
+        var subscription = await db.UserSubscriptions
+            .FromSqlInterpolated($"""
+                SELECT * FROM user_subscriptions
+                WHERE "Id" = {subscriptionId}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(ct);
+
+        if (subscription is null ||
+            subscription.Status != SubscriptionStatus.Active ||
+            subscription.CancelAtPeriodEnd ||
+            string.IsNullOrWhiteSpace(
+                subscription.BillingKeyCiphertext) ||
+            subscription.NextBillingAtUtc is null ||
+            subscription.CurrentPeriodEndUtc is null ||
+            subscription.NextBillingAtUtc > DateTime.UtcNow)
+        {
+            await tx.CommitAsync(ct);
+            return null;
+        }
+
+        var periodStart = subscription.NextBillingAtUtc.Value;
+
+        if (periodStart != subscription.CurrentPeriodEndUtc.Value)
+            throw new InvalidOperationException(
+                "구독 청구 기간 정보가 일치하지 않습니다.");
+
+        var productCode = subscription.Plan switch
+        {
+            SubscriptionPlan.Plus => "PLUS_MONTHLY",
+            SubscriptionPlan.Pro => "PRO_MONTHLY",
+            _ => throw new InvalidOperationException(
+                "지원하지 않는 구독 플랜입니다.")
+        };
+
+        var product = PaymentCatalog.Get(productCode);
+
+        var existing = await db.PaymentOrders
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x =>
+                x.SubscriptionId == subscription.Id &&
+                x.BillingPeriodStartUtc == periodStart,
+                ct);
+
+        if (existing is not null)
+        {
+            await tx.CommitAsync(ct);
+            return existing;
+        }
+
+        var order = new PaymentOrder
+        {
+            UserId = subscription.UserId,
+            SubscriptionId = subscription.Id,
+            BillingPeriodStartUtc = periodStart,
+            OrderId = "UL-SUB-" + Guid.NewGuid().ToString("N"),
+            ProductCode = product.Code,
+            Amount = product.Price,
+            Status = PaymentOrderStatus.Pending
+        };
+
+        db.PaymentOrders.Add(order);
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+
+        return order;
+    }
+}

@@ -23,7 +23,6 @@ import {
   X,
 } from "lucide-react";
 import { type Session } from "./auth";
-import { useMediaQuery } from "./use-media-query";
 import {
   read,
   write,
@@ -159,19 +158,7 @@ export function Workspace({
   const [shared, setShared] = useState<SharedPicture[]>(() =>
     cloud ? [] : read("upscale.demo.shared.v1", []),
   );
-  const compact = useMediaQuery("(max-width: 1100px)");
-  const [sidebar, setSidebar] = useState(() => !window.matchMedia("(max-width: 1100px)").matches && read("upscale.sidebar", true));
-  const sidebarToggle = useRef<HTMLButtonElement>(null);
-  useEffect(() => { setSidebar(compact ? false : read("upscale.sidebar", true)); }, [compact]);
-  useEffect(() => { if (compact) setSidebar(false); }, [route, compact]);
-  useEffect(() => {
-    if (!compact || !sidebar) return;
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { setSidebar(false); sidebarToggle.current?.focus(); }
-    };
-    document.addEventListener("keydown", close);
-    return () => document.removeEventListener("keydown", close);
-  }, [compact, sidebar]);
+  const [sidebar, setSidebar] = useState(() => read("upscale.sidebar", true));
   const [message, setMessage] = useState<ToastMessage | null>(null);
   const toastPointer = useRef({ x: innerWidth / 2, y: innerHeight / 2 });
   const toastSequence = useRef(0);
@@ -514,14 +501,13 @@ export function Workspace({
         <header className="app-header">
           <button
             className="icon-button sidebar-toggle"
-            ref={sidebarToggle}
             aria-label={sidebar ? "왼쪽 메뉴 숨기기" : "왼쪽 메뉴 펼치기"}
             aria-expanded={sidebar}
             aria-controls="app-sidebar"
             onClick={() => {
               setSidebar(!sidebar);
               try {
-                if (!compact) write("upscale.sidebar", !sidebar);
+                write("upscale.sidebar", !sidebar);
               } catch {}
             }}
           >
@@ -541,7 +527,7 @@ export function Workspace({
                 <div className="header-token-dropdown">
                   <strong>내 토큰 정보</strong>
                   <div><span>현재 요금제</span><b>{tokenWallet.plan ?? "-"}</b></div>
-                  <div><span>주 제공 토큰 잔액</span><b>{tokenWallet.monthlyBalance ?? 0}</b></div>
+                  <div><span>월 제공 토큰 잔액</span><b>{tokenWallet.monthlyBalance ?? 0}</b></div>
                   <div><span>구매 토큰 잔액</span><b>{tokenWallet.purchasedBalance ?? 0}</b></div>
                   <div className="token-dropdown-total">
                     <span>총 잔여 토큰</span>
@@ -551,7 +537,7 @@ export function Workspace({
               </details>
             )}
             <details className="account-menu" ref={accountMenu}>
-              <summary aria-label="내 계정">
+              <summary>
                 <AccountAvatar session={session} />
                 <span>내 계정</span>
                 <ChevronDown size={16} />
@@ -569,15 +555,11 @@ export function Workspace({
             </details>
           </div>
         </header>
-        {compact && sidebar && <button className="sidebar-backdrop" aria-label="메뉴 닫기" onClick={() => setSidebar(false)} />}
         <aside
           id="app-sidebar"
           className="sidebar"
           inert={!sidebar}
           aria-label="앱 메뉴"
-          onClick={(event) => {
-            if (compact && (event.target as Element).closest("a[data-spa-link]")) setSidebar(false);
-          }}
         >
           <nav>
             {navigation.map(({ slug, name, icon: Icon }) => (
@@ -598,12 +580,12 @@ export function Workspace({
             >
               <Coins size={22} /> 토큰·요금제
             </Link>
-            <button className="nav-link" onClick={() => { if (compact) setSidebar(false); setDialog("downloads"); }}>
+            <button className="nav-link" onClick={() => setDialog("downloads")}>
               <Download size={22} /> 연결 앱 다운로드
             </button>
           </div>
         </aside>
-        <main className={`app-main ${page?.slug === "studio" ? "studio-main" : ""}`} key={page?.slug || "unknown"} inert={compact && sidebar}>
+        <main className={`app-main ${page?.slug === "studio" ? "studio-main" : ""}`} key={page?.slug || "unknown"}>
           {loadError && (
             <div className="api-error" role="alert">
               {loadError}
@@ -622,11 +604,11 @@ export function Workspace({
             <Gallery explore />
           ) : page?.slug === "studio" ? (
             <Studio route={route} />
-          ) : page?.slug === "devices" ? (
-            <Devices />
-          ) : page?.slug === "billing" ? (
-            <Billing />
-          ) : (
+           ) : page?.slug === "devices" ? (
+             <Devices />
+           ) : page?.slug === "billing" ? (
+             <Billing />
+           ) : (
             <Empty text="페이지를 찾을 수 없어요">
               <Link to="/app/images" className="button primary">
                 내 이미지로 이동

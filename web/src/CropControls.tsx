@@ -3,9 +3,7 @@ import type { Edit } from "./model";
 import { cropPresets, cropRegion, fitCrop, pixelCrop, zoomCrop } from "./crop-geometry";
 import "./crop.css";
 
-export function CropControls({ edit, width, height, change, saving, error }: {
-  edit: Edit; width: number; height: number; change: (edit: Edit) => void; saving: boolean; error: string;
-}) {
+export function CropControls({ edit, width, height, change }: { edit: Edit; width: number; height: number; change: (edit: Edit) => void }) {
   const ready = width > 0 && height > 0, region = cropRegion(width, height, edit);
   const pixels = ready ? pixelCrop(width, height, edit) : null;
   const center = { x: region.x + region.width / 2, y: region.y + region.height / 2 };
@@ -37,8 +35,5 @@ export function CropControls({ edit, width, height, change, saving, error }: {
         <button type="button" className="button secondary" disabled={!ready} aria-label="자르기 축소" onClick={() => change({ ...edit, cropRegion: zoomCrop(region, 1 / 1.2, width, height) })}><Minus size={17} /></button>
         <button type="button" className="button secondary" disabled={!ready} onClick={() => change({ ...edit, cropRegion: fitCrop(width, height, region.width * width / (region.height * height)) })}><RotateCcw size={15} />영역 초기화</button></div>
     </div>}
-    <p className={`crop-save-state ${error ? "mask-error" : ""}`} role="status">{error
-      ? "자동 저장에 실패했습니다. 다시 조정하거나 보관함에 저장해 주세요."
-      : saving ? "자르기 자동 저장 중…" : "자르기 변경 사항이 자동으로 저장됩니다."}</p>
   </>;
 }

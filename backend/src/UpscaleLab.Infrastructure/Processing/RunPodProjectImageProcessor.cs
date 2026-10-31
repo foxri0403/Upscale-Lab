@@ -9,6 +9,7 @@ namespace UpscaleLab.Infrastructure.Processing;
 
 public sealed class RunPodProjectImageProcessor(
     ExistingLayerProjectProcessor layerProcessor,
+    RunPodPretrainedSeeThroughProcessor characterProcessor,
     RunPodUpscaleService base64Service,
     RunPodS3UpscaleService s3Service,
     RunPodOptions options,
@@ -17,7 +18,8 @@ public sealed class RunPodProjectImageProcessor(
 {
     public bool Supports(ProcessingOperation operation)
     {
-        return (operation == ProcessingOperation.Layers && layerProcessor.Supports(operation)) ||
+        return (operation == ProcessingOperation.CharacterLayers && characterProcessor.IsConfigured) ||
+            (operation == ProcessingOperation.Layers && layerProcessor.Supports(operation)) ||
             (operation == ProcessingOperation.Upscale && base64Service.IsConfigured);
     }
 
@@ -25,6 +27,20 @@ public sealed class RunPodProjectImageProcessor(
         ProjectProcessingRequest request,
         CancellationToken cancellationToken)
     {
+        // Existing photo background/subject separation is unchanged.
+        // Character parts use their own RunPod endpoint and operation.
+        if (request.Operation == ProcessingOperation.CharacterLayers)
+        {
+            var layers = await characterProcessor.ProcessAsync(
+                new LayerProcessingRequest(request.InputPath, request.OutputDirectory,
+                    request.JobId, request.ReportProgress), cancellationToken);
+            if (layers.Count == 0)
+                throw new InvalidDataException("캐릭터 파츠 분리 결과가 비어 있습니다.");
+            var info = new MagickImageInfo(layers[0].FilePath);
+            return new ProjectProcessingResult(layers, null,
+                checked((int)info.Width), checked((int)info.Height));
+        }
+
         // 기존 레이어 분해 기능 유지
         if (request.Operation == ProcessingOperation.Layers)
         {

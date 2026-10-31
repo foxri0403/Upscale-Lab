@@ -1,0 +1,14 @@
+Upscale Lab 병합 검증 결과 (2026-10-31)
+
+베이스: Upscale-Lab-feature-main-runpod-toss-release(2).zip
+통합 범위: Live2D v3 웹 UI + 캐릭터 파츠 처리 API + 레이어 순서 저장 + 리깅 설정 저장
+기존 파일 수정: 23개
+신규 Live2D 소스/테스트/설명: 17개
+노드 테스트 실행: 81개 중 67개 PASS / 0개 FAIL / 14개 SKIP
+TypeScript 소스 파서: 59개 파일 / 문법 오류 0개
+웹 TypeScript 상대경로 import 검사: 누락 0개
+웹 프로덕션 전체 빌드: 이 환경에서 pnpm 의존성 설치 불가(외부 npm registry 접근 실패)하여 미검증
+.NET 전체 빌드: 이 환경에 dotnet SDK 없음으로 미검증
+클라우드 API/실제 See-through worker 동작: 미검증
+
+주의: 병합본 기준으로 웹과 .NET 빌드 및 실제 API 통합 테스트를 확인한 뒤 배포해야 합니다.

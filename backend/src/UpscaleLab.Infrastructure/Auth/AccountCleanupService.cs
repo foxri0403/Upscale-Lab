@@ -83,7 +83,6 @@ public sealed class AccountCleanupService(ApplicationDbContext db, IStorageServi
             foreach (var key in await db.OptimizedImages.Where(x => x.Image.UserId == userId).Select(x => x.ObjectKey).ToListAsync(ct)) Add(key);
             foreach (var key in await db.ImageLayers.Where(x => x.Project.UserId == userId).Select(x => x.ObjectKey).ToListAsync(ct)) Add(key);
             foreach (var key in await db.ProcessingJobs.Where(x => x.Project.UserId == userId).Select(x => x.ResultObjectKey).ToListAsync(ct)) Add(key);
-            foreach (var key in await db.ProcessingJobs.Where(x => x.Project.UserId == userId).Select(x => x.SubjectMaskObjectKey).ToListAsync(ct)) Add(key);
             foreach (var key in await db.AccountCleanupTasks.Where(x => x.UserId == userId && x.ObjectKey != null).Select(x => x.ObjectKey).ToListAsync(ct)) Add(key);
             var assets = await db.WallpaperAssets.Where(x => x.UserId == userId).ToListAsync(ct);
             foreach (var asset in assets)

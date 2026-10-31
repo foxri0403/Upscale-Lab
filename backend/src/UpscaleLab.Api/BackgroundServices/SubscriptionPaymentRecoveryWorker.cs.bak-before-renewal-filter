@@ -1,0 +1,128 @@
+using Microsoft.EntityFrameworkCore;
+using UpscaleLab.Domain.Entities;
+using UpscaleLab.Infrastructure.Database;
+using UpscaleLab.Infrastructure.Payments;
+
+namespace UpscaleLab.Api.BackgroundServices;
+
+public sealed class SubscriptionPaymentRecoveryWorker(
+    IServiceScopeFactory scopeFactory,
+    IConfiguration configuration,
+    ILogger<SubscriptionPaymentRecoveryWorker> logger)
+    : BackgroundService
+{
+    protected override async Task ExecuteAsync(
+        CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(
+            TimeSpan.FromMinutes(5));
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (configuration.GetValue<bool>(
+                    "Payments:EnableSubscriptionRecovery"))
+                {
+                    await RecoverAsync(stoppingToken);
+                }
+            }
+            catch (OperationCanceledException)
+                when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(
+                    ex, "구독 결제 자동 복구 작업 실패");
+            }
+
+            try
+            {
+                if (!await timer.WaitForNextTickAsync(
+                    stoppingToken))
+                    break;
+            }
+            catch (OperationCanceledException)
+                when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+    }
+
+    private async Task RecoverAsync(CancellationToken ct)
+    {
+        using var scope = scopeFactory.CreateScope();
+
+        var db = scope.ServiceProvider
+            .GetRequiredService<ApplicationDbContext>();
+
+        var billing = scope.ServiceProvider
+            .GetRequiredService<TossBillingClient>();
+
+        var fulfillment = scope.ServiceProvider
+            .GetRequiredService<SubscriptionFulfillmentService>();
+
+        var cutoff = DateTime.UtcNow.AddMinutes(-1);
+
+        var orders = await db.PaymentOrders
+            .AsNoTracking()
+            .Where(x =>
+                x.Status == PaymentOrderStatus.Confirming &&
+                x.SubscriptionId != null &&
+                x.BillingPeriodStartUtc != null &&
+                x.CreatedAt <= cutoff)
+            .OrderBy(x => x.CreatedAt)
+            .Take(20)
+            .ToListAsync(ct);
+
+        foreach (var order in orders)
+        {
+            if (ct.IsCancellationRequested)
+                break;
+
+            try
+            {
+                // 결제를 다시 청구하지 않고 상태만 조회
+                var payment =
+                    await billing.GetPaymentByOrderIdAsync(
+                        order.OrderId, ct);
+
+                if (payment.Status != "DONE" ||
+                    string.IsNullOrWhiteSpace(
+                        payment.PaymentKey) ||
+                    payment.OrderId != order.OrderId ||
+                    payment.TotalAmount != order.Amount ||
+                    payment.ApprovedAt is null)
+                {
+                    continue;
+                }
+
+                var granted = await fulfillment
+                    .ActivateInitialSubscriptionAsync(
+                        order.UserId, payment, ct);
+
+                if (granted)
+                {
+                    logger.LogInformation(
+                        "구독 결제 복구 완료: {OrderId}",
+                        order.OrderId);
+                }
+            }
+            catch (OperationCanceledException)
+                when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(
+                    "구독 결제 복구 실패: {OrderId}, {ErrorType}",
+                    order.OrderId,
+                    ex.GetType().Name);
+            }
+        }
+    }
+}

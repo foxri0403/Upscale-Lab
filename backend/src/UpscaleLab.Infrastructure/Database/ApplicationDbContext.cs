@@ -71,6 +71,18 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
+    private static void ConfigureUser(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<User>();
+        entity.ToTable("users");
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.Email).HasMaxLength(320).IsRequired();
+        entity.Property(x => x.Username).HasMaxLength(50).IsRequired();
+        entity.Property(x => x.PasswordHash).HasMaxLength(200).IsRequired();
+        entity.HasIndex(x => x.Email).IsUnique();
+        entity.HasIndex(x => x.Username).IsUnique();
+    }
+
     private static void ConfigureTokens(ModelBuilder modelBuilder)
     {
         var wallet = modelBuilder.Entity<UserTokenWallet>();
@@ -122,8 +134,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         transaction.HasOne(x => x.ProcessingJob)
             .WithMany()
             .HasForeignKey(x => x.ProcessingJobId)
-            .OnDelete(DeleteBehavior.SetNull);
+            .OnDelete(DeleteBehavior.Cascade);
     }
+
 
     private static void ConfigurePayments(ModelBuilder modelBuilder)
     {
@@ -160,6 +173,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.UserId)
             .OnDelete(DeleteBehavior.Restrict);
     }
+
 
     private static void ConfigureSubscriptions(ModelBuilder modelBuilder)
     {
@@ -213,17 +227,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .OnDelete(DeleteBehavior.Cascade);
     }
 
-    private static void ConfigureUser(ModelBuilder modelBuilder)
-    {
-        var entity = modelBuilder.Entity<User>();
-        entity.ToTable("users");
-        entity.HasKey(x => x.Id);
-        entity.Property(x => x.Email).HasMaxLength(320).IsRequired();
-        entity.Property(x => x.Username).HasMaxLength(50).IsRequired();
-        entity.Property(x => x.PasswordHash).HasMaxLength(200).IsRequired();
-        entity.HasIndex(x => x.Email).IsUnique();
-        entity.HasIndex(x => x.Username).IsUnique();
-    }
+
 
     private static void ConfigureDevice(ModelBuilder modelBuilder)
     {
@@ -338,7 +342,6 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         job.Property(x => x.UpscaleFactor).HasDefaultValue(2);
         job.Property(x => x.TargetLongEdge).IsRequired(false);
         job.Property(x => x.ResultObjectKey).HasMaxLength(1024);
-        job.Property(x => x.SubjectMaskObjectKey).HasMaxLength(1024);
         job.HasIndex(x => new { x.ProjectId, x.CreatedAt });
         job.HasIndex(x => x.ProjectId).IsUnique().HasFilter("\"Status\" IN ('Queued', 'Processing')");
         job.HasOne(x => x.Project).WithMany(x => x.ProcessingJobs).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);

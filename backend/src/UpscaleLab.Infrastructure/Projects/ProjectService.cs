@@ -187,11 +187,62 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
         return MapLayer(layer);
     }
 
+    public async Task<IReadOnlyList<LayerResponse>> ReorderLayersAsync(
+        Guid userId, Guid projectId, ReorderProjectLayersRequest request, CancellationToken cancellationToken)
+    {
+        var project = await dbContext.LiveLayerProjects.Include(x => x.Layers)
+            .SingleOrDefaultAsync(x => x.Id == projectId && x.UserId == userId, cancellationToken)
+            ?? throw new NotFoundException("프로젝트를 찾을 수 없습니다.");
+        if (ProjectDraftState.IsDiscarded(project.SavedEditJson))
+            throw new NotFoundException("프로젝트를 찾을 수 없습니다.");
+        if (await dbContext.GalleryPosts.AnyAsync(x => x.ProjectId == projectId && x.IsPublic, cancellationToken) ||
+            await dbContext.WallpaperAssets.AnyAsync(x => x.SourceProjectId == projectId && x.IsPublic && !x.IsArchived, cancellationToken))
+            throw new ConflictException("공유를 끈 뒤 레이어 순서를 편집해 주세요.");
+        if (await dbContext.ProcessingJobs.AnyAsync(x => x.ProjectId == projectId &&
+                (x.Status == UpscaleLab.Domain.Enums.ProcessingJobStatus.Queued ||
+                 x.Status == UpscaleLab.Domain.Enums.ProcessingJobStatus.Processing), cancellationToken))
+            throw new ConflictException("이미지 처리가 끝난 다음 레이어 순서를 변경해 주세요.");
+
+        var requested = request.LayerIds;
+        var layers = project.Layers.ToList();
+        if (requested is null || requested.Count != layers.Count || layers.Count is < 2 or > 64 ||
+            requested.Distinct().Count() != layers.Count ||
+            !requested.ToHashSet().SetEquals(layers.Select(x => x.Id)))
+            throw new ValidationException("모든 레이어를 빠짐없이 한 번씩 선택해 주세요.");
+
+        var backgrounds = layers.Where(x => x.LayerType == UpscaleLab.Domain.Enums.LayerType.Background).ToArray();
+        if (backgrounds.Length > 0 && (backgrounds.Length != 1 || requested[0] != backgrounds[0].Id))
+            throw new ValidationException("배경 레이어는 항상 가장 아래에 배치해 주세요.");
+
+        var byId = layers.ToDictionary(x => x.Id);
+        if (requested.Select((id, order) => byId[id].LayerOrder == order).All(x => x))
+            return requested.Select(id => MapLayer(byId[id])).ToList();
+
+        // PostgreSQL has a unique (ProjectId, LayerOrder) index. Direct swaps violate it.
+        // First move each order into a temporary negative namespace, then assign 0..N-1.
+        // Both saves run inside one transaction: failures cannot leave partial ordering.
+        var transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+        try
+        {
+            for (var i = 0; i < requested.Count; i++) byId[requested[i]].LayerOrder = -(i + 1);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            for (var i = 0; i < requested.Count; i++) byId[requested[i]].LayerOrder = i;
+            await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
+        }
+        return requested.Select(id => MapLayer(byId[id])).ToList();
+    }
+
     public async Task DeleteAsync(Guid userId, Guid projectId, CancellationToken cancellationToken)
     {
         var project = await FindOwnedAsync(userId, projectId, true, cancellationToken);
         var objectKeys = project.Layers.Select(x => x.ObjectKey)
-            .Concat(project.ProcessingJobs.Where(x => x.SubjectMaskObjectKey != null).Select(x => x.SubjectMaskObjectKey!))
             .Concat(project.ProcessingJobs.Where(x => x.ResultObjectKey != null).Select(x => x.ResultObjectKey!))
             .Concat(project.OriginalImage.OptimizedImages.Select(x => x.ObjectKey))
             .Append(project.OriginalImage.OriginalObjectKey)
@@ -293,7 +344,19 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
         layer.MovementX,
         layer.MovementY,
         layer.CreatedAt,
-        layer.UpdatedAt);
+        layer.UpdatedAt,
+        GetAutomaticLayerOrder(layer));
+
+    // Generated layer object keys are stored as layers/000_<guid>.png. The image key
+    // does not change when the user's visible stack order changes, so it retains the
+    // original AI ordering without adding a schema migration.
+    private static int GetAutomaticLayerOrder(ImageLayer layer)
+    {
+        var name = Path.GetFileName(layer.ObjectKey) ?? string.Empty;
+        return name.Length >= 5 && name[3] == '_' &&
+            int.TryParse(name.AsSpan(0, 3), out var order) && order is >= 0 and < 64
+            ? order : layer.LayerOrder;
+    }
 
     private static string SanitizeFileName(string fileName)
     {

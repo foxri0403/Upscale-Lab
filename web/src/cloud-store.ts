@@ -1,7 +1,6 @@
 import {
   request,
   post,
-  requestBlob,
   type Project,
   type Asset,
   type Manifest,
@@ -11,7 +10,6 @@ import {
   type ApiLayer,
   type SavedEdit,
 } from "./api";
-import { subjectPreview } from "./subject-preview";
 import {
   defaultEdit,
   read,
@@ -25,13 +23,6 @@ import {
   type GalleryPost,
 } from "./explore-feed";
 import { unspecifiedTag } from "./image-tags";
-
-export async function previewSubject(picture: Picture, signal: AbortSignal, changed: (job: Job) => void) {
-  const image = picture.exportSources?.image ? await requestBlob(picture.exportSources.image, signal)
-    : await (await fetch(picture.src, { signal })).blob();
-  signal.throwIfAborted();
-  return subjectPreview({ json: request, blob: requestBlob, remove: path => request(path, { method: "DELETE" }) }, image, signal, changed);
-}
 import { isImageShared, projectSharing } from "./image-sharing";
 import { mapDeviceLibrary } from "./device-state";
 import { galleryImages } from "./gallery-library";
@@ -50,10 +41,10 @@ export function projectPicture(p: Project): Picture {
     projectId: p.id,
     isDraft: p.isDraft ?? false,
     detailsUntil: p.layers !== undefined ? Date.now() + 5 * 60000 : undefined,
-    edit: p.edit ? { strength: p.edit.strength, motionDefaultsVersion: p.edit.motionDefaultsVersion, filter: p.edit.filter, crop: p.edit.crop,
+    edit: p.edit ? { strength: p.edit.strength, filter: p.edit.filter, crop: p.edit.crop,
       cropRegion: p.edit.cropRegion || undefined,
       scale: result ? 1 : p.edit.scale, foreground: p.edit.foreground, liveEnabled: p.edit.liveEnabled,
-      mouseEnabled: p.edit.mouseEnabled ?? false, gyroEnabled: p.edit.gyroEnabled ?? false } : undefined,
+      mouseEnabled: p.edit.mouseEnabled ?? false, gyroEnabled: p.edit.gyroEnabled ?? false, rig: p.edit.rig } : undefined,
     savedAt: p.edit?.savedAt,
     name: p.title,
     src: result?.imageUrl || p.originalImageUrl,
@@ -71,7 +62,7 @@ export function projectPicture(p: Project): Picture {
     },
     created: p.createdAt,
     background,
-    subjectLayerId: p.layers?.find(layer => layer.layerType !== "Background")?.id,
+    layers: p.layers?.slice().sort((a, b) => a.layerOrder - b.layerOrder),
     foregrounds: p.layers
       ?.filter((l) => l.layerType !== "Background")
       .sort((a, b) => a.layerOrder - b.layerOrder)
@@ -87,10 +78,10 @@ export async function assetPicture(a: Asset, fresh = false): Promise<Picture> {
       ...cached.picture,
       sourceProjectId: a.sourceProjectId ?? undefined,
       name: a.title,
-      edit: a.edit ? { strength: a.edit.strength, motionDefaultsVersion: a.edit.motionDefaultsVersion, filter: a.edit.filter, crop: a.edit.crop,
+      edit: a.edit ? { strength: a.edit.strength, filter: a.edit.filter, crop: a.edit.crop,
         cropRegion: a.edit.cropRegion || undefined,
         scale: a.edit.scale, foreground: a.edit.foreground, liveEnabled: a.edit.liveEnabled,
-        mouseEnabled: a.edit.mouseEnabled ?? false, gyroEnabled: a.edit.gyroEnabled ?? false } : undefined,
+        mouseEnabled: a.edit.mouseEnabled ?? false, gyroEnabled: a.edit.gyroEnabled ?? false, rig: a.edit.rig } : undefined,
       tags: a.edit?.tags || [], features: a.features,
       savedAt: a.edit?.savedAt,
       creator: a.username, creatorAvatar: a.profileImageUrl || undefined, ownerId: a.userId,
@@ -101,10 +92,10 @@ export async function assetPicture(a: Asset, fresh = false): Promise<Picture> {
   const picture: Picture = {
     id: `asset:${a.id}`,
     assetId: a.id,
-    edit: a.edit ? { strength: a.edit.strength, motionDefaultsVersion: a.edit.motionDefaultsVersion, filter: a.edit.filter, crop: a.edit.crop,
+    edit: a.edit ? { strength: a.edit.strength, filter: a.edit.filter, crop: a.edit.crop,
       cropRegion: a.edit.cropRegion || undefined,
       scale: a.edit.scale, foreground: a.edit.foreground, liveEnabled: a.edit.liveEnabled,
-      mouseEnabled: a.edit.mouseEnabled ?? false, gyroEnabled: a.edit.gyroEnabled ?? false } : undefined,
+      mouseEnabled: a.edit.mouseEnabled ?? false, gyroEnabled: a.edit.gyroEnabled ?? false, rig: a.edit.rig } : undefined,
     savedAt: a.edit?.savedAt,
     creator: a.username, creatorAvatar: a.profileImageUrl || undefined, ownerId: a.userId,
     sourceProjectId: a.sourceProjectId ?? undefined,
@@ -213,10 +204,33 @@ export async function fetchLibrary(
 }
 export async function importGalleryPicture(picture: Picture): Promise<Picture> {
   if (!picture.galleryPostId) throw new Error("공유 게시물을 확인해 주세요.");
-  return projectPicture(await request<Project>(
-    `/api/gallery/${encodeURIComponent(picture.galleryPostId)}/import`,
-    { method: "POST", body: "{}", signal: AbortSignal.timeout(180000) },
-  ));
+  // Get a fresh read-only preview URL. Importing is not a completed file download
+  // and must not increment the mobile gallery's download counter.
+  const { url } = await request<{ url: string }>(
+    `/api/gallery/${picture.galleryPostId}/preview-url`,
+  );
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(30000) });
+  } catch {
+    throw new Error(
+      "공유 원본 이미지를 가져올 수 없습니다. 잠시 후 다시 시도해 주세요.",
+    );
+  }
+  if (!response.ok) throw new Error("공유 원본 이미지에 접근할 수 없습니다.");
+  const blob = await response.blob();
+  const extension = (
+    { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" } as Record<
+      string,
+      string
+    >
+  )[blob.type];
+  if (!extension)
+    throw new Error("이 공유 이미지 형식은 웹 가져오기를 지원하지 않습니다.");
+  return uploadProject(
+    new File([blob], `${picture.name}.${extension}`, { type: blob.type }),
+    false,
+  );
 }
 export async function uploadProject(file: File, isDraft = true): Promise<Picture> {
   const contentType = validateImageUpload(file);
@@ -272,11 +286,16 @@ export async function createAsset(picture: Picture): Promise<Asset> {
   const edit = picture.edit || defaultEdit;
   let projectId = picture.projectId;
   const layered = !!picture.background && !!picture.foregrounds?.length && edit.foreground;
+  // Character-only layers do not have a Background role. Until the Android Live2D
+  // pipeline supports those manifests, publish their current ordered composite as
+  // a static PNG instead of silently publishing the original uploaded photo.
+  const characterParts = !picture.background && (picture.layers?.length || 0) >= 2;
   // Bake actual crop/filter settings into a new source before freezing a static version.
   const rendered =
     edit.filter !== "original" ||
     edit.crop !== "original" ||
     edit.scale !== 1 ||
+    characterParts ||
     (!!picture.background && !edit.foreground);
   if (picture.assetId && layered && !picture.projectId)
     return post<Asset>(`/api/wallpapers/${picture.assetId}/snapshot`, {
@@ -316,12 +335,12 @@ export async function createAsset(picture: Picture): Promise<Asset> {
       await request(`/api/projects/${temporaryProjectId}`, { method: "DELETE" }).catch(() => {});
   }
 }
-export async function saveImageEdit(picture: Picture, keepalive = false): Promise<SavedEdit> {
+export async function saveImageEdit(picture: Picture): Promise<SavedEdit> {
   const path = picture.assetId ? `/api/wallpapers/${picture.assetId}`
     : picture.projectId ? `/api/projects/${picture.projectId}` : null;
   if (!path) throw new Error("저장할 이미지를 확인해 주세요.");
   return request<SavedEdit>(`${path}/edit`, {
-    method: "PUT", keepalive, body: JSON.stringify({ ...(picture.edit || defaultEdit), title: picture.name, tags: picture.tags || [] }),
+    method: "PUT", body: JSON.stringify({ ...(picture.edit || defaultEdit), title: picture.name, tags: picture.tags || [] }),
   });
 }
 export async function processProject(
@@ -337,12 +356,4 @@ export async function processProject(
     operation,
     ...(operation === "Upscale" ? { targetLongEdge } : {}),
   });
-}
-
-export async function refineSubject(picture: Picture, mask: Blob) {
-  if (!picture.projectId) throw new Error("원본 프로젝트를 불러온 뒤 분리해 주세요.");
-  const body = new FormData();
-  body.append("baseLayerId", picture.subjectLayerId || "00000000-0000-0000-0000-000000000000");
-  body.append("mask", mask, "subject-mask.png");
-  return request<Job>(`/api/projects/${picture.projectId}/subject-selection`, { method: "POST", body });
 }

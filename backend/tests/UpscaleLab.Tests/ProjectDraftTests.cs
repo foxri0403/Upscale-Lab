@@ -66,7 +66,7 @@ public sealed class ProjectDraftTests
         db.Add(job); await db.SaveChangesAsync();
         await new ProjectService(db, store).DiscardDraftAsync(project.UserId, project.Id, Ct);
         var processor = new Processor(() => throw new Exception("Discarded job must not run"));
-        await new ProjectProcessingService(db, WorkflowData.Factory, store, processor, new Queue(), new FakeTokenService(), NullLogger<ProjectProcessingService>.Instance).ExecuteAsync(job.Id, Ct);
+        await new ProjectProcessingService(db, store, processor, new Queue(), NullLogger<ProjectProcessingService>.Instance).ExecuteAsync(job.Id, Ct);
         Assert.Equal(0, processor.Calls); Assert.Empty(await db.LiveLayerProjects.ToListAsync()); Assert.Empty(store.Files);
     }
 
@@ -83,7 +83,7 @@ public sealed class ProjectDraftTests
             Assert.Empty(await service.GetAllAsync(project.UserId, Ct));
             await Assert.ThrowsAsync<NotFoundException>(() => service.SaveEditAsync(project.UserId, project.Id, Edit, Ct));
         });
-        await new ProjectProcessingService(db, WorkflowData.Factory, store, processor, new Queue(), new FakeTokenService(), NullLogger<ProjectProcessingService>.Instance).ExecuteAsync(job.Id, Ct);
+        await new ProjectProcessingService(db, store, processor, new Queue(), NullLogger<ProjectProcessingService>.Instance).ExecuteAsync(job.Id, Ct);
         Assert.Equal(1, processor.Calls); Assert.Empty(await db.LiveLayerProjects.ToListAsync());
         Assert.Empty(await db.Images.ToListAsync()); Assert.Empty(store.Files);
     }

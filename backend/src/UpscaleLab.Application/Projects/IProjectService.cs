@@ -13,6 +13,7 @@ public interface IProjectService
     Task<ProjectDetailResponse> GetAsync(Guid userId, Guid projectId, CancellationToken cancellationToken);
     Task<IReadOnlyList<LayerResponse>> GetLayersAsync(Guid userId, Guid projectId, CancellationToken cancellationToken);
     Task<LayerResponse> UpdateLayerAsync(Guid userId, Guid projectId, Guid layerId, UpdateLayerRequest request, CancellationToken cancellationToken);
+    Task<IReadOnlyList<LayerResponse>> ReorderLayersAsync(Guid userId, Guid projectId, ReorderProjectLayersRequest request, CancellationToken cancellationToken);
     Task DeleteAsync(Guid userId, Guid projectId, CancellationToken cancellationToken);
     Task DiscardDraftAsync(Guid userId, Guid projectId, CancellationToken cancellationToken);
     Task<ProjectDetailResponse> ResetEffectsAsync(Guid userId, Guid projectId, ResetProjectEffectsRequest request, CancellationToken ct);

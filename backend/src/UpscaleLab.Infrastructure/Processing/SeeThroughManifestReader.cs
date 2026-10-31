@@ -46,7 +46,12 @@ public static class SeeThroughManifestReader
                 !double.IsFinite(item.MovementY))
                 throw new InvalidDataException("See-through 레이어 좌표에 잘못된 숫자가 있습니다.");
 
-            var layerType = Enum.TryParse<LayerType>(item.LayerType, ignoreCase: true, out var parsed) &&
+            // Prefer existing fine-grained domain types for the manual layer editor.
+            var label = !string.IsNullOrWhiteSpace(item.SemanticLayerType) &&
+                        Enum.TryParse<LayerType>(item.SemanticLayerType, ignoreCase: true, out var semantic) &&
+                        Enum.IsDefined(semantic)
+                ? item.SemanticLayerType : item.LayerType;
+            var layerType = Enum.TryParse<LayerType>(label, ignoreCase: true, out var parsed) &&
                             Enum.IsDefined(parsed) ? parsed : LayerType.Other;
             layers.Add(new ProcessedLayer(
                 path, layerType, item.LayerOrder, item.Depth, item.PositionX, item.PositionY,
@@ -60,5 +65,6 @@ public static class SeeThroughManifestReader
     private sealed record AdapterManifest(IReadOnlyList<AdapterLayer> Layers);
     private sealed record AdapterLayer(
         string File, string LayerType, int LayerOrder, double Depth, double PositionX,
-        double PositionY, double Rotation, double Scale, double MovementX, double MovementY);
+        double PositionY, double Rotation, double Scale, double MovementX, double MovementY,
+        string? SemanticLayerType = null);
 }

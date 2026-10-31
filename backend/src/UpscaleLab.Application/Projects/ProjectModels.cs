@@ -63,7 +63,11 @@ public sealed record LayerResponse(
     double MovementX,
     double MovementY,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    int? AutomaticOrder = null);
+
+// Bottom-to-top layer IDs. Every current layer must occur exactly once.
+public sealed record ReorderProjectLayersRequest([param: Required] IReadOnlyList<Guid> LayerIds);
 
 public sealed record UpdateLayerRequest(
     [param: Range(-100, 100)] double? Depth,

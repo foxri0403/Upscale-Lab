@@ -16,18 +16,43 @@ namespace UpscaleLab.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/tokens")]
-public sealed class TokensController(TokenService tokenService) : ControllerBase
+public sealed class TokensController(ApplicationDbContext db) : ControllerBase
 {
     [HttpGet("me")]
     public async Task<IActionResult> GetMine(CancellationToken ct)
     {
         var userId = User.GetRequiredUserId();
 
-        var wallet = await tokenService.GetOrRefreshWalletAsync(
-            userId, ct);
+        var wallet = await db.UserTokenWallets
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.UserId == userId, ct);
 
-        var monthlyBalance = wallet.Balance;
-        var effectivePeriod = wallet.PeriodStartUtc;
+        if (wallet == null)
+        {
+            return Ok(new
+            {
+                plan = "Free",
+                monthlyBalance = 10,
+                purchasedBalance = 0,
+                totalBalance = 10,
+                monthlyAllowance = 10,
+                periodStartUtc = TokenService.CurrentPeriodUtc()
+            });
+        }
+
+        var currentPeriod = TokenService.CurrentPeriodUtc();
+
+        var freeRenewal =
+            wallet.Plan == SubscriptionPlan.Free &&
+            wallet.PeriodStartUtc < currentPeriod;
+
+        var monthlyBalance = freeRenewal
+            ? TokenPolicy.MonthlyAllowance(SubscriptionPlan.Free)
+            : wallet.Balance;
+
+        var effectivePeriod = freeRenewal
+            ? currentPeriod
+            : wallet.PeriodStartUtc;
 
         return Ok(new
         {

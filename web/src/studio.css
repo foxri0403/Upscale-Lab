@@ -94,7 +94,7 @@
 .studio-editor .subject-layer { transition: none; transform: translate3d(var(--motion-x, 0px), var(--motion-y, 0px), 0); }
 .studio-editor .motion-active .subject-layer { will-change: transform; }
 .studio-canvas-viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #f2f4f9; border-radius: 8px; }
-.studio-canvas-center { position: absolute; inset: 26px 0 0 26px; display: block; overflow: auto; touch-action: none; }
+.studio-canvas-center { position: absolute; inset: 26px 0 0 26px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .studio-editor .canvas-stage {
   flex: none;
   min-height: 0;
@@ -163,10 +163,8 @@
 .studio-layer-selection [role="group"] { display: grid; gap: 8px; }
 .studio-editor .layer-choice { display: flex; align-items: center; width: 100%; text-align: left; border: 1px solid var(--line); background: white; }
 .studio-editor .layer-choice.active { border-color: var(--primary); background: var(--tint); color: var(--primary); }
-.studio-editor .layer-choice .layer-thumb { position: relative; display: block; overflow: hidden; flex-shrink: 0; container-type: size; }
-.layer-thumb-window { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); overflow: hidden; }
-.layer-thumb-plane { position: absolute; }
-.studio-editor .layer-choice .layer-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.studio-editor .layer-choice .layer-thumb { position: relative; display: block; overflow: hidden; flex-shrink: 0; }
+.studio-editor .layer-choice .layer-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .studio-editor .layer-choice > svg { margin-left: auto; }
 .layer-preview-hint { font-size: 12px; color: var(--muted); line-height: 1.6; }
 .studio-editor .canvas-stage.subject-only { background-color: #fff; background-image: conic-gradient(#e4e7ef 25%, transparent 0 50%, #e4e7ef 0 75%, transparent 0); background-size: 20px 20px; }
@@ -247,3 +245,48 @@
   .resolution-choices span { font-size: 0.5rem; }
   .resolution-choices span, .resolution-summary { font-size: 0.5714286rem; }
 }
+
+/* Character separation mode: mirrors the existing Studio inspector styling. */
+.studio-separation-mode { margin: 0 0 16px; padding: 0 0 15px; border-bottom: 1px solid var(--line); }
+.studio-separation-mode h3 { margin: 0 0 10px; font-size: .7857143rem; }
+.studio-separation-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.studio-separation-choices button { display: flex; min-width: 0; align-items: center; flex-direction: column; gap: 7px; padding: 12px 5px; border: 1px solid var(--line); border-radius: 7px; background: white; color: #65748e; font-size: .72rem; text-align: center; }
+.studio-separation-choices button svg { color: inherit; flex: none; }
+.studio-separation-choices button strong { color: var(--ink); font-size: .7857143rem; font-weight: 600; }
+.studio-separation-choices button span { color: #7b88a0; font-size: .6428571rem; }
+.studio-separation-choices button.active { border-color: #bfcaff; background: var(--tint); color: var(--primary); }
+.studio-separation-choices button.active strong { color: var(--primary); }
+.studio-separation-choices button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.studio-separation-choices button:disabled { cursor: not-allowed; opacity: .55; }
+.studio-separation-help, .studio-separation-hint { color: #687793; font-size: .7142857rem; line-height: 1.6; margin: 10px 0 0; }
+.studio-separation-hint { margin-top: 5px; }
+
+/* Character part processing and preview controls live in the existing Live 2D inspector. */
+.studio-live-controls { margin-top: 18px; }
+.studio-live-intro { padding: 0 0 14px; border-bottom: 1px solid var(--line); }
+.studio-live-intro h3 { margin: 0 0 9px; }
+.studio-live-intro p, .studio-live-limitation, .studio-rig-helper { color: var(--muted); font-size: .7142857rem; line-height: 1.6; margin: 7px 0; }
+.studio-rig-controls { margin-top: 16px; padding-top: 3px; border-top: 1px solid var(--line); }
+.studio-rig-controls fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.studio-rig-controls fieldset:disabled { opacity: .5; }
+.studio-rig-toggle { display: flex; align-items: center; gap: 9px; padding: 10px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: .75rem; }
+.studio-rig-toggle input { accent-color: var(--primary); width: 16px; height: 16px; flex: none; }
+.studio-rig-idle { margin-top: 10px; }
+.studio-rig-slider { display: block; margin: 12px 0; }
+.studio-rig-slider > span { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: .75rem; color: var(--ink); }
+.studio-rig-slider output { color: var(--primary); font-variant-numeric: tabular-nums; }
+.studio-rig-slider > input { display: block; width: 100%; margin: 9px 0 3px; accent-color: var(--primary); }
+.studio-rig-slider small { display: block; color: var(--muted); font-size: .6428571rem; }
+.studio-rig-mouse[aria-pressed="true"] { background: var(--tint); color: var(--primary); border-color: var(--primary); }
+.studio-rig-reset { margin-top: 8px; }
+.studio-live-limitation { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 17px; }
+
+.studio-live-layer-list { margin-bottom: 14px; }
+.studio-live-layer-list h3 { display: flex; justify-content: space-between; align-items: center; }
+.studio-live-layer-list h3 span { color: var(--muted); font-weight: 400; font-size: .7142857rem; }
+.studio-live-layer-list > p { margin: 0 0 9px; font-size: .7142857rem; color: var(--muted); }
+.studio-live-layer-items { max-height: 230px; overflow-y: auto; display: grid; gap: 6px; }
+.studio-live-layer-item { background: white; border: 1px solid var(--line); border-radius: 7px; display: flex; gap: 10px; align-items: center; padding: 5px 8px; font-size: .7142857rem; }
+.studio-live-layer-item > img { width: 45px; height: 37px; object-fit: contain; background: var(--tint); border-radius: 5px; flex: none; }
+.studio-live-layer-item > span { flex: 1; min-width: 0; }
+.studio-live-layer-item > small { color: var(--muted); font-variant-numeric: tabular-nums; }

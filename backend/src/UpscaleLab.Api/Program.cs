@@ -90,14 +90,13 @@ builder.Services.AddHttpClient<RunPodUpscaleService>(client =>
     client.Timeout = Timeout.InfiniteTimeSpan;
 });
 builder.Services.AddHttpClient<RunPodImageLayerProcessor>(client => client.Timeout = Timeout.InfiniteTimeSpan);
+builder.Services.AddHttpClient<RunPodPretrainedSeeThroughProcessor>(client => client.Timeout = Timeout.InfiniteTimeSpan);
 builder.Services.AddSingleton(seeThroughOptions);
 builder.Services.AddSingleton(cognitoOptions);
 builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure(3)));
-builder.Services.AddDbContextFactory<ApplicationDbContext>(options =>
-    options.UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure(3)), ServiceLifetime.Scoped);
 
 builder.Services.AddSingleton<IAmazonS3>(_ =>
     new AmazonS3Client(RegionEndpoint.GetBySystemName(s3Options.Region)));
@@ -141,7 +140,6 @@ builder.Services.AddScoped<IWallpaperService, WallpaperService>();
 builder.Services.AddScoped<IUserSettingService, UserSettingService>();
 builder.Services.AddScoped<IImageService, ImageService>();
 builder.Services.AddScoped<IGalleryService, GalleryService>();
-builder.Services.AddScoped<IGalleryImportService, GalleryImportService>();
 builder.Services.AddScoped<IGalleryThumbnailService, GalleryThumbnailService>();
 builder.Services.AddSingleton<GalleryThumbnailCache>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
@@ -159,9 +157,7 @@ builder.Services.AddHostedService<UpscaleLab.Api.BackgroundServices.Subscription
 builder.Services.AddHostedService<UpscaleLab.Api.BackgroundServices.SubscriptionExpirationWorker>();
 builder.Services.AddHttpClient<UpscaleLab.Infrastructure.Payments.TossBillingClient>(client => client.Timeout = TimeSpan.FromSeconds(90));
 builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.BillingKeyProtector>();
-builder.Services.AddScoped<UpscaleLab.Infrastructure.Tokens.TokenService>();
-builder.Services.AddScoped<UpscaleLab.Infrastructure.Tokens.ITokenService>(services =>
-    services.GetRequiredService<UpscaleLab.Infrastructure.Tokens.TokenService>());
+builder.Services.AddScoped<UpscaleLab.Infrastructure.Tokens.ITokenService, UpscaleLab.Infrastructure.Tokens.TokenService>();
 builder.Services.AddScoped<IProjectProcessingService, ProjectProcessingService>();
 builder.Services.AddSingleton<IProcessingJobQueue, ProcessingJobQueue>();
 builder.Services.AddSingleton<IImageLayerProcessor>(services => services.GetRequiredService<RunPodImageLayerProcessor>());

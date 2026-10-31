@@ -9,9 +9,9 @@ namespace UpscaleLab.Api.Authentication;
 
 public static class ClientAuthentication
 {
-    public static IServiceCollection AddClientAuthentication(this IServiceCollection services, JwtOptions jwt, bool includeDeviceAgents = true)
+    public static IServiceCollection AddClientAuthentication(this IServiceCollection services, JwtOptions jwt)
     {
-        var authentication = services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
             {
                 options.MapInboundClaims = false;
@@ -43,9 +43,8 @@ public static class ClientAuthentication
                             context.Fail("로그인 세션이 만료되거나 해제되었습니다.");
                     }
                 };
-            });
-        if (includeDeviceAgents)
-            authentication.AddScheme<AuthenticationSchemeOptions, DeviceAgentHandler>(DeviceAgentHandler.SchemeName, _ => { });
+            })
+            .AddScheme<AuthenticationSchemeOptions, DeviceAgentHandler>(DeviceAgentHandler.SchemeName, _ => { });
         services.AddAuthorization(options => options.AddPolicy("AccountSession", policy =>
             policy.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme).RequireAuthenticatedUser().RequireClaim("sid")));
         return services;

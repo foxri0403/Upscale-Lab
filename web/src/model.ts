@@ -2,22 +2,36 @@ import { selectableTags, unspecifiedTag } from "./image-tags";
 import { validateImageUpload } from "./image-upload";
 import { requestBlob } from "./api";
 import { pixelCrop, type CropRegion } from "./crop-geometry";
-import { defaultMotionStrength } from "./editor-defaults";
 export type Genre = (typeof selectableTags)[number] | typeof unspecifiedTag;
 export type Tool = "upscale" | "layers" | "live" | "crop" | "filter" | "tags";
+export type HeadRig = {
+  enabled: boolean;
+  headTilt: number;
+  eyeMove: number;
+  hairSway: number;
+  pivotX: number;
+  pivotY: number;
+  idle: boolean;
+};
+export const defaultHeadRig: HeadRig = {
+  enabled: false, headTilt: 60, eyeMove: 35, hairSway: 55,
+  pivotX: 50, pivotY: 16, idle: true,
+};
 export type Edit = {
   strength: number;
-  motionDefaultsVersion?: number;
   filter: string;
   crop: string;
   cropRegion?: CropRegion;
   scale: number;
   foreground: boolean;
   liveEnabled?: boolean;
+  rig?: HeadRig;
   mouseEnabled?: boolean;
   gyroEnabled?: boolean;
 };
 export type Picture = {
+  /** 원본 배경 분리 결과의 주요 피사체 레이어 ID */
+  subjectLayerId?: string;
   separationDisabled?: boolean;
   isDraft?: boolean;
   id: string;
@@ -44,7 +58,7 @@ export type Picture = {
   sourceProjectId?: string;
   background?: string;
   foregrounds?: string[];
-  subjectLayerId?: string;
+  layers?: import("./api").ApiLayer[];
   jobId?: string;
   detailsUntil?: number;
   width?: number;
@@ -85,10 +99,10 @@ export type Library = {
 };
 export const defaultEdit: Edit = {
   liveEnabled: false,
+  rig: { ...defaultHeadRig },
   mouseEnabled: false,
   gyroEnabled: false,
-  strength: defaultMotionStrength,
-  motionDefaultsVersion: 1,
+  strength: 70,
   filter: "original",
   crop: "original",
   scale: 1,
@@ -263,8 +277,23 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
     return loadImage(url);
   };
   try {
+  const characterLayers = !picture.background && (picture.layers?.length || 0) >= 2
+    ? picture.layers!.slice().sort((a, b) => a.layerOrder - b.layerOrder) : null;
   const img = await load(picture.background || picture.src, picture.background ? picture.exportSources?.background : picture.exportSources?.image);
   let source: CanvasImageSource = img;
+  if (characterLayers && edit.foreground) {
+    const composite = document.createElement("canvas");
+    const first = await load(characterLayers[0].imageUrl,
+      picture.projectId ? `/api/projects/${picture.projectId}/content?layerId=${characterLayers[0].id}` : undefined);
+    composite.width = first.width;
+    composite.height = first.height;
+    const context = composite.getContext("2d")!;
+    context.drawImage(first, 0, 0);
+    for (const layer of characterLayers.slice(1))
+      context.drawImage(await load(layer.imageUrl,
+        picture.projectId ? `/api/projects/${picture.projectId}/content?layerId=${layer.id}` : undefined), 0, 0, composite.width, composite.height);
+    source = composite;
+  }
   if (picture.background && picture.foregrounds?.length) {
     const composite = document.createElement("canvas");
     composite.width = img.width;
@@ -276,7 +305,8 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
         context.drawImage(await load(src, picture.exportSources?.foregrounds?.[index]), 0, 0, img.width, img.height);
     source = composite;
   }
-  const selected = pixelCrop(img.width, img.height, edit);
+  const selected = pixelCrop(characterLayers && edit.foreground ? (source as HTMLCanvasElement).width : img.width,
+    characterLayers && edit.foreground ? (source as HTMLCanvasElement).height : img.height, edit);
   const sw = selected.width, sh = selected.height;
   const scale = Math.min(edit.scale, 4096 / Math.max(sw, sh));
   const canvas = document.createElement("canvas");

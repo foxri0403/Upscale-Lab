@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 import requests
 import runpod
-from pipeline import LayerPipeline, MAX_BYTES, png_bytes, read_image, read_subject_mask, read_subject_selection
+from pipeline import LayerPipeline, MAX_BYTES, png_bytes, read_image
 
 pipeline = None
 gpu_lock = threading.Lock()
@@ -31,18 +31,6 @@ def upload(url, content, content_type):
             raise RuntimeError("S3 result upload failed.")
 
 
-def download(url):
-    with requests.get(url, timeout=(15, 120), stream=True, allow_redirects=False) as response:
-        if response.status_code != 200:
-            raise RuntimeError("S3 input download failed.")
-        content = bytearray()
-        for chunk in response.iter_content(65536):
-            content.extend(chunk)
-            if len(content) > MAX_BYTES:
-                raise ValueError("Input file exceeds the file limit.")
-        return content
-
-
 def handler(event):
     global pipeline
     stage = "validate"
@@ -59,42 +47,29 @@ def handler(event):
         width, height = data["width"], data["height"]
         if type(width) is not int or type(height) is not int or min(width, height) < 1 or width * height > 64_000_000:
             raise ValueError("Invalid canvas.")
-        content = download(urls["image_url"])
+        with requests.get(urls["image_url"], timeout=(15, 120), stream=True, allow_redirects=False) as response:
+            if response.status_code != 200:
+                raise RuntimeError("S3 input download failed.")
+            content = bytearray()
+            for chunk in response.iter_content(65536):
+                content.extend(chunk)
+                if len(content) > MAX_BYTES:
+                    raise ValueError("Input file exceeds the file limit.")
         import hashlib
         if hashlib.sha256(content).hexdigest().upper() != fingerprint.upper():
             raise ValueError("Input checksum does not match.")
         image = read_image(content, width, height)
-        alpha, selection, mask_hash = None, None, data.get("mask_sha256")
-        mask_mode = data.get("mask_mode")
-        if mask_mode not in (None, "selection"):
-            raise ValueError("Unsupported mask mode.")
-        if data.get("mask_url") is not None:
-            if not isinstance(mask_hash, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", mask_hash):
-                raise ValueError("Invalid mask checksum.")
-            mask_content = download(signed_s3_url(data["mask_url"]))
-            if hashlib.sha256(mask_content).hexdigest().upper() != mask_hash.upper():
-                raise ValueError("Subject mask checksum does not match.")
-            if mask_mode == "selection":
-                selection = read_subject_selection(mask_content, width, height)
-            else:
-                alpha = read_subject_mask(mask_content, width, height)
-        elif mask_hash is not None or mask_mode is not None:
-            raise ValueError("Subject mask URL is missing.")
         with gpu_lock:
             if pipeline is None:
                 stage = "load_models"
                 pipeline = LayerPipeline()
             stage = "split"
-            background, foreground = pipeline.split(image, selection=selection) if selection is not None else pipeline.split(image, alpha)
+            background, foreground = pipeline.split(image)
         stage = "upload_results"
         upload(urls["background_url"], png_bytes(background), "image/png")
         upload(urls["foreground_url"], png_bytes(foreground), "image/png")
         result = {"status": "completed", "jobId": job, "inputSha256": fingerprint,
                   "width": width, "height": height, "model": "BiRefNet_HR-matting", "inpainting": "big-lama"}
-        if mask_hash is not None:
-            result["maskSha256"] = mask_hash
-        if mask_mode is not None:
-            result["maskMode"] = mask_mode
         # Publish completion only after both PNGs are durable.
         upload(urls["completion_url"], json.dumps(result).encode(), "application/json")
         print(json.dumps({"event": "layers_completed", "seconds": round(time.monotonic() - started, 2)}), flush=True)

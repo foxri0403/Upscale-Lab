@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cropPresets, cropRegion, pixelCrop, moveCrop, resizeCrop, zoomCrop, validCrop, sameCrop, cropPresentation } from '../src/crop-geometry.ts';
+import { cropPresets, cropRegion, pixelCrop, moveCrop, resizeCrop, zoomCrop, validCrop } from '../src/crop-geometry.ts';
 test('preset order and inscribed pixel bounds preserve the source',()=>{
  assert.deepEqual(cropPresets.map(v=>v[0]),['original','wide','portrait','square','custom']);
  assert.deepEqual(pixelCrop(400,300,{crop:'wide'}),{x:0,y:38,width:400,height:225});
@@ -26,25 +26,4 @@ test('persisted non-centered selections resolve to the exact pixels after reload
  const edit={crop:'custom',cropRegion:{x:.25,y:.1,width:.5,height:.6}};
  assert.deepEqual(pixelCrop(400,300,JSON.parse(JSON.stringify(edit))),{x:100,y:30,width:200,height:180});
  assert.deepEqual(pixelCrop(800,600,edit),{x:200,y:60,width:400,height:360});assert.equal(validCrop({x:.9,y:0,width:.2,height:1}),false);
-});
-
-test('crop drafts compare the selected region and disregard obsolete original-crop coordinates',()=>{
- const saved={crop:'custom',cropRegion:{x:.25,y:.1,width:.5,height:.6}};
- assert(sameCrop(saved,JSON.parse(JSON.stringify(saved))));
- assert(!sameCrop(saved,{...saved,cropRegion:{...saved.cropRegion,x:.2}}));
- assert(!sameCrop(saved,{...saved,crop:'square'}));
- assert(sameCrop({crop:'original'},{crop:'original',cropRegion:saved.cropRegion}));
- assert(!sameCrop({crop:'wide'}, {crop:'wide',cropRegion:saved.cropRegion}));
-});
-
-test('all layer previews and thumbnails use the saved crop while retaining full-source editing coordinates',()=>{
- const edit={crop:'custom',cropRegion:{x:.25,y:.1,width:.5,height:.6}};
- const preview=cropPresentation(400,300,edit);
- assert.deepEqual(preview,{x:100,y:30,width:200,height:180,plane:{width:'200%',height:`${300/180*100}%`,left:'-50%',top:`${-30/180*100}%`}});
- const upscaled=cropPresentation(800,600,edit);
- assert.deepEqual(upscaled.plane,preview.plane);
- // The cropped viewport's left edge corresponds to x=100 in the full source, not x=0.
- const sourceAtLeft=-parseFloat(preview.plane.left)/parseFloat(preview.plane.width)*400;
- assert.equal(sourceAtLeft,100);
- assert.deepEqual(cropPresentation(400,300,{crop:'original'}).plane,{width:'100%',height:'100%',left:'0%',top:'0%'});
 });

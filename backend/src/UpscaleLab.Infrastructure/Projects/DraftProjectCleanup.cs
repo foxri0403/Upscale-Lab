@@ -23,35 +23,7 @@ internal static class DraftProjectCleanup
             if (requested) { project.SavedEditJson = ProjectDraftState.Discarded; await db.SaveChangesAsync(ct); }
             return;
         }
-        // 토큰 예약이 남은 업스케일링 작업은 삭제하지 않는다.
-        // 예약 거래를 보존하고 기존 정산/환불 처리에서 복구할 수 있도록 한다.
-        var jobIds = project.ProcessingJobs
-            .Select(x => x.Id)
-            .ToArray();
-
-        if (jobIds.Length > 0)
-        {
-            var hasReservedTokens = await db.TokenTransactions
-                .AsNoTracking()
-                .AnyAsync(
-                    x => x.ProcessingJobId.HasValue &&
-                         jobIds.Contains(x.ProcessingJobId.Value) &&
-                         x.Status == UpscaleLab.Domain.Entities.TokenTransactionStatus.Reserved,
-                    ct);
-
-            if (hasReservedTokens)
-            {
-                if (requested)
-                {
-                    project.SavedEditJson = ProjectDraftState.Discarded;
-                    await db.SaveChangesAsync(ct);
-                }
-                return;
-            }
-        }
-
         var keys = project.Layers.Select(x => x.ObjectKey)
-            .Concat(project.ProcessingJobs.Where(x => x.SubjectMaskObjectKey != null).Select(x => x.SubjectMaskObjectKey!))
             .Concat(project.ProcessingJobs.Where(x => x.ResultObjectKey != null).Select(x => x.ResultObjectKey!))
             .Concat(project.OriginalImage.OptimizedImages.Select(x => x.ObjectKey))
             .Append(project.OriginalImage.OriginalObjectKey).Append(project.OriginalImage.OriginalObjectKey + ".gallery-480.jpg").Distinct().ToArray();

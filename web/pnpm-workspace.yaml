@@ -2,3 +2,6 @@
 # https://pnpm.io/settings#allowbuilds
 allowBuilds:
   esbuild: true
+  onnxruntime-node: true
+  protobufjs: true
+  sharp: true

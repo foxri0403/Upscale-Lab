@@ -2098,7 +2098,7 @@ small {
   gap: 6px;
   min-width: 0;
 }
-.display-label .primary-display {
+.display-name .primary-display {
   background: #f0f3fa;
   padding: 3px 5px;
   border-radius: 4px;
@@ -3197,11 +3197,6 @@ small {
 .devices-page .mobile-device .display-label { display: flex; justify-content: center; }
 .devices-page .mobile-device .display-name { justify-content: center; width: 100%; }
 .devices-page .mobile-device .display-name h3 { text-align: center; }
-.devices-page .pc-device .display-label { grid-template-columns: minmax(48px, 1fr) minmax(0, 2fr) minmax(48px, 1fr); gap: 4px; }
-.devices-page .pc-device .display-name { grid-column: 2; grid-row: 1; justify-content: center; }
-.devices-page .pc-device .display-name h3 { text-align: center; }
-.devices-page .pc-device .primary-display { grid-column: 1; grid-row: 1; justify-self: start; }
-.devices-page .pc-device .display-label > .device-connection { grid-column: 3; grid-row: 1; }
 .devices-page .mobile-device-connection { position: absolute; top: var(--device-panel-padding); right: var(--device-panel-padding); line-height: 24px; font-size: 0.5714286rem; white-space: nowrap; }
 .devices-page .display-resolution, .devices-page .mobile-device .display-resolution { height: 32px; min-height: 32px; flex: 0 0 32px; line-height: 16px; }
 @media (max-width: 1250px) {

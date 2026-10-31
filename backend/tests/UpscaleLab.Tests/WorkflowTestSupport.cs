@@ -48,16 +48,8 @@ internal sealed class WorkflowClock : TimeProvider
 
 internal static class WorkflowData
 {
-    public static IDbContextFactory<ApplicationDbContext> Factory { get; } = new InMemoryOnlyFactory();
-    private sealed class InMemoryOnlyFactory : IDbContextFactory<ApplicationDbContext>
-    {
-        public ApplicationDbContext CreateDbContext() => throw new InvalidOperationException("InMemory tests must not enter PostgreSQL retry transactions.");
-    }
     public static ApplicationDbContext Db() => new(new DbContextOptionsBuilder<ApplicationDbContext>()
-        .UseInMemoryDatabase(Guid.NewGuid().ToString())
-        .ConfigureWarnings(w => w.Ignore(
-            Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
-        .Options);
+        .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
     public static Device Device(Guid userId) => new() { UserId = userId, Platform = DevicePlatform.Windows,
         DeviceName = "Desktop", ScreenWidth = 1920, ScreenHeight = 1080, AspectRatio = "16:9" };
     public static LiveLayerProject Project(Guid userId) => new() { UserId = userId, Title = "Source",

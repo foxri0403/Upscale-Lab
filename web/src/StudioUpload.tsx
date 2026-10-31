@@ -55,6 +55,7 @@ export function StudioUpload() {
           {busy ? "이미지 추가 중…" : "이미지 파일 선택"}
         </button>
         <small>{imageUploadDescription}</small>
+        <small>업로드 후 작업실의 <strong>배경 분리</strong>에서 캐릭터 파츠 분리도 선택할 수 있어요.</small>
         <small>움직이는 이미지와 여러 페이지 이미지는 첫 프레임으로 편집됩니다.</small>
         <input
           ref={input}

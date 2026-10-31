@@ -108,6 +108,53 @@ public sealed class ProjectServiceTests
             CancellationToken.None));
     }
 
+    [Fact]
+    public async Task ReorderLayers_StoresBottomToTopOrderAndRetainsOriginalAutomaticOrder()
+    {
+        await using var db = CreateDbContext();
+        var owner = Guid.NewGuid();
+        var project = WorkflowData.Project(owner);
+        var back = new ImageLayer { Project = project, ObjectKey = "users/u/projects/p/layers/000_a.png", LayerType = LayerType.Background, LayerOrder = 0 };
+        var front = new ImageLayer { Project = project, ObjectKey = "users/u/projects/p/layers/001_b.png", LayerType = LayerType.Body, LayerOrder = 1 };
+        var eyes = new ImageLayer { Project = project, ObjectKey = "users/u/projects/p/layers/002_c.png", LayerType = LayerType.Face, LayerOrder = 2 };
+        db.Add(project);
+        db.ImageLayers.AddRange(back, front, eyes);
+        await db.SaveChangesAsync();
+        var service = new ProjectService(db, new FakeStorageService());
+
+        var saved = await service.ReorderLayersAsync(owner, project.Id,
+            new ReorderProjectLayersRequest(new[] { eyes.Id, back.Id, front.Id }), CancellationToken.None);
+        Assert.Equal(new[] { eyes.Id, back.Id, front.Id }, saved.Select(x => x.Id));
+        Assert.Equal(new[] { 0, 1, 2 }, saved.Select(x => x.LayerOrder));
+        Assert.Equal(new[] { 2, 0, 1 }, saved.Select(x => x.AutomaticOrder));
+        var read = await service.GetLayersAsync(owner, project.Id, CancellationToken.None);
+        Assert.Equal(new[] { eyes.Id, back.Id, front.Id }, read.Select(x => x.Id));
+    }
+
+    [Fact]
+    public async Task ReorderLayers_RejectsMissingDuplicateAndForeignLayerIds()
+    {
+        await using var db = CreateDbContext();
+        var owner = Guid.NewGuid();
+        var project = WorkflowData.Project(owner);
+        var first = new ImageLayer { Project = project, ObjectKey = "first.png", LayerOrder = 0 };
+        var second = new ImageLayer { Project = project, ObjectKey = "second.png", LayerOrder = 1 };
+        db.Add(project);
+        db.ImageLayers.AddRange(first, second);
+        await db.SaveChangesAsync();
+        var service = new ProjectService(db, new FakeStorageService());
+        await Assert.ThrowsAsync<ValidationException>(() => service.ReorderLayersAsync(owner,
+            project.Id, new ReorderProjectLayersRequest(new[] { first.Id }), CancellationToken.None));
+        await Assert.ThrowsAsync<ValidationException>(() => service.ReorderLayersAsync(owner,
+            project.Id, new ReorderProjectLayersRequest(new[] { first.Id, first.Id }), CancellationToken.None));
+        await Assert.ThrowsAsync<ValidationException>(() => service.ReorderLayersAsync(owner,
+            project.Id, new ReorderProjectLayersRequest(new[] { first.Id, Guid.NewGuid() }), CancellationToken.None));
+        await Assert.ThrowsAsync<NotFoundException>(() => service.ReorderLayersAsync(Guid.NewGuid(),
+            project.Id, new ReorderProjectLayersRequest(new[] { second.Id, first.Id }), CancellationToken.None));
+        Assert.Equal(0, first.LayerOrder);
+        Assert.Equal(1, second.LayerOrder);
+    }
+
     private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

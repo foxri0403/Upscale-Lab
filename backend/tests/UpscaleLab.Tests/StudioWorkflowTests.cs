@@ -73,34 +73,30 @@ public sealed class StudioWorkflowTests
         var project = WorkflowData.Project(Guid.NewGuid()); db.Add(project); await db.SaveChangesAsync();
         using (var image = new MagickImage(MagickColors.Blue, 10, 10)) store.Files["source.png"] = image.ToByteArray(MagickFormat.Png);
         var processor = new PipelineProcessor();
-        var processing = new ProjectProcessingService(db, WorkflowData.Factory, store, processor, new ProcessingJobQueue(), new FakeTokenService(), NullLogger<ProjectProcessingService>.Instance);
+        var processing = new ProjectProcessingService(db, store, processor, new ProcessingJobQueue(), NullLogger<ProjectProcessingService>.Instance);
         foreach (var operation in layersFirst ? new[] { ProcessingOperation.Layers, ProcessingOperation.Upscale } : new[] { ProcessingOperation.Upscale, ProcessingOperation.Layers })
         {
-            var job = await processing.StartAsync(project.UserId, project.Id, new(operation, 2,
-                TargetLongEdge: operation == ProcessingOperation.Upscale ? 1920 : null), Ct);
+            var job = await processing.StartAsync(project.UserId, project.Id, new(operation, 2), Ct);
             await processing.ExecuteAsync(job.JobId, Ct);
-            var currentStatus = await processing.GetStatusAsync(project.UserId, project.Id, Ct);
-            Assert.True(
-                currentStatus.Status == ProcessingJobStatus.Completed,
-                $"작업 {operation} 실패: {currentStatus.ErrorMessage}");
+            Assert.Equal(ProcessingJobStatus.Completed, (await processing.GetStatusAsync(project.UserId, project.Id, Ct)).Status);
         }
         var projects = new ProjectService(db, store);
         await projects.SaveEditAsync(project.UserId, project.Id, new(45, "original", "original", 1, true, LiveEnabled: true), Ct);
         db.ChangeTracker.Clear();
         var detail = await projects.GetAsync(project.UserId, project.Id, Ct);
-        Assert.Equal(1920, detail.ImageResult!.Width);
+        Assert.Equal(20, detail.ImageResult!.Width);
         Assert.Equal(new[] { "업스케일", "배경 분리", "Live 2D" }, detail.Features);
         Assert.Equal(2, detail.Layers.Count);
         foreach (var layer in await db.ImageLayers.AsNoTracking().ToArrayAsync())
         {
-            var info = new MagickImageInfo(store.Files[layer.ObjectKey]); Assert.Equal(1920u, info.Width);
+            var info = new MagickImageInfo(store.Files[layer.ObjectKey]); Assert.Equal(20u, info.Width);
             if (layer.LayerType != LayerType.Background) { using var image = new MagickImage(store.Files[layer.ObjectKey]); Assert.True(image.HasAlpha); }
         }
-        if (!layersFirst) Assert.Equal(1920u, processor.SeparationInputWidth);
+        if (!layersFirst) Assert.Equal(20u, processor.SeparationInputWidth);
         var wallpapers = new WallpaperService(db, store, store);
         var asset = await wallpapers.CreateAsync(project.UserId, new(project.Id, "All features", WallpaperMode.Live2D), Ct);
         var manifest = await wallpapers.GetManifestAsync(project.UserId, asset.Id, false, Ct);
-        Assert.Equal(1920, manifest.Width); Assert.Equal(2, manifest.Files.Count);
+        Assert.Equal(20, manifest.Width); Assert.Equal(2, manifest.Files.Count);
         Assert.Equal(new[] { "업스케일", "배경 분리", "Live 2D" }, asset.Features);
     }
 
@@ -111,9 +107,7 @@ public sealed class StudioWorkflowTests
         public Task<ProjectProcessingResult> ProcessAsync(ProjectProcessingRequest request, CancellationToken ct)
         {
             var info = new MagickImageInfo(request.InputPath);
-            var edge = request.Operation == ProcessingOperation.Upscale
-                ? (uint)(request.TargetLongEdge ?? (int)info.Width * 2)
-                : info.Width;
+            var edge = request.Operation == ProcessingOperation.Upscale ? info.Width * 2 : info.Width;
             using var background = new MagickImage(MagickColors.Blue, edge, edge);
             var path = Path.Combine(request.OutputDirectory, "background.png"); background.Write(path, MagickFormat.Png);
             if (request.Operation == ProcessingOperation.Upscale) return Task.FromResult(new ProjectProcessingResult([], path, (int)edge, (int)edge));

@@ -145,8 +145,8 @@ async function requestResponse(
 export async function request<T>(path: string, init: RequestInit = {}, authenticated = true): Promise<T> {
   return parse<T>(await requestResponse(path, init, authenticated));
 }
-export async function requestBlob(path: string, signal: AbortSignal = AbortSignal.timeout(180000)): Promise<Blob> {
-  const response = await requestResponse(path, { signal });
+export async function requestBlob(path: string): Promise<Blob> {
+  const response = await requestResponse(path, { signal: AbortSignal.timeout(180000) });
   if (!response.ok) await parse(response);
   return response.blob();
 }
@@ -215,6 +215,7 @@ export type ApiLayer = {
   id: string;
   layerType: string;
   layerOrder: number;
+  automaticOrder?: number | null;
   imageUrl: string;
   movementX: number;
   movementY: number;
