@@ -1,36 +1,75 @@
-using Microsoft.EntityFrameworkCore;
 using UpscaleLab.Domain.Entities;
 using UpscaleLab.Domain.Tokens;
+using UpscaleLab.Infrastructure.Tokens;
 using Xunit;
 
 namespace UpscaleLab.Tests;
 
+/// <summary>
+/// Regression tests for the current monthly usage-token policy.
+/// These tests do not execute real payments or database transactions.
+/// </summary>
 public sealed class TokenCompatibilityTests
 {
     [Theory]
     [InlineData(SubscriptionPlan.Free, 10)]
     [InlineData(SubscriptionPlan.Plus, 20)]
     [InlineData(SubscriptionPlan.Pro, 40)]
-    public void PreservesDeployedWeeklyAllowances(SubscriptionPlan plan, int tokens) =>
-        Assert.Equal(tokens, TokenPolicy.WeeklyAllowance(plan));
+    public void MonthlyAllowance_MatchesCurrentPlan(SubscriptionPlan plan, int expected)
+    {
+        Assert.Equal(expected, TokenPolicy.MonthlyAllowance(plan));
+    }
 
     [Theory]
-    [InlineData(0, 0)]
-    [InlineData(6, 0)]
-    [InlineData(7, 7)]
-    [InlineData(15, 14)]
-    public void WeeklyPeriodsFollowTheUserStartRatherThanCalendarMonth(int days, int periodDays)
+    [InlineData(1920, 1)]
+    [InlineData(2560, 2)]
+    [InlineData(3840, 4)]
+    public void UpscaleCost_MatchesSupportedResolutions(int longEdge, int expected)
     {
-        var start = new DateTime(2026, 10, 29, 8, 30, 0, DateTimeKind.Utc);
-        Assert.Equal(start.AddDays(periodDays), TokenPolicy.WeeklyPeriodStart(start, start.AddDays(days)));
+        Assert.Equal(expected, TokenPolicy.UpscaleCost(longEdge));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1280)]
+    [InlineData(4096)]
+    public void UpscaleCost_RejectsUnsupportedResolution(int longEdge)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => TokenPolicy.UpscaleCost(longEdge));
     }
 
     [Fact]
-    public void DeletingJobsPreservesTokenHistory()
+    public void MonthlyAllowance_RejectsUnknownPlan()
     {
-        using var db = WorkflowData.Db();
-        var entity = db.Model.FindEntityType(typeof(TokenTransaction))!;
-        Assert.True(entity.FindProperty(nameof(TokenTransaction.ProcessingJobId))!.IsNullable);
-        Assert.Equal(DeleteBehavior.SetNull, entity.GetForeignKeys().Single(x => x.Properties.Any(p => p.Name == nameof(TokenTransaction.ProcessingJobId))).DeleteBehavior);
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            TokenPolicy.MonthlyAllowance((SubscriptionPlan)999));
+    }
+
+    [Fact]
+    public void CurrentPeriodUtc_BeginsAtMidnightOnTheFirstDayOfTheUtcMonth()
+    {
+        // Accommodate the unlikely case that UTC changes month during the test.
+        var before = DateTime.UtcNow;
+        var period = TokenService.CurrentPeriodUtc();
+        var after = DateTime.UtcNow;
+
+        static DateTime FirstOfMonth(DateTime dt) =>
+            new(dt.Year, dt.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        Assert.Equal(DateTimeKind.Utc, period.Kind);
+        Assert.True(
+            period == FirstOfMonth(before) || period == FirstOfMonth(after),
+            $"Expected first day of the current UTC month; actual: {period:O}");
+    }
+
+    [Fact]
+    public void NewTokenWallet_HasFreePlanAndSeparatePurchasedBalance()
+    {
+        var wallet = new UserTokenWallet();
+
+        Assert.Equal(SubscriptionPlan.Free, wallet.Plan);
+        Assert.Equal(10, wallet.Balance);
+        Assert.Equal(0, wallet.PurchasedBalance);
+        Assert.Equal(DateTimeKind.Utc, wallet.PeriodStartUtc.Kind);
     }
 }

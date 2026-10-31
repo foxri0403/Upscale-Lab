@@ -123,12 +123,12 @@ public sealed class ProjectServiceTests
         var service = new ProjectService(db, new FakeStorageService());
 
         var saved = await service.ReorderLayersAsync(owner, project.Id,
-            new ReorderProjectLayersRequest(new[] { eyes.Id, back.Id, front.Id }), CancellationToken.None);
-        Assert.Equal(new[] { eyes.Id, back.Id, front.Id }, saved.Select(x => x.Id));
+            new ReorderProjectLayersRequest(new[] { back.Id, eyes.Id, front.Id }), CancellationToken.None);
+        Assert.Equal(new[] { back.Id, eyes.Id, front.Id }, saved.Select(x => x.Id));
         Assert.Equal(new[] { 0, 1, 2 }, saved.Select(x => x.LayerOrder));
-        Assert.Equal(new[] { 2, 0, 1 }, saved.Select(x => x.AutomaticOrder));
+        Assert.Equal(new[] { 0, 2, 1 }, saved.Select(x => x.AutomaticOrder ?? -1));
         var read = await service.GetLayersAsync(owner, project.Id, CancellationToken.None);
-        Assert.Equal(new[] { eyes.Id, back.Id, front.Id }, read.Select(x => x.Id));
+        Assert.Equal(new[] { back.Id, eyes.Id, front.Id }, read.Select(x => x.Id));
     }
 
     [Fact]
