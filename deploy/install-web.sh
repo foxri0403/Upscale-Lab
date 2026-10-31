@@ -20,6 +20,18 @@ sudo mkdir -p "$destination"
 sudo tar -xzf "$archive" -C "$destination"
 sudo test -f "$destination/index.html"
 sudo test -f "$destination/config.js"
+# Older frontend-only archives omitted the ignored EXE/APK directory. Reuse the
+# immutable previous download directory rather than publishing broken buttons.
+if ! sudo test -d "$destination/downloads"; then
+  test -n "$previous"
+  sudo test -f "$base/current/downloads/manifest.json"
+  downloads=$(readlink -f "$base/current/downloads")
+  sudo ln -s "$downloads" "$destination/downloads"
+fi
+sudo test -s "$destination/downloads/manifest.json"
+for installer in "$destination/downloads/"*.exe "$destination/downloads/"*.apk; do
+  sudo test -s "$installer"
+done
 sudo find "$destination" -type d -exec chmod 755 {} +
 sudo find "$destination" -type f -exec chmod 644 {} +
 rollback() {

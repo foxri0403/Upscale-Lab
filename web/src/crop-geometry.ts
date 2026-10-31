@@ -24,6 +24,18 @@ export function pixelCrop(width: number, height: number, edit: CropEdit) {
   const x = clamp(Math.round(region.x * width), 0, width - 1), y = clamp(Math.round(region.y * height), 0, height - 1);
   return { x, y, width: clamp(Math.round(region.width * width), 1, width - x), height: clamp(Math.round(region.height * height), 1, height - y) };
 }
+export function sameCrop(a: CropEdit, b: CropEdit) {
+  if (a.crop !== b.crop) return false;
+  if (a.crop === "original") return true;
+  if (!a.cropRegion || !b.cropRegion) return a.cropRegion === b.cropRegion;
+  return (["x", "y", "width", "height"] as const).every(key => a.cropRegion![key] === b.cropRegion![key]);
+}
+/** The full source stays in source coordinates inside a clipped crop viewport. */
+export function cropPresentation(width: number, height: number, edit: CropEdit) {
+  const selected = pixelCrop(width, height, edit);
+  return { ...selected, plane: { width: `${width / selected.width * 100}%`, height: `${height / selected.height * 100}%`,
+    left: `${-selected.x / selected.width * 100}%`, top: `${-selected.y / selected.height * 100}%` } };
+}
 export function moveCrop(region: CropRegion, dx: number, dy: number): CropRegion {
   return { ...region, x: clamp(region.x + dx, 0, 1 - region.width), y: clamp(region.y + dy, 0, 1 - region.height) };
 }

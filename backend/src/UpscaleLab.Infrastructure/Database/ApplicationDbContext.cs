@@ -341,6 +341,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         job.Property(x => x.Operation).HasConversion<string>().HasMaxLength(30).HasDefaultValue(UpscaleLab.Domain.Enums.ProcessingOperation.Layers);
         job.Property(x => x.UpscaleFactor).HasDefaultValue(2);
         job.Property(x => x.TargetLongEdge).IsRequired(false);
+        job.Property(x => x.SubjectMaskObjectKey).HasMaxLength(1024);
         job.Property(x => x.ResultObjectKey).HasMaxLength(1024);
         job.HasIndex(x => new { x.ProjectId, x.CreatedAt });
         job.HasIndex(x => x.ProjectId).IsUnique().HasFilter("\"Status\" IN ('Queued', 'Processing')");

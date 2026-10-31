@@ -1,11 +1,15 @@
 import { Check } from "lucide-react";
 import type { LayerPreview } from "./layer-preview";
+import type { Edit } from "./model";
+import { cropPresentation } from "./crop-geometry";
 import type { ApiLayer } from "./api";
 
-export function LayerPreviewSelector({ value, change, ready, original, background, foregrounds, layers }: {
+export function LayerPreviewSelector({ value, change, ready, original, background, foregrounds, layers, edit, width, height }: {
   value: LayerPreview; change: (value: LayerPreview) => void; ready: boolean;
-  original: string; background: string; foregrounds: string[]; layers?: ApiLayer[];
+  original: string; background: string; foregrounds: string[]; layers?: ApiLayer[]; edit: Edit; width: number; height: number;
 }) {
+  const crop = cropPresentation(Math.max(1, width), Math.max(1, height), edit);
+  const ratio = crop.width / crop.height;
   const ordered = layers?.slice().sort((a, b) => a.layerOrder - b.layerOrder);
   const hasBackground = ordered ? ordered.some(layer => layer.layerType === "Background") : !!background;
   return <section className="studio-layer-selection" aria-label="분리 결과">
@@ -16,6 +20,8 @@ export function LayerPreviewSelector({ value, change, ready, original, backgroun
           aria-label={`${layer.name} 레이어 보기`} aria-pressed={value === layer.id}
           disabled={!ready && layer.id !== "all"} onClick={() => change(layer.id)}>
           <span className={`layer-thumb ${layer.id === "subject" ? "checker" : ""}`}>
+            <span className="layer-thumb-window" style={{ width: `min(100cqw, calc(100cqh * ${ratio}))`, aspectRatio: ratio }}>
+            <span className="layer-thumb-plane" style={crop.plane}>
             {layer.id === "all" && !ready && <img src={original} alt="" />}
             {ready && ordered?.length ? ordered.filter(item => layer.id === "all" ||
               (layer.id === "background" ? item.layerType === "Background" : item.layerType !== "Background"))
@@ -23,6 +29,8 @@ export function LayerPreviewSelector({ value, change, ready, original, backgroun
               {ready && layer.id !== "subject" && !!background && <img src={background} alt="" />}
               {ready && layer.id !== "background" && foregrounds.map(src => <img key={src} src={src} alt="" />)}
             </>}
+            </span>
+            </span>
           </span>
           <span>{layer.name}</span>
           {value === layer.id && <Check size={17} aria-hidden="true" />}

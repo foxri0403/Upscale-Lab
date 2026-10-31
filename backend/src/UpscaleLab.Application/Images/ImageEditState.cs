@@ -22,8 +22,9 @@ public sealed record HeadRigSettings(bool Enabled, int HeadTilt, int EyeMove, in
 
 // Non-destructive library edits are separate from immutable device wallpaper files.
 public sealed record ImageEditState(int Strength, string Filter, string Crop, int Scale, bool Foreground, DateTime SavedAt,
-    string[]? Tags = null, bool LiveEnabled = false, bool MouseEnabled = false, bool GyroEnabled = false, ImageCropRegion? CropRegion = null, HeadRigSettings? Rig = null)
+    string[]? Tags = null, bool LiveEnabled = false, bool MouseEnabled = false, bool GyroEnabled = false, ImageCropRegion? CropRegion = null, int MotionDefaultsVersion = 0, HeadRigSettings? Rig = null)
 {
+    public const int DefaultMotionStrength = 50;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     public static ImageEditState Create(SaveImageEditRequest request, ImageEditState? previous = null)
@@ -40,8 +41,7 @@ public sealed record ImageEditState(int Strength, string Filter, string Crop, in
         return new(request.Strength, request.Filter, request.Crop, request.Scale, request.Foreground, DateTime.UtcNow,
             request.Tags is null ? null : GalleryTagCatalog.NormalizeMany(request.Tags).Where(x => x != GalleryTagCatalog.Unspecified).ToArray(),
             request.LiveEnabled, request.MouseEnabled ?? previous?.MouseEnabled ?? false,
-            request.GyroEnabled ?? previous?.GyroEnabled ?? false, request.Crop == "original" ? null : request.CropRegion,
-            request.Rig ?? previous?.Rig);
+            request.GyroEnabled ?? previous?.GyroEnabled ?? false, request.Crop == "original" ? null : request.CropRegion, 1, request.Rig ?? previous?.Rig);
     }
 
     public string ToJson() => JsonSerializer.Serialize(this, Json);

@@ -24,6 +24,7 @@ internal static class DraftProjectCleanup
             return;
         }
         var keys = project.Layers.Select(x => x.ObjectKey)
+            .Concat(project.ProcessingJobs.Where(x => x.SubjectMaskObjectKey != null).Select(x => x.SubjectMaskObjectKey!))
             .Concat(project.ProcessingJobs.Where(x => x.ResultObjectKey != null).Select(x => x.ResultObjectKey!))
             .Concat(project.OriginalImage.OptimizedImages.Select(x => x.ObjectKey))
             .Append(project.OriginalImage.OriginalObjectKey).Append(project.OriginalImage.OriginalObjectKey + ".gallery-480.jpg").Distinct().ToArray();

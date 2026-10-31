@@ -32,6 +32,9 @@ public sealed class ApiContractTests
         Assert.DoesNotContain(OperationType.Get, api.Paths["/api/devices/{id}/commands"].Operations.Keys);
         Assert.Contains("/api/wallpapers/{id}/import", api.Paths.Keys);
         Assert.Contains("/api/projects/{projectId}/jobs/{jobId}/download-url", api.Paths.Keys);
+        Assert.Contains("multipart/form-data", api.Paths["/api/projects/{projectId}/subject-mask"].Operations[OperationType.Post].RequestBody.Content.Keys);
+        Assert.Contains("multipart/form-data", api.Paths["/api/projects/{projectId}/subject-selection"].Operations[OperationType.Post].RequestBody.Content.Keys);
+        Assert.Contains(OperationType.Put, api.Paths["/api/projects/{projectId}/layers/order"].Operations.Keys);
         Assert.Contains("DeviceState", api.Components.Schemas.Keys);
         foreach (var field in new[] { "manufacturer", "model", "architecture" })
         {

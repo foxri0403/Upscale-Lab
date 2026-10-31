@@ -2,6 +2,7 @@ import { selectableTags, unspecifiedTag } from "./image-tags";
 import { validateImageUpload } from "./image-upload";
 import { requestBlob } from "./api";
 import { pixelCrop, type CropRegion } from "./crop-geometry";
+import { defaultMotionStrength } from "./editor-defaults";
 export type Genre = (typeof selectableTags)[number] | typeof unspecifiedTag;
 export type Tool = "upscale" | "layers" | "live" | "crop" | "filter" | "tags";
 export type HeadRig = {
@@ -19,6 +20,7 @@ export const defaultHeadRig: HeadRig = {
 };
 export type Edit = {
   strength: number;
+  motionDefaultsVersion?: number;
   filter: string;
   crop: string;
   cropRegion?: CropRegion;
@@ -102,7 +104,8 @@ export const defaultEdit: Edit = {
   rig: { ...defaultHeadRig },
   mouseEnabled: false,
   gyroEnabled: false,
-  strength: 70,
+  strength: defaultMotionStrength,
+  motionDefaultsVersion: 1,
   filter: "original",
   crop: "original",
   scale: 1,

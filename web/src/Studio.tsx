@@ -30,7 +30,7 @@ import {
 } from "./model";
 import { Modal, Notice, Busy, Empty, Link } from "./ui";
 import { cloud, request, post, type Job } from "./api";
-import { detailPicture, discardDraft, loadProjectPicture, processProject, resetProjectEffects, saveImageEdit } from "./cloud-store";
+import { detailPicture, discardDraft, loadProjectPicture, processProject, refineSubject, resetProjectEffects, saveImageEdit } from "./cloud-store";
 import { useUnsavedWarning } from "./use-unsaved-warning";
 import { LayerPreviewSelector } from "./LayerPreviewSelector";
 import { LayerMotionControls } from "./LayerMotionControls";
@@ -46,6 +46,12 @@ import { imageFeatures } from "./image-features";
 import { copyGeneratedLink } from "./share-clipboard";
 import "./studio.css";
 import { CropControls } from "./CropControls";
+import { useMediaQuery } from "./use-media-query";
+import { useSubjectSeparation, SubjectSeparationControls } from "./SubjectSeparation";
+import { useCropAutosave } from "./use-crop-autosave";
+import { sameCrop } from "./crop-geometry";
+import { motionStrength } from "./editor-defaults";
+
 import { LayerStackEditor } from "./LayerStackEditor";
 import { separationAvailable } from "./character-processing";
 import { CharacterMotionControls } from "./CharacterMotionControls";
@@ -84,8 +90,9 @@ const tools: {
   },
   { id: "tags", name: "태그 수정", icon: Tag },
 ];
-const normalizedEdit = (value?: Edit) => ({ ...defaultEdit, ...value });
+const normalizedEdit = (value?: Edit) => ({ ...defaultEdit, ...value, strength: motionStrength(value), motionDefaultsVersion: 1 });
 export function Studio({ route }: { route: string }) {
+  const compact = useMediaQuery("(max-width: 1100px)");
   const {
     library,
     update,
@@ -102,7 +109,17 @@ export function Studio({ route }: { route: string }) {
   const [selectedLayer, setSelectedLayer] = useState<LayerPreview>("all");
   const [lookupFinished, setLookupFinished] = useState<string | null>(null);
   const discarding = useRef(false);
-  const [edit, setEdit] = useState<Edit>(picture?.edit || defaultEdit);
+  const [edit, setEdit] = useState<Edit>(normalizedEdit(picture?.edit));
+  const currentLibrary = useRef(library); currentLibrary.current = library;
+  const cropAutosave = useCropAutosave(async ({ picture: target, crop }) => {
+    const current = [...currentLibrary.current.images, ...(currentLibrary.current.assets || [])].find(p => p.id === target.id) || target;
+    const snapshot = { ...normalizedEdit(current.edit), ...crop };
+    const savedAt = cloud ? (await saveImageEdit({ ...current, edit: snapshot }, true)).savedAt : new Date().toISOString();
+    const replace = (p: typeof current) => p.id === target.id ? { ...p, isDraft: false,
+      edit: { ...normalizedEdit(p.edit), ...crop }, savedAt } : p;
+    if (!update(value => ({ ...value, images: value.images.map(replace), assets: value.assets?.map(replace) })))
+      throw new Error("자르기 저장 상태를 동기화하지 못했습니다.");
+  }, error => toast(error.message), picture?.id, tool === "crop");
   const [name, setName] = useState(picture?.name || "");
   const [tags, setTags] = useState<string[]>(picture ? imageTags(picture) : []);
   const [shareFeedback, setShareFeedback] = useState<{ x: number; y: number; text: string } | null>(null);
@@ -120,6 +137,7 @@ export function Studio({ route }: { route: string }) {
   const [target, setTarget] = useState("pc/monitor1");
   const [job, setJob] = useState<Job | null>(null);
   const [capabilities, setCapabilities] = useState<{ upscale: boolean; layers: boolean; characterLayers?: boolean } | null>(null);
+  const subjectJob = useRef<string | null>(null);
   useEffect(() => { settingsScroll.current?.scrollTo(0, 0); }, [tool, picture?.id]);
   useEffect(() => {
     if (!cloud) return;
@@ -137,8 +155,9 @@ export function Studio({ route }: { route: string }) {
     if (allTags.current) allTags.current.indeterminate = tags.length > 0 && !allTagsSelected(tags);
   }, [tags, tool]);
   useEffect(() => {
-    setJob(null);
+    setJob(null); setBusy(false);
     setTool("upscale"); setShareFeedback(null); setSelectedLayer("all"); discarding.current = false;
+    subjectJob.current = null;
   }, [picture?.id]);
   useEffect(() => {
     if (!cloud || !id || picture || id.startsWith("asset:") || parameters.get("new") === "1") return;
@@ -172,13 +191,12 @@ export function Studio({ route }: { route: string }) {
     };
   }, [picture?.id, picture?.detailsUntil]);
   useEffect(() => {
-    setEdit(picture?.edit || { ...defaultEdit });
+    setEdit(normalizedEdit(picture?.edit));
     setName(picture?.name || "");
     setTags(picture ? imageTags(picture) : []);
   }, [picture?.id]);
   const isFox =
-    !picture?.separationDisabled && (!!(picture?.layers && picture.layers.length >= 2) ||
-    !!(picture?.background && picture.foregrounds?.length) ||
+    !picture?.separationDisabled && (!!(picture?.background && picture.foregrounds?.length) ||
     (!cloud && !!picture?.src.endsWith("/fox.png")));
   const isCharacterProject = !!picture?.layers?.length && !picture.layers.some(layer => layer.layerType === "Background");
   const characterRig = useCharacterRig(tool === "live" && isCharacterProject, edit.rig,
@@ -187,10 +205,13 @@ export function Studio({ route }: { route: string }) {
   const foregroundSrcs = picture?.foregrounds?.length
     ? picture.foregrounds
     : ["/images/fox-foreground.png"];
-  const dirty =
+  const published = isImageShared(picture);
+  const processing = !!job && ["Queued", "Processing"].includes(job.status);
+  const separation = useSubjectSeparation(picture && isFox ? { ...picture, foregrounds: foregroundSrcs } : picture,
+    tool === "layers" && !published, published || busy || processing || !isFox, undefined, true);
+  const dirty = cropAutosave.pending || separation.dirty ||
     JSON.stringify(normalizedEdit(edit)) !== JSON.stringify(normalizedEdit(picture?.edit)) ||
     name.trim() !== picture?.name || JSON.stringify(tags) !== JSON.stringify(picture ? imageTags(picture) : []);
-  const published = isImageShared(picture);
   const saved = !!picture && !picture.isDraft;
   useUnsavedWarning(!!picture && (!saved || dirty), () => {
     if (!picture || discarding.current) return;
@@ -213,8 +234,7 @@ export function Studio({ route }: { route: string }) {
   const sourceHeight = dimensions?.height || 0;
   const longest = Math.max(sourceWidth, sourceHeight);
   const targetDimensions = upscaleDimensions(sourceWidth, sourceHeight, resolution);
-  const processing = !!job && ["Queued", "Processing"].includes(job.status);
-  const motion = useParallax(tool === "layers" && !!isFox && selectedLayer !== "background" && (!!picture?.background || !cloud), edit.strength,
+  const motion = useParallax(tool === "layers" && !!isFox && selectedLayer !== "background" && (published || separation.view === "motion"), edit.strength,
     !!edit.mouseEnabled, !!edit.gyroEnabled, picture?.id);
   const gyroContext = useRef({ id: picture?.id, editable: !published });
   gyroContext.current = { id: picture?.id, editable: !published };
@@ -238,8 +258,15 @@ export function Studio({ route }: { route: string }) {
     if (published) return;
     setEdit((e) => ({ ...e, [key]: value }));
   }
+  function changeCrop(next: Edit) {
+    if (!picture || published || busy || processing || sameCrop(next, edit)) return;
+    const crop = { crop: next.crop, cropRegion: next.crop === "original" || !next.cropRegion ? undefined : { ...next.cropRegion } };
+    setEdit(previous => ({ ...previous, ...crop }));
+    cropAutosave.enqueue({ picture, crop });
+  }
   async function resetEffects(feature: "All" | "Upscale" | "Layers") {
-    if (!picture || published || busy || processing) return;
+    if (!picture || published || busy || processing || cropAutosave.pending) return;
+    if (separation.dirty) { toast("피사체 다시 분리를 누르거나 선택 초기화를 눌러 주세요."); return; }
     setBusy(true);
     try {
       const nextEdit = feature === "All" ? { ...defaultEdit }
@@ -257,6 +284,8 @@ export function Studio({ route }: { route: string }) {
   const draft = picture ? { ...picture, name: name.trim(), tags, genre: (tags[0] || unspecifiedTag) as Genre, edit } : null;
   async function save(silent = false) {
     if (!picture || published || saving.current || busy) return false;
+    if (cropAutosave.pending) { toast("자르기 자동 저장을 마친 뒤 다시 시도해 주세요."); return false; }
+    if (separation.dirty) { toast("피사체 다시 분리를 눌러 선택 영역을 먼저 적용해 주세요."); return false; }
     if (!name.trim()) { toast("이미지 이름을 입력해 주세요."); return false; }
     saving.current = true;
     setBusy(true);
@@ -315,7 +344,12 @@ export function Studio({ route }: { route: string }) {
     finally { sharePending.current = false; setBusy(false); }
   }
   async function startProcessing() {
-    if (!picture || published) return;
+    if (!picture || published || busy || processing || cropAutosave.pending || separation.tracing || separation.drawing || separation.polygonPoints) return;
+    if (tool === "layers") {
+      if (isFox) { await applySubjectEdits(); return; }
+      setSelectedLayer("all"); separation.setView("overlay");
+    }
+    if (tool !== "layers" && separation.dirty) return;
     setBusy(true);
     try {
       const value = await processProject(
@@ -323,12 +357,25 @@ export function Studio({ route }: { route: string }) {
         tool === "upscale" ? "Upscale" : tool === "live" ? "CharacterLayers" : "Layers",
         tool === "upscale" ? resolution : undefined,
       );
+      subjectJob.current = null;
       setJob(value);
+      if (tool === "upscale") window.dispatchEvent(new Event("tokens-updated"));
     } catch (e) {
       toast((e as Error).message);
     } finally {
       setBusy(false);
     }
+  }
+  async function applySubjectEdits() {
+    if (!cloud || !picture?.projectId || !isFox || capabilities?.layers === false || published || busy || processing || cropAutosave.pending || !separation.ready || !separation.dirty || separation.drawing || separation.tracing || separation.polygonPoints) return;
+    setSelectedLayer("all"); separation.setView("overlay");
+    setBusy(true);
+    try {
+      const value = await refineSubject(picture, await separation.exportSelection());
+      subjectJob.current = value.jobId;
+      setJob(value);
+    } catch (error) { toast((error as Error).message); }
+    finally { setBusy(false); }
   }
   useEffect(() => {
     if (!cloud || !picture?.projectId) return;
@@ -354,13 +401,20 @@ export function Studio({ route }: { route: string }) {
               ),
             }));
             change("scale", 1);
+            const refined = subjectJob.current === status.jobId;
+            if (status.operation === "Layers") {
+              if (refined) { separation.markApplied(); subjectJob.current = null; }
+              else { separation.reload(true); setSelectedLayer("all"); separation.setView("overlay"); }
+            }
             setJob(status);
-            toast("이미지 처리를 완료했습니다.");
+            if (status.operation === "Upscale") window.dispatchEvent(new Event("tokens-updated"));
+            toast(status.operation === "Layers" ? refined ? "선택한 피사체와 배경 레이어를 갱신했습니다." : "분리 결과를 확인하고 중앙 이미지에서 바로 수정해 주세요." : "이미지 처리를 완료했습니다.");
           }
         } else {
           setJob(status);
           if (status.status === "Failed")
             toast(status.errorMessage || "이미지 처리에 실패했습니다.");
+          if (status.status === "Failed" && status.operation === "Upscale") window.dispatchEvent(new Event("tokens-updated"));
         }
       } catch (e) {
         if (alive) {
@@ -388,7 +442,7 @@ export function Studio({ route }: { route: string }) {
     };
   }, [picture?.id, job?.jobId, job?.status]);
   async function download() {
-    if (!picture || busy || downloading) return;
+    if (!picture || busy || processing || downloading || separation.dirty || cropAutosave.pending) return;
     setDownloading(true);
     setBusy(true);
     try {
@@ -430,15 +484,16 @@ export function Studio({ route }: { route: string }) {
             disabled={published || busy || processing} onChange={event => setName(event.target.value)} />
         </div>
         <div className="studio-document-actions">
-          <button aria-label="편집 초기화" title="업스케일·배경 분리·색감·자르기·움직임을 초기화하고 원본으로 복구" disabled={published || busy || processing} onClick={() => void resetEffects("All")}>
+          <button aria-label="편집 초기화" title="업스케일·배경 분리·색감·자르기·움직임을 초기화하고 원본으로 복구" disabled={published || busy || processing || separation.dirty || cropAutosave.pending} onClick={() => void resetEffects("All")}>
             <RotateCcw size={17} /><span>편집 초기화</span>
           </button>
           <button aria-label="이미지 정보" title="이미지 정보" onClick={() => setDialog("info")}><Info size={18} /><span>이미지 정보</span></button>
         </div>
       </div>
-      <div className="tool-tabs studio-tool-dock" role="tablist" aria-label="이미지 편집 도구" aria-orientation="vertical">
+      <div className="tool-tabs studio-tool-dock" role="tablist" aria-label="이미지 편집 도구" aria-orientation={compact ? "horizontal" : "vertical"}>
         {tools.map(({ id, name, icon: Icon }) => (
           <button key={id} id={`studio-tool-${id}`} type="button" role="tab"
+            disabled={busy || separation.drawing || separation.tracing || separation.polygonPoints > 0}
             aria-controls="studio-properties" aria-selected={tool === id}
             tabIndex={tool === id ? 0 : -1}
             onKeyDown={(event) => {
@@ -455,8 +510,9 @@ export function Studio({ route }: { route: string }) {
           </button>
         ))}
       </div>
-      <StudioCanvas picture={draft || picture} edit={edit} tool={tool} layered={isFox} motion={motion} characterRig={characterRig}
-        onEdit={next => { if (!published && !busy && !processing) setEdit(next); }} readOnly={published || busy || processing}
+      <StudioCanvas picture={draft || picture} edit={edit} tool={tool} layered={isFox || isCharacterProject} motion={motion} characterRig={characterRig}
+        separation={separation} published={published}
+        onEdit={changeCrop} readOnly={published || busy || processing}
         selectedLayer={selectedLayer}
         background={backgroundSrc} foregrounds={foregroundSrcs} onDimensions={setImageDimensions}
         unsaved={dirty || !saved} saveState={published ? "업로드됨 · 편집 잠금" : dirty ? "저장하지 않은 변경" : saved ? "저장됨" : "보관함에 저장 전"} />
@@ -491,13 +547,16 @@ export function Studio({ route }: { route: string }) {
         {(tool === "upscale" || tool === "layers" || tool === "live") && (
           <div className="cloud-processing">
             <button
-              className="button primary full"
+              className={`button primary full ${tool === "layers" ? "separation-action" : ""}`}
               disabled={
-                busy ||
+                busy || cropAutosave.pending ||
                 !cloud ||
                 !picture.projectId ||
                 processing ||
-                (tool === "layers" && !separationAvailable("background", capabilities)) ||
+                (tool !== "layers" && separation.dirty) ||
+                separation.tracing || separation.drawing || separation.polygonPoints > 0 ||
+                (tool === "layers" && (!separation.ready || isFox && !separation.dirty)) ||
+                (tool === "layers" && capabilities?.layers === false) ||
                 (tool === "live" && !separationAvailable("character", capabilities)) ||
                 (tool === "upscale" && capabilities?.upscale === false) ||
                 (tool === "upscale" && (!longest || resolution <= longest))
@@ -508,28 +567,26 @@ export function Studio({ route }: { route: string }) {
               (job && ["Queued", "Processing"].includes(job.status)) ? (
                 <Busy />
               ) : (
-                <Expand size={17} />
+                tool === "layers" ? <Scan size={17} /> : <Expand size={17} />
               )}{" "}
               {tool === "upscale"
                 ? "업스케일"
-                : tool === "live" ? "캐릭터 파츠 분리 시작" : "배경·피사체 분리 시작"}
+                : tool === "live" ? "캐릭터 파츠 분리 시작" : isFox ? "피사체 다시 분리" : "피사체 자동 분리"}
             </button>
+            {tool === "layers" && separation.error && <p className="mask-error" role="alert">{separation.error}</p>}
             {tool === "upscale" && <button className="button secondary full effect-cancel" type="button"
               disabled={busy || processing || !picture.projectId || !picture.jobId}
               onClick={() => void resetEffects("Upscale")}>
               <RotateCcw size={16} />업스케일 적용 취소
             </button>}
-            {tool === "layers" && capabilities?.layers === false &&
-              <Notice>배경 분리 서비스 연결을 준비하고 있습니다.</Notice>}
+            {tool === "layers" && capabilities?.layers === false && <Notice>배경 분리 서비스 연결을 준비하고 있습니다.</Notice>}
             {tool === "live" && capabilities?.characterLayers !== true &&
               <Notice>캐릭터 파츠 분리 서비스가 연결되지 않았습니다. 서버의 SeeThrough 설정을 확인해 주세요.</Notice>}
             {tool === "live" && capabilities?.characterLayers === true &&
               <p className="studio-separation-help">캐릭터용 분리는 완료까지 시간이 걸릴 수 있습니다. 기존 배경 분리와 다른 AI 서비스로 처리합니다.</p>}
-            {job && (
+            {job && job.status !== "Completed" && (
               <p className="job-state">
-                {job.status === "Completed"
-                  ? "처리 완료"
-                  : job.status === "Failed"
+                {job.status === "Failed"
                     ? job.errorMessage || "처리 실패"
                     : `처리 중 · ${job.progress}%`}
               </p>
@@ -538,17 +595,21 @@ export function Studio({ route }: { route: string }) {
         )}
         </fieldset>
         {tool === "layers" && <>
-          <LayerPreviewSelector value={selectedLayer} change={setSelectedLayer}
-            ready={isFox} original={picture.src} background={backgroundSrc} foregrounds={foregroundSrcs} layers={picture.layers} />
-          <fieldset className="photo-settings layer-motion-settings" disabled={published || busy || processing}>
-            <LayerMotionControls edit={edit} ready={isFox && (!!picture.background || !cloud)} change={change} gyroReady={motion.gyroReady}
-              gyroPending={motion.gyroPending} toggleGyro={() => void toggleGyro()} />
+          {!published && <SubjectSeparationControls editor={separation} disabled={busy || processing} hasResult={isFox}
+            selectTool={() => { setSelectedLayer("all"); separation.setView("overlay"); }} />}
+          <LayerPreviewSelector value={selectedLayer} change={value => { setSelectedLayer(value); if (value !== "background") separation.setView(value === "subject" ? "cutout" : "overlay"); }}
+            ready={isFox} original={picture.src} background={backgroundSrc} foregrounds={foregroundSrcs} layers={picture.layers}
+            edit={edit} width={sourceWidth} height={sourceHeight} />
+          <fieldset className="photo-settings layer-motion-settings" disabled={published || busy || processing || separation.dirty}>
+            <LayerMotionControls edit={edit} ready={isFox} change={(key, value) => { change(key, value); separation.setView("motion"); }} gyroReady={motion.gyroReady}
+              gyroPending={motion.gyroPending} toggleGyro={() => { separation.setView("motion"); void toggleGyro(); }} />
             <button className="button secondary full effect-cancel" type="button"
-              disabled={!picture.projectId || !isFox} onClick={() => void resetEffects("Layers")}>
+              disabled={!picture.projectId || !isFox || separation.dirty} onClick={() => void resetEffects("Layers")}>
               <RotateCcw size={16} />배경 분리 적용 취소
             </button>
           </fieldset>
         </>}
+        {tool === "live" && <h3>Live 2D</h3>}
         {tool === "live" && <div className="studio-live-controls">
           {isCharacterProject && <section className="studio-live-layer-list">
             <h3>분리된 레이어 <span>{picture.layers?.length ?? 0}개</span></h3>
@@ -561,7 +622,7 @@ export function Studio({ route }: { route: string }) {
                 </div>)}
             </div>
           </section>}
-          {cloud && picture.projectId && isFox && <section className="studio-layer-stack-entry">
+          {cloud && picture.projectId && (isFox || isCharacterProject) && <section className="studio-layer-stack-entry">
             <h3>레이어 조합</h3>
             <p>AI 자동 합성이 기본입니다. 겹침이 어색할 때만 맨 아래부터 파츠를 직접 쌓아 보세요.</p>
             <button type="button" className="button secondary full" disabled={busy || processing || published}
@@ -574,7 +635,8 @@ export function Studio({ route }: { route: string }) {
         </div>}
         <fieldset className="photo-settings" disabled={published || busy || processing}>
         {tool === "crop" && (
-          <CropControls edit={edit} width={sourceWidth} height={sourceHeight} change={next => { if (!published && !busy && !processing) setEdit(next); }} />
+          <CropControls edit={edit} width={sourceWidth} height={sourceHeight} change={changeCrop}
+            saving={cropAutosave.pending} error={cropAutosave.error} />
         )}
         {tool === "filter" && (
           <>
@@ -619,13 +681,13 @@ export function Studio({ route }: { route: string }) {
           <div className="export-buttons">
             <button
               className="button secondary"
-              disabled={busy || processing} onClick={event => void share(event)}
+              disabled={busy || processing || cropAutosave.pending} onClick={event => void share(event)}
             >
               <Share2 size={18} /> 공유
             </button>
             <button
               className="button secondary"
-              disabled={busy}
+              disabled={busy || processing || separation.dirty || cropAutosave.pending}
               aria-busy={downloading}
               onClick={download}
             >
@@ -635,17 +697,17 @@ export function Studio({ route }: { route: string }) {
         </div>
           <button
             className="button primary full"
-            disabled={busy || processing || published || (saved && !dirty) || !name.trim()}
+            disabled={busy || processing || published || separation.dirty || cropAutosave.pending || (saved && !dirty) || !name.trim()}
             onClick={() => void save()}
           >
             <Save size={17} />보관함에 저장
           </button>
-          <button className="button secondary full" disabled={busy || processing || !name.trim()} onClick={() => void uploadAndSave()}>
+          <button className="button secondary full" disabled={busy || processing || separation.dirty || cropAutosave.pending || !name.trim()} onClick={() => void uploadAndSave()}>
             <Upload size={18} />{published ? "업로드 해제" : "업로드하고 저장"}
           </button>
           <button
             className="button secondary full"
-            disabled={!options.length || busy || processing}
+            disabled={!options.length || busy || processing || cropAutosave.pending}
             onClick={() => { if (!saved || dirty) toast("보관함에 저장한 뒤 기기에 적용해 주세요."); else setDialog("apply"); }}
           >
             <Monitor size={18} /> 연결된 기기에 적용
@@ -668,7 +730,7 @@ export function Studio({ route }: { route: string }) {
           toast("레이어 합성 순서를 저장했어요.");
         }} />}
       {dialog === "info" && <ImageInformation picture={picture}
-        layerCount={picture.layers?.length ?? (isFox ? foregroundSrcs.length + (backgroundSrc ? 1 : 0) : 1)} close={() => setDialog(null)} />}
+        layerCount={picture.layers?.length ?? (isFox ? foregroundSrcs.length + 1 : 1)} close={() => setDialog(null)} />}
       {dialog === "apply" && (
         <Modal title="배경화면 적용" close={() => setDialog(null)}>
           <img className="share-preview" src={picture.src} alt={picture.name} />

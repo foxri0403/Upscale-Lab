@@ -258,7 +258,7 @@ export function Devices() {
                 <div className={`device-displays ${mobile ? "mobile-display-group" : ""}`}>
                   {mobile && device.displays.length > 0 && (
                     <span className={`device-connection device-connection-${displayConnection} mobile-device-connection`}>
-                      {displayConnection === "connected" ? "연결됨" : displayConnection === "connecting" ? "연결중" : "미연결"}
+                      {displayConnection === "connected" ? "연결됨" : displayConnection === "connecting" ? "연결중" : "연결안됨"}
                     </span>
                   )}
                   <div className="display-grid">
@@ -271,9 +271,9 @@ export function Devices() {
                       return (
                         <div className="display-card" key={display.id}>
                           <div className="display-label">
+                            {!mobile && (display.isPrimary ?? i === 0) && <span className="primary-display">주 화면</span>}
                             <div className="display-name">
                               <h3>{display.name}</h3>
-                              {!mobile && (display.isPrimary ?? i === 0) && <span className="primary-display">주 화면</span>}
                             </div>
                             {!mobile && <span
                               className={
