@@ -221,21 +221,23 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
         // PostgreSQL has a unique (ProjectId, LayerOrder) index. Direct swaps violate it.
         // First move each order into a temporary negative namespace, then assign 0..N-1.
         // Both saves run inside one transaction: failures cannot leave partial ordering.
-        var transaction = dbContext.Database.IsRelational()
-            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
-            : null;
-        try
+        // EnableRetryOnFailure is configured in the API. Explicit transactions must run
+        // inside the provider execution strategy, otherwise an InvalidOperationException
+        // is thrown by NpgsqlRetryingExecutionStrategy.
+        var strategy = dbContext.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
         {
+            await using var transaction = dbContext.Database.IsRelational()
+                ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+                : null;
+
             for (var i = 0; i < requested.Count; i++) byId[requested[i]].LayerOrder = -(i + 1);
             await dbContext.SaveChangesAsync(cancellationToken);
             for (var i = 0; i < requested.Count; i++) byId[requested[i]].LayerOrder = i;
             await dbContext.SaveChangesAsync(cancellationToken);
+
             if (transaction is not null) await transaction.CommitAsync(cancellationToken);
-        }
-        finally
-        {
-            if (transaction is not null) await transaction.DisposeAsync();
-        }
+        });
         return requested.Select(id => MapLayer(byId[id])).ToList();
     }
 
