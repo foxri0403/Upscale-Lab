@@ -1,4 +1,6 @@
+using UpscaleLab.Infrastructure.Inpainting;
 using System.Text;
+using System.Threading.RateLimiting;
 using System.Text.Json.Serialization;
 using Amazon;
 using Amazon.CognitoIdentityProvider;
@@ -87,6 +89,8 @@ builder.Services.AddHttpClient<RunPodUpscaleService>(client =>
 {
     client.Timeout = Timeout.InfiniteTimeSpan;
 });
+builder.Services.AddHttpClient<RunPodImageLayerProcessor>(client => client.Timeout = Timeout.InfiniteTimeSpan);
+builder.Services.AddHttpClient<RunPodPretrainedSeeThroughProcessor>(client => client.Timeout = Timeout.InfiniteTimeSpan);
 builder.Services.AddSingleton(seeThroughOptions);
 builder.Services.AddSingleton(cognitoOptions);
 builder.Services.AddSingleton(TimeProvider.System);
@@ -113,12 +117,25 @@ builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IEmailVerificationProvider, CognitoEmailVerificationProvider>();
 builder.Services.AddScoped<IPasswordRecoveryProvider, CognitoEmailVerificationProvider>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IAccountService, AccountService>();
+builder.Services.AddScoped<IAccountCleanupService, AccountCleanupService>();
+builder.Services.AddScoped<IAccountIdentityRemover, CognitoAccountIdentityRemover>();
+builder.Services.AddHostedService<AccountCleanupWorker>();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("account-sensitive", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirst("sub")?.Value ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+});
 builder.Services.AddScoped<IActiveSessionValidator, ActiveSessionValidator>();
 builder.Services.AddScoped<IUnverifiedAccountCleaner, CognitoAccountCleaner>();
 builder.Services.AddHostedService<ExpiredAccountWorker>();
 builder.Services.AddScoped<IDeviceService, DeviceService>();
 builder.Services.AddScoped<IDeviceControlService, DeviceControlService>();
 builder.Services.AddScoped<IDeviceEvents, DeviceEvents>();
+builder.Services.AddSingleton<DeviceChangeFeed>();
 builder.Services.AddScoped<IWallpaperService, WallpaperService>();
 builder.Services.AddScoped<IUserSettingService, UserSettingService>();
 builder.Services.AddScoped<IImageService, ImageService>();
@@ -126,24 +143,39 @@ builder.Services.AddScoped<IGalleryService, GalleryService>();
 builder.Services.AddScoped<IGalleryThumbnailService, GalleryThumbnailService>();
 builder.Services.AddSingleton<GalleryThumbnailCache>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
+builder.Services.AddHttpClient<UpscaleLab.Infrastructure.Payments.TossPaymentsClient>(
+    client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.PaymentFulfillmentService>();
+builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.SubscriptionFulfillmentService>();
+builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.SubscriptionChargeClaimService>();
+builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.SubscriptionRenewalOrderService>();
+builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.SubscriptionRenewalFulfillmentService>();
+builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.SubscriptionRenewalChargeClaimService>();
+builder.Services.AddHostedService<UpscaleLab.Api.BackgroundServices.PaymentRecoveryWorker>();
+builder.Services.AddHostedService<UpscaleLab.Api.BackgroundServices.SubscriptionPaymentRecoveryWorker>();
+builder.Services.AddHostedService<UpscaleLab.Api.BackgroundServices.SubscriptionRenewalWorker>();
+builder.Services.AddHostedService<UpscaleLab.Api.BackgroundServices.SubscriptionExpirationWorker>();
+builder.Services.AddHttpClient<UpscaleLab.Infrastructure.Payments.TossBillingClient>(client => client.Timeout = TimeSpan.FromSeconds(90));
+builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.BillingKeyProtector>();
+builder.Services.AddScoped<UpscaleLab.Infrastructure.Tokens.ITokenService, UpscaleLab.Infrastructure.Tokens.TokenService>();
 builder.Services.AddScoped<IProjectProcessingService, ProjectProcessingService>();
 builder.Services.AddSingleton<IProcessingJobQueue, ProcessingJobQueue>();
-builder.Services.AddSingleton<SeeThroughImageLayerProcessor>();
-builder.Services.AddHttpClient<RunPodPretrainedSeeThroughProcessor>(client =>
-    client.Timeout = Timeout.InfiniteTimeSpan);
-builder.Services.AddScoped<IImageLayerProcessor>(services =>
-    string.Equals(seeThroughOptions.Provider, "RunPod", StringComparison.OrdinalIgnoreCase)
-        ? services.GetRequiredService<RunPodPretrainedSeeThroughProcessor>()
-        : services.GetRequiredService<SeeThroughImageLayerProcessor>());
-builder.Services.AddScoped<ExistingLayerProjectProcessor>();
+builder.Services.AddSingleton<IImageLayerProcessor>(services => services.GetRequiredService<RunPodImageLayerProcessor>());
+builder.Services.AddSingleton<ExistingLayerProjectProcessor>();
 builder.Services.AddScoped<IProjectImageProcessor, RunPodProjectImageProcessor>();
+builder.Services.AddHttpClient<RunPodS3UpscaleService>(client => client.Timeout = Timeout.InfiniteTimeSpan);
+var inpaintingOptions = builder.Configuration.GetSection("RunPodInpainting").Get<RunPodInpaintingOptions>() ?? new RunPodInpaintingOptions();
+builder.Services.AddSingleton(inpaintingOptions);
+builder.Services.AddScoped<InpaintingQuotaService>();
+builder.Services.AddHttpClient<RunPodInpaintingService>(client => client.Timeout = Timeout.InfiniteTimeSpan);
 builder.Services.AddHostedService<LiveLayerProcessingWorker>();
 
 builder.Services.AddClientAuthentication(jwtOptions);
 
 builder.Services.AddControllers().AddJsonOptions(options =>
     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
-builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = 25 * 1024 * 1024);
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = ImageFormatPolicy.MaxRequestBytes);
+builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = ImageFormatPolicy.MaxRequestBytes);
 builder.Services.AddSignalR();
 builder.Services.AddHealthChecks();
 
@@ -198,6 +230,7 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseCors("ClientPolicy");
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapHealthChecks("/health");

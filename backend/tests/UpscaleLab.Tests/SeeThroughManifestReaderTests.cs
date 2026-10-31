@@ -28,6 +28,18 @@ public sealed class SeeThroughManifestReaderTests
     }
 
     [Fact]
+    public async Task Manifest_PrefersKnownSemanticLabelsForLayerEditor()
+    {
+        using var temp = new TempDirectory();
+        Directory.CreateDirectory(Path.Combine(temp.Path, "layers"));
+        await File.WriteAllBytesAsync(Path.Combine(temp.Path, "layers", "000.png"), [1]);
+        await File.WriteAllTextAsync(Path.Combine(temp.Path, "manifest.json"),
+            """{"layers":[{"file":"layers/000.png","layerType":"Face","semanticLayerType":"Eye","layerOrder":0,"depth":0,"positionX":0,"positionY":0,"rotation":0,"scale":1,"movementX":0,"movementY":0}]}""");
+        var result = await SeeThroughManifestReader.ReadAsync(temp.Path, CancellationToken.None);
+        Assert.Equal(LayerType.Eye, Assert.Single(result).LayerType);
+    }
+
+    [Fact]
     public async Task Manifest_RejectsTraversal()
     {
         using var temp = new TempDirectory();

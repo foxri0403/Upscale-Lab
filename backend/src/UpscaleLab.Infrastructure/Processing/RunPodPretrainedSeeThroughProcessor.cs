@@ -22,6 +22,12 @@ public sealed class RunPodPretrainedSeeThroughProcessor(
     IAmazonS3 s3,
     S3StorageOptions s3Options) : IImageLayerProcessor
 {
+    public bool IsConfigured => options.Enabled &&
+        string.Equals(options.Provider, "RunPod", StringComparison.OrdinalIgnoreCase) &&
+        !string.IsNullOrWhiteSpace(options.RunPodEndpointId) &&
+        !string.IsNullOrWhiteSpace(options.RunPodApiKey) &&
+        !string.IsNullOrWhiteSpace(s3Options.S3BucketName);
+
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(3);
     private const long MaxInputBytes = 16L * 1024 * 1024;
     private const long MaxArchiveBytes = 128L * 1024 * 1024;
@@ -31,8 +37,7 @@ public sealed class RunPodPretrainedSeeThroughProcessor(
         LayerProcessingRequest request,
         CancellationToken cancellationToken)
     {
-        if (!options.Enabled ||
-            !string.Equals(options.Provider, "RunPod", StringComparison.OrdinalIgnoreCase))
+        if (!IsConfigured)
             throw new ConfigurationException("SeeThrough:Enabled=true 및 Provider=RunPod 설정이 필요합니다.");
         if (string.IsNullOrWhiteSpace(options.RunPodEndpointId) ||
             string.IsNullOrWhiteSpace(options.RunPodApiKey) ||

@@ -1,21 +1,47 @@
 import { selectableTags, unspecifiedTag } from "./image-tags";
+import { validateImageUpload } from "./image-upload";
+import { requestBlob } from "./api";
+import { pixelCrop, type CropRegion } from "./crop-geometry";
 export type Genre = (typeof selectableTags)[number] | typeof unspecifiedTag;
-export type Tool = "upscale" | "layers" | "live" | "crop" | "filter";
+export type Tool = "upscale" | "layers" | "live" | "crop" | "filter" | "tags";
+export type HeadRig = {
+  enabled: boolean;
+  headTilt: number;
+  eyeMove: number;
+  hairSway: number;
+  pivotX: number;
+  pivotY: number;
+  idle: boolean;
+};
+export const defaultHeadRig: HeadRig = {
+  enabled: false, headTilt: 60, eyeMove: 35, hairSway: 55,
+  pivotX: 50, pivotY: 16, idle: true,
+};
 export type Edit = {
   strength: number;
   filter: string;
   crop: string;
+  cropRegion?: CropRegion;
   scale: number;
   foreground: boolean;
+  liveEnabled?: boolean;
+  rig?: HeadRig;
+  mouseEnabled?: boolean;
+  gyroEnabled?: boolean;
 };
 export type Picture = {
+  separationDisabled?: boolean;
+  isDraft?: boolean;
   id: string;
   name: string;
   src: string;
   genre: Genre;
-  kind?: "Live 2D" | "업스케일";
+  kind?: "Live 2D" | "배경 분리" | "업스케일";
+  features?: string[];
+  exportSources?: { image: string; background?: string; foregrounds?: string[] };
   created: string;
   edit?: Edit;
+  savedAt?: string;
   sharedId?: string;
   galleryPostId?: string;
   galleryPostIds?: string[];
@@ -23,11 +49,14 @@ export type Picture = {
   ownerId?: string;
   tags?: string[];
   creator?: string;
+  creatorAvatar?: string;
   downloads?: number;
   projectId?: string;
   assetId?: string;
+  sourceProjectId?: string;
   background?: string;
   foregrounds?: string[];
+  layers?: import("./api").ApiLayer[];
   jobId?: string;
   detailsUntil?: number;
   width?: number;
@@ -40,6 +69,7 @@ export type Display = {
   resolution: string;
   current: string;
   desired?: string;
+  removing?: boolean;
   connected: boolean;
   nativeId?: string;
   target?: string;
@@ -50,32 +80,26 @@ export type Display = {
 };
 export type Device = {
   id: string;
+  created?: string;
   name: string;
   platform: "Windows" | "Android";
   osVersion?: string;
-  manufacturer?: string;
-  model?: string;
-  architecture?: string;
   physicalDisplayCount?: number;
   online: boolean;
+  connection?: "connected" | "connecting" | "disconnected";
+  supportsWallpaperRemoval?: boolean;
   displays: Display[];
-};
-export type Command = {
-  id: string;
-  device: string;
-  display: string;
-  picture: string;
-  status: "대기" | "완료" | "실패";
-  created: string;
-  detail?: string;
 };
 export type Library = {
   images: Picture[];
   devices: Device[];
-  commands: Command[];
   assets?: Picture[];
 };
 export const defaultEdit: Edit = {
+  liveEnabled: false,
+  rig: { ...defaultHeadRig },
+  mouseEnabled: false,
+  gyroEnabled: false,
   strength: 70,
   filter: "original",
   crop: "original",
@@ -162,16 +186,6 @@ export function sampleLibrary(): Library {
         ],
       },
     ],
-    commands: [
-      {
-        id: "sample-1",
-        device: "내 휴대폰",
-        display: "홈 화면",
-        picture: "숲속의 여우",
-        status: "대기",
-        created: new Date().toISOString(),
-      },
-    ],
   };
 }
 export const community = sampleImages().map((p, i) => ({
@@ -228,10 +242,7 @@ export async function loadImage(src: string): Promise<HTMLImageElement> {
   return img;
 }
 export async function uploadImage(file: File): Promise<Picture> {
-  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
-    throw new Error("JPG, PNG, WebP 이미지를 선택해 주세요.");
-  if (file.size > 15 * 1024 * 1024)
-    throw new Error("15MB 이하의 이미지를 선택해 주세요.");
+  validateImageUpload(file);
   const url = URL.createObjectURL(file);
   try {
     const img = await loadImage(url);
@@ -256,8 +267,31 @@ export async function uploadImage(file: File): Promise<Picture> {
   }
 }
 export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
-  const img = await loadImage(picture.background || picture.src);
+  const temporary: string[] = [];
+  const load = async (source: string, endpoint?: string) => {
+    if (!endpoint) return loadImage(source);
+    const url = URL.createObjectURL(await requestBlob(endpoint));
+    temporary.push(url);
+    return loadImage(url);
+  };
+  try {
+  const characterLayers = !picture.background && (picture.layers?.length || 0) >= 2
+    ? picture.layers!.slice().sort((a, b) => a.layerOrder - b.layerOrder) : null;
+  const img = await load(picture.background || picture.src, picture.background ? picture.exportSources?.background : picture.exportSources?.image);
   let source: CanvasImageSource = img;
+  if (characterLayers && edit.foreground) {
+    const composite = document.createElement("canvas");
+    const first = await load(characterLayers[0].imageUrl,
+      picture.projectId ? `/api/projects/${picture.projectId}/content?layerId=${characterLayers[0].id}` : undefined);
+    composite.width = first.width;
+    composite.height = first.height;
+    const context = composite.getContext("2d")!;
+    context.drawImage(first, 0, 0);
+    for (const layer of characterLayers.slice(1))
+      context.drawImage(await load(layer.imageUrl,
+        picture.projectId ? `/api/projects/${picture.projectId}/content?layerId=${layer.id}` : undefined), 0, 0, composite.width, composite.height);
+    source = composite;
+  }
   if (picture.background && picture.foregrounds?.length) {
     const composite = document.createElement("canvas");
     composite.width = img.width;
@@ -265,23 +299,13 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
     const context = composite.getContext("2d")!;
     context.drawImage(img, 0, 0);
     if (edit.foreground)
-      for (const src of picture.foregrounds)
-        context.drawImage(await loadImage(src), 0, 0, img.width, img.height);
+      for (const [index, src] of picture.foregrounds.entries())
+        context.drawImage(await load(src, picture.exportSources?.foregrounds?.[index]), 0, 0, img.width, img.height);
     source = composite;
   }
-  let sw = img.width,
-    sh = img.height;
-  const ratio =
-    edit.crop === "original"
-      ? sw / sh
-      : (
-          { wide: 16 / 9, square: 1, portrait: 9 / 16 } as Record<
-            string,
-            number
-          >
-        )[edit.crop];
-  if (sw / sh > ratio) sw = sh * ratio;
-  else sh = sw / ratio;
+  const selected = pixelCrop(characterLayers && edit.foreground ? (source as HTMLCanvasElement).width : img.width,
+    characterLayers && edit.foreground ? (source as HTMLCanvasElement).height : img.height, edit);
+  const sw = selected.width, sh = selected.height;
   const scale = Math.min(edit.scale, 4096 / Math.max(sw, sh));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(sw * scale);
@@ -291,8 +315,8 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(
     source,
-    (img.width - sw) / 2,
-    (img.height - sh) / 2,
+    selected.x,
+    selected.y,
     sw,
     sh,
     0,
@@ -300,7 +324,7 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
     canvas.width,
     canvas.height,
   );
-  return new Promise<Blob>((resolve, reject) =>
+  return await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(
       (b) =>
         b
@@ -313,6 +337,7 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
       "image/png",
     ),
   );
+  } finally { temporary.forEach(url => URL.revokeObjectURL(url)); }
 }
 export async function downloadImage(
   picture: Picture,
@@ -323,6 +348,8 @@ export async function downloadImage(
   const a = document.createElement("a");
   a.href = url;
   a.download = `${picture.name.replace(/[<>:"/\\|?*]/g, "_")}.png`;
-  a.click();
+  a.style.display = "none";
+  document.body.appendChild(a);
+  try { a.click(); } finally { a.remove(); }
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
