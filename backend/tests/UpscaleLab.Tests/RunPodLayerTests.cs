@@ -115,6 +115,25 @@ public sealed class RunPodLayerTests
         Assert.Equal(1, cloud.Submissions);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SelectionRequiresWorkerAcknowledgementAndCannotSilentlyUseLegacyMask(bool supported)
+    {
+        using var files = new Workspace(); using var s3 = new S3Stub();
+        using var cloud = new Cloud(s3) { EchoSelection = supported }; using var http = new HttpClient(cloud);
+        var path = Path.Combine(files.Root, "selection.png");
+        using (var mask = new MagickImage(MagickColors.Red, 40, 60)) mask.Write(path, MagickFormat.Png);
+        var request = new LayerProcessingRequest(files.Input, files.Output, Guid.NewGuid(), SubjectMaskPath: path, RefineSelection: true);
+        if (supported)
+        {
+            Assert.Equal(2, (await Processor(http, s3).ProcessAsync(request, CancellationToken.None)).Count);
+            Assert.Equal(2, (await Processor(http, s3).ProcessAsync(request, CancellationToken.None)).Count);
+        }
+        else await Assert.ThrowsAsync<InvalidDataException>(() => Processor(http, s3).ProcessAsync(request, CancellationToken.None));
+        Assert.Equal(1, cloud.Submissions);
+    }
+
     private static RunPodImageLayerProcessor Processor(HttpClient http, IAmazonS3 s3) => new(http,
         new RunPodOptions { ApiKey = "secret-api-key", LayersEndpointId = "layers", ApiBaseUrl = "https://provider.test/v2/" },
         s3, new S3StorageOptions { S3BucketName = "test" });
@@ -125,6 +144,7 @@ public sealed class RunPodLayerTests
         public int Submissions; public bool Opaque; public bool Fail;
         public bool PublishCompletion = true;
         public bool EchoMaskHash = true;
+        public bool EchoSelection = true;
         public CancellationTokenSource? CancelOnStatus;
         private string? pendingKey;
         private byte[]? pending;
@@ -148,7 +168,8 @@ public sealed class RunPodLayerTests
                 pendingKey = prefix + "complete.json";
                 pending = JsonSerializer.SerializeToUtf8Bytes(new { status = "completed",
                     jobId = input.GetProperty("job_id").GetString(), inputSha256 = input.GetProperty("input_sha256").GetString(), width = 40, height = 60,
-                    maskSha256 = EchoMaskHash && input.TryGetProperty("mask_sha256", out var hash) ? hash.GetString() : null });
+                    maskSha256 = EchoMaskHash && input.TryGetProperty("mask_sha256", out var hash) ? hash.GetString() : null,
+                    maskMode = EchoSelection && input.TryGetProperty("mask_mode", out var mode) ? mode.GetString() : null });
                 if (PublishCompletion) store.Files[pendingKey] = pending;
                 return new(HttpStatusCode.OK) { Content = JsonContent.Create(new { id = "remote-id" }) };
             }

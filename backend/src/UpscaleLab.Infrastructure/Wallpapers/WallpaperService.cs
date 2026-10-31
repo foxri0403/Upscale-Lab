@@ -35,7 +35,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         if (presentation is null && manifest.MotionEnabled == request.MotionEnabled && files.SequenceEqual(manifest.Files) &&
             (!request.MouseEnabled.HasValue || request.MouseEnabled == (edit?.MouseEnabled ?? false)) &&
             (!request.GyroEnabled.HasValue || request.GyroEnabled == (edit?.GyroEnabled ?? false))) return Map(source);
-        var state = (edit ?? new ImageEditState(35, "original", "original", 1, true, DateTime.UtcNow))
+        var state = (edit ?? new ImageEditState(ImageEditState.DefaultMotionStrength, "original", "original", 1, true, DateTime.UtcNow, MotionDefaultsVersion: 1))
             with { Strength = request.Strength, LiveEnabled = independentMotion ? edit?.LiveEnabled == true : request.MotionEnabled,
                 MouseEnabled = request.MouseEnabled ?? edit?.MouseEnabled ?? false,
                 GyroEnabled = request.GyroEnabled ?? edit?.GyroEnabled ?? false, SavedAt = DateTime.UtcNow };
@@ -216,9 +216,9 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         }
         var asset = new WallpaperAsset { UserId = userId, SourceProjectId = origin,
             Title = request.Title.Trim(), Mode = request.Mode };
-        asset.SavedEditJson = new ImageEditState(request.Render?.Strength ?? metadata?.Strength ?? 35, "original", "original", 1, true,
+        asset.SavedEditJson = new ImageEditState(request.Render?.Strength ?? metadata?.Strength ?? ImageEditState.DefaultMotionStrength, "original", "original", 1, true,
             DateTime.UtcNow, metadata?.Tags, independentMotion ? metadata?.LiveEnabled == true : request.Mode == WallpaperMode.Live2D && request.MotionEnabled,
-            request.MouseEnabled ?? metadata?.MouseEnabled ?? false, request.GyroEnabled ?? metadata?.GyroEnabled ?? false).ToJson();
+            request.MouseEnabled ?? metadata?.MouseEnabled ?? false, request.GyroEnabled ?? metadata?.GyroEnabled ?? false, MotionDefaultsVersion: 1).ToJson();
         var copied = new List<string>();
         try
         {

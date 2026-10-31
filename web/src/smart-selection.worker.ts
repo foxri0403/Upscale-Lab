@@ -1,5 +1,5 @@
 import { AutoProcessor, RawImage, SamModel, SamProcessor, Tensor, env } from "@huggingface/transformers";
-import { chooseSelection, selectionPrompts, type SmartSelectionInput } from "./smart-selection";
+import { chooseSelection, selectedAddition, selectionPrompts, type SmartSelectionInput } from "./smart-selection";
 
 // This is the primary interactive selector, on WebAssembly CPU; never a local GPU runner.
 env.allowLocalModels = false;
@@ -49,6 +49,7 @@ async function run(message: { id: number; input?: SmartSelectionInput }) {
     output = await model.forward({ ...frame.embeddings, input_points: inputPoints, input_labels: inputLabels } as Parameters<SamModel["forward"]>[0]);
     const processed = await processor.post_process_masks(output.pred_masks, frame.sizes, frame.reshaped, { binarize: false }); masks = processed;
     const result = chooseSelection(processed[0].data as Float32Array, output.iou_scores.data as Float32Array, input, prompts.points, prompts.labels, prompts.referenceHits);
+    if (input.scope === "painted") result.alpha = selectedAddition(result.alpha, input.guide);
     scope.postMessage({ id, type: "result", ...result }, [result.alpha.buffer]);
   } finally {
     inputPoints.dispose(); inputLabels.dispose(); masks?.forEach(x => x.dispose());

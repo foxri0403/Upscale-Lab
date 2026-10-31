@@ -5,7 +5,7 @@ import { imageFileFormat, imageResolution } from "./image-information";
 import { imageFeatures } from "./image-features";
 import { visibleLayers, type LayerPreview } from "./layer-preview";
 import { CropEditor } from "./CropEditor";
-import { pixelCrop } from "./crop-geometry";
+import { cropPresentation } from "./crop-geometry";
 import { previewStageStyle, PreviewPaletteButton } from "./StudioPreview";
 import { SubjectSeparationCanvas, type SubjectSeparation } from "./SubjectSeparation";
 import { usePreviewPan } from "./use-preview-pan";
@@ -47,7 +47,7 @@ export function StudioCanvas({ picture, edit, tool, layered, background, foregro
   }, [source]);
   const width = pixels.src === source ? pixels.width : picture.width || 1920;
   const height = pixels.src === source ? pixels.height : picture.height || 1080;
-  const selected = pixelCrop(width, height, inline ? { ...edit, crop: "original" } : edit);
+  const selected = cropPresentation(width, height, edit);
   const croppedWidth = tool === "crop" ? width : selected.width;
   const croppedHeight = tool === "crop" ? height : selected.height;
   const cropped = edit.crop !== "original";
@@ -66,15 +66,15 @@ export function StudioCanvas({ picture, edit, tool, layered, background, foregro
           <PreviewPaletteButton {...palette} />
           <div className={`canvas-stage studio-preview-stage ${cropped ? "crop-stage" : ""} ${layered && selectedLayer === "subject" && tool === "layers" ? "subject-only" : ""}`}
             ref={motion.stage} style={previewStageStyle(croppedWidth, croppedHeight, zoom)}>
-            {inline ? <SubjectSeparationCanvas editor={separation} disabled={readOnly || hand || pan.canPan || separation.tracing} filter={filterStyle(edit.filter)} /> : <div className="studio-image-plane" style={{ width: `${width / croppedWidth * 100}%`, height: `${height / croppedHeight * 100}%`, left: `${-selected.x / croppedWidth * 100}%`, top: `${-selected.y / croppedHeight * 100}%` }}>
-            {layered && tool === "layers" ? (
+            <div className="studio-image-plane" style={selected.plane}>
+            {inline ? <SubjectSeparationCanvas editor={separation} disabled={readOnly || !layered || hand || pan.canPan || separation.tracing} filter={filterStyle(edit.filter)} /> : layered && tool === "layers" ? (
               <div className={`live-canvas ${moving ? "motion-active" : ""}`} ref={motion.layers} style={{ filter: filterStyle(edit.filter) }}>
                 {visible.background && <img src={background} alt="배경 레이어" />}
                 {visible.subject && foregrounds.map((src, i) => <img key={src}
                   className="subject-layer" src={src} alt={`피사체 레이어 ${i + 1}`} />)}
               </div>
             ) : <img src={picture.src} alt={picture.name} style={{ filter: filterStyle(edit.filter) }} />}
-            </div>}
+            </div>
           </div>
           </div>
         </div>}

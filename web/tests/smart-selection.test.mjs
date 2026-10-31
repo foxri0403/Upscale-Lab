@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { interiorPoint, selectionPrompts, chooseSelection } from "../src/smart-selection.ts";
+import { interiorPoint, selectionPrompts, chooseSelection, selectedAddition } from "../src/smart-selection.ts";
 
 function fixture() {
   const width = 40, height = 30, guide = new Uint8Array(width * height), prior = guide.slice(), reference = guide.slice();
@@ -66,4 +66,22 @@ test("unrelated islands in a textured background are removed while the prompted 
   for (let y = 2; y < 5; y++) for (let x = 2; x < 5; x++) logits[y * input.width + x] = 5;
   const result = chooseSelection(logits, new Float32Array([.95]), input, prompts.points, prompts.labels, prompts.referenceHits);
   assert.deepEqual(result.alpha, input.reference);
+});
+
+test("painted background is excluded and AI foreground outside the brush is never added", () => {
+  const guide=new Uint8Array([0,255,255,255,128,0]);
+  const prediction=new Uint8Array([255,0,64,255,255,255]);
+  const addition=selectedAddition(prediction,guide);
+  assert.deepEqual(addition,new Uint8Array([0,0,64,255,128,0]));
+  const prior=new Uint8Array([17,0,192,0,50,231]);
+  const combined=Uint8Array.from(prior,(value,i)=>Math.max(value,addition[i]));
+  assert.deepEqual(combined,new Uint8Array([17,0,192,255,128,231]));
+  assert.throws(()=>selectedAddition(new Uint8Array(1),new Uint8Array(2)));
+});
+
+test("a local brush never labels the neighboring part of the same object as background", () => {
+  const input={...fixture(),scope:'painted'},prompts=selectionPrompts(input);
+  const corners=new Set([`0,0`,`${input.width-1},0`,`0,${input.height-1}`,`${input.width-1},${input.height-1}`]);
+  for(let i=0;i<prompts.labels.length;i++)if(prompts.labels[i]===0)assert(corners.has(prompts.points[i].join(',')));
+  assert(prompts.labels.includes(0));
 });

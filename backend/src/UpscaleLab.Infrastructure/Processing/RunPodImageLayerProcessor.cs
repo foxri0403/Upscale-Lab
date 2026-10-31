@@ -47,6 +47,8 @@ public sealed class RunPodImageLayerProcessor(HttpClient http, RunPodOptions opt
         string hash;
         await using (var content = File.OpenRead(input)) hash = Convert.ToHexString(await SHA256.HashDataAsync(content, token));
         string? maskHash = null;
+        var maskMode = request.RefineSelection ? "selection" : null;
+        if (request.RefineSelection && request.SubjectMaskPath == null) throw new InvalidDataException("재분리할 선택 영역이 없습니다.");
         if (request.SubjectMaskPath is { } maskPath)
         {
             await using var mask = File.OpenRead(maskPath);
@@ -58,7 +60,7 @@ public sealed class RunPodImageLayerProcessor(HttpClient http, RunPodOptions opt
         try
         {
             remote = await ReadJsonAsync<RemoteJob>(prefix + "remote.json", token);
-            if (remote != null && (remote.InputSha256 != hash || remote.EndpointId != options.LayersEndpointId || remote.MaskSha256 != maskHash))
+            if (remote != null && (remote.InputSha256 != hash || remote.EndpointId != options.LayersEndpointId || remote.MaskSha256 != maskHash || remote.MaskMode != maskMode))
                 throw new InvalidDataException("원격 분리 작업의 입력 정보가 일치하지 않습니다.");
 
             // A durable completion marker also survives RunPod's 30-minute result retention.
@@ -82,6 +84,7 @@ public sealed class RunPodImageLayerProcessor(HttpClient http, RunPodOptions opt
                             image_url = Sign(prefix + "input.png", HttpVerb.GET, expires),
                             mask_url = maskHash == null ? null : Sign(prefix + "mask.png", HttpVerb.GET, expires),
                             mask_sha256 = maskHash,
+                            mask_mode = maskMode,
                             background_url = Sign(prefix + "background.png", HttpVerb.PUT, expires),
                             foreground_url = Sign(prefix + "foreground.png", HttpVerb.PUT, expires),
                             completion_url = Sign(prefix + "complete.json", HttpVerb.PUT, expires), width, height },
@@ -90,7 +93,7 @@ public sealed class RunPodImageLayerProcessor(HttpClient http, RunPodOptions opt
                     }, token);
                     var id = submission.RootElement.GetProperty("id").GetString();
                     if (string.IsNullOrWhiteSpace(id)) throw new InvalidDataException("클라우드 작업 ID가 없습니다.");
-                    remote = new(id, hash, options.LayersEndpointId, maskHash);
+                    remote = new(id, hash, options.LayersEndpointId, maskHash, maskMode);
                     await s3.PutObjectAsync(new PutObjectRequest { BucketName = storage.S3BucketName,
                         Key = prefix + "remote.json", ContentBody = JsonSerializer.Serialize(remote, Json),
                         ContentType = "application/json" }, token);
@@ -119,7 +122,7 @@ public sealed class RunPodImageLayerProcessor(HttpClient http, RunPodOptions opt
                 }
             }
             if (complete.JobId != request.JobId.ToString("N") || complete.InputSha256 != hash ||
-                complete.Width != width || complete.Height != height || complete.Status != "completed" || complete.MaskSha256 != maskHash)
+                complete.Width != width || complete.Height != height || complete.Status != "completed" || complete.MaskSha256 != maskHash || complete.MaskMode != maskMode)
                 throw new InvalidDataException("클라우드 분리 결과 규격이 일치하지 않습니다.");
             var background = Path.Combine(request.OutputDirectory, "background.png");
             var foreground = Path.Combine(request.OutputDirectory, "foreground.png");
@@ -181,6 +184,6 @@ public sealed class RunPodImageLayerProcessor(HttpClient http, RunPodOptions opt
         return JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
     }
 
-    private sealed record RemoteJob(string Id, string InputSha256, string EndpointId, string? MaskSha256 = null);
-    private sealed record LayerCompletion(string Status, string JobId, string InputSha256, int Width, int Height, string? MaskSha256 = null);
+    private sealed record RemoteJob(string Id, string InputSha256, string EndpointId, string? MaskSha256 = null, string? MaskMode = null);
+    private sealed record LayerCompletion(string Status, string JobId, string InputSha256, int Width, int Height, string? MaskSha256 = null, string? MaskMode = null);
 }

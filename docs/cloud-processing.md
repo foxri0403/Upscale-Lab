@@ -1,6 +1,6 @@
 # 클라우드 AI 담당자 연동 계약
 
-자동 분리 후 사용자가 피사체 마스크를 수정하는 API·워커 계약과 배포 순서는 [피사체 수정 문서](subject-mask-refinement.md)를 따른다.
+현재 작업실은 자동 분리 후 표시한 범위를 BiRefNet_HR-matting으로 다시 추론한다. [선택 범위 보완 계약](subject-selection-additive.md)과 [운영 배포 기록](birefnet-roi-deployment-20261031.md)을 따른다. 기존 직접 알파 마스크 계약은 [호환 API 문서](subject-mask-refinement.md)에 남아 있다.
 
 현재 업스케일 경로는 `RunPodProjectImageProcessor` → `RunPodUpscaleService` → NVIDIA CUDA 워커의 `RealESRGAN_x4plus`다. 배경 분리는 `ExistingLayerProjectProcessor` → `RunPodImageLayerProcessor` → 별도 RunPod CUDA 워커의 `BiRefNet_HR-matting` + `big-lama`다. 로컬 GPU 추론 대체 경로는 사용하지 않는다. 공급자 자격은 API 서버 보안 설정에서만 읽는다. 모델 준비·컨테이너·입출력 계약은 [분리 워커 문서](../gpu-worker-runpod/layers/README.md)를 따른다.
 

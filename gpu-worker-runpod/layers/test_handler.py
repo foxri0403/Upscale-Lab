@@ -33,7 +33,10 @@ class Pipeline:
     def __init__(self):
         self.calls = []
 
-    def split(self, image, alpha):
+    def split(self, image, alpha=None, selection=None):
+        if selection is not None:
+            self.selection = selection
+            alpha = selection.getchannel("R")
         self.calls.append(alpha)
         foreground = image.convert("RGBA")
         if alpha is not None:
@@ -42,6 +45,16 @@ class Pipeline:
 
 
 class HandlerContractTests(unittest.TestCase):
+    def test_selection_reaches_roi_pipeline_and_completion_acknowledges_mode(self):
+        prior = Image.new("L", (64, 64), 0); prior.paste(128, (20, 20, 40, 40))
+        guide = Image.new("L", (64, 64), 0); guide.paste(255, (30, 30, 50, 50))
+        self.mask = png_bytes(Image.merge("RGB", (prior, guide, Image.new("L", (64, 64), 0))))
+        self.data["mask_mode"] = "selection"
+        self.data["mask_sha256"] = hashlib.sha256(self.mask).hexdigest().upper()
+        result = self.run_handler()
+        self.assertEqual(result["maskMode"], "selection")
+        self.assertEqual(self.pipeline.selection.getpixel((35, 35)), (128, 255, 0))
+
     def setUp(self):
         self.image = png_bytes(Image.new("RGB", (64, 64), "blue"))
         mask = Image.new("L", (64, 64), 0)

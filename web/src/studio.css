@@ -163,8 +163,10 @@
 .studio-layer-selection [role="group"] { display: grid; gap: 8px; }
 .studio-editor .layer-choice { display: flex; align-items: center; width: 100%; text-align: left; border: 1px solid var(--line); background: white; }
 .studio-editor .layer-choice.active { border-color: var(--primary); background: var(--tint); color: var(--primary); }
-.studio-editor .layer-choice .layer-thumb { position: relative; display: block; overflow: hidden; flex-shrink: 0; }
-.studio-editor .layer-choice .layer-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.studio-editor .layer-choice .layer-thumb { position: relative; display: block; overflow: hidden; flex-shrink: 0; container-type: size; }
+.layer-thumb-window { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); overflow: hidden; }
+.layer-thumb-plane { position: absolute; }
+.studio-editor .layer-choice .layer-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
 .studio-editor .layer-choice > svg { margin-left: auto; }
 .layer-preview-hint { font-size: 12px; color: var(--muted); line-height: 1.6; }
 .studio-editor .canvas-stage.subject-only { background-color: #fff; background-image: conic-gradient(#e4e7ef 25%, transparent 0 50%, #e4e7ef 0 75%, transparent 0); background-size: 20px 20px; }

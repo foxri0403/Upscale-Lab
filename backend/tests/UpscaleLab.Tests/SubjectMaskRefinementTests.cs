@@ -101,19 +101,22 @@ public sealed class SubjectMaskRefinementTests
         Assert.Equal(ProcessingJobStatus.Queued, (await service.RefineSubjectAsync(project.UserId, project.Id, layerId, retryMask, Ct)).Status);
     }
 
-    [Fact]
-    public async Task OwnershipStaleResultsPublishedProjectsAndConcurrentJobsAreRejectedBeforeStorage()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OwnershipStaleResultsPublishedProjectsAndConcurrentJobsAreRejectedBeforeStorage(bool selection)
     {
         await using var db = WorkflowData.Db(); var project = Project(); db.Add(project); await db.SaveChangesAsync();
         var store = new WorkflowStore(); var service = Service(db, store, new()); using var mask = Mask();
         var layerId = project.Layers.Last().Id;
-        await Assert.ThrowsAsync<NotFoundException>(() => service.RefineSubjectAsync(Guid.NewGuid(), project.Id, layerId, mask, Ct));
-        await Assert.ThrowsAsync<ConflictException>(() => service.RefineSubjectAsync(project.UserId, project.Id, Guid.NewGuid(), mask, Ct));
+        Task Refine(Guid user, Guid layer) => selection ? service.RefineSelectionAsync(user, project.Id, layer, mask, Ct) : service.RefineSubjectAsync(user, project.Id, layer, mask, Ct);
+        await Assert.ThrowsAsync<NotFoundException>(() => Refine(Guid.NewGuid(), layerId));
+        await Assert.ThrowsAsync<ConflictException>(() => Refine(project.UserId, Guid.NewGuid()));
         var post = new GalleryPost { ProjectId = project.Id, UserId = project.UserId, ImageId = project.OriginalImageId, IsPublic = true };
         db.Add(post); await db.SaveChangesAsync();
-        await Assert.ThrowsAsync<ConflictException>(() => service.RefineSubjectAsync(project.UserId, project.Id, layerId, mask, Ct));
+        await Assert.ThrowsAsync<ConflictException>(() => Refine(project.UserId, layerId));
         db.Remove(post); db.Add(new ProcessingJob { ProjectId = project.Id }); await db.SaveChangesAsync();
-        await Assert.ThrowsAsync<ConflictException>(() => service.RefineSubjectAsync(project.UserId, project.Id, layerId, mask, Ct));
+        await Assert.ThrowsAsync<ConflictException>(() => Refine(project.UserId, layerId));
         Assert.Empty(store.Files);
     }
 
@@ -133,13 +136,61 @@ public sealed class SubjectMaskRefinementTests
         Assert.Empty(await db.ProcessingJobs.ToListAsync()); Assert.Empty(store.Files);
     }
 
+    [Fact]
+    public async Task SelectionUsesTrustedNativeAlphaAndPreservesModeAcrossQueueRecovery()
+    {
+        await using var db = WorkflowData.Db(); var project = Project(); db.Add(project); await db.SaveChangesAsync();
+        var store = new WorkflowStore(); using var image = new MagickImage(MagickColors.Blue, 10, 10);
+        store.Files["source.png"] = image.ToByteArray(MagickFormat.Png);
+        using var alphaStream = Mask(); using var alpha = new MagickImage(alphaStream);
+        image.Alpha(AlphaOption.Set); image.Composite(alpha, CompositeOperator.CopyAlpha);
+        store.Files["old-subject.png"] = image.ToByteArray(MagickFormat.Png);
+        using var hints = new MagickImage(MagickColors.Red, 10, 10);
+        using var erase = new MagickImage(MagickColors.Lime, 1, 10); hints.Composite(erase, 0, 0, CompositeOperator.Over);
+        using var input = new MemoryStream(hints.ToByteArray(MagickFormat.Png));
+        var processor = new CaptureProcessor(); var started = await Service(db, store, processor)
+            .RefineSelectionAsync(project.UserId, project.Id, project.Layers.Last().Id, input, Ct);
+        var key = (await db.ProcessingJobs.SingleAsync()).SubjectMaskObjectKey!;
+        Assert.EndsWith(".selection.png", key);
+        using var packed = new MagickImage(store.Files[key]); using var pixels = packed.GetPixels();
+        Assert.Equal(128, pixels.GetPixel(4, 0).ToColor()!.R);
+        Assert.Equal(255, pixels.GetPixel(4, 0).ToColor()!.G);
+        Assert.Equal(0, pixels.GetPixel(4, 0).ToColor()!.B);
+        Assert.Equal(255, pixels.GetPixel(0, 0).ToColor()!.B);
+        Assert.Equal(0, pixels.GetPixel(9, 0).ToColor()!.R);
+        db.ChangeTracker.Clear(); var queue = new ProcessingJobQueue(); var service = Service(db, store, processor, queue);
+        await service.RecoverPendingAsync(Ct); Assert.Equal(started.JobId, await queue.DequeueAsync(Ct));
+        await service.ExecuteAsync(started.JobId, Ct);
+        Assert.True(processor.Selection); Assert.Equal(128, processor.SoftAlpha);
+        Assert.Equal(ProcessingJobStatus.Completed, (await service.GetStatusAsync(project.UserId, project.Id, Ct)).Status);
+    }
+
+    [Theory]
+    [InlineData("empty")]
+    [InlineData("blue")]
+    [InlineData("transparent")]
+    [InlineData("dimensions")]
+    public async Task InvalidSelectionNeverCreatesJobOrUploadsObject(string kind)
+    {
+        await using var db = WorkflowData.Db(); var project = Project(); db.Add(project); await db.SaveChangesAsync();
+        var store = new WorkflowStore(); using var prior = new MagickImage(MagickColors.Transparent, 10, 10);
+        using var body = new MagickImage(MagickColors.White, 5, 10); prior.Composite(body, 0, 0, CompositeOperator.Over);
+        store.Files["old-subject.png"] = prior.ToByteArray(MagickFormat.Png);
+        using var hints = new MagickImage(kind == "empty" ? MagickColors.Black : kind == "blue" ? MagickColors.Blue : kind == "transparent" ? MagickColors.Transparent : MagickColors.Red,
+            kind == "dimensions" ? 20u : 10u, 10);
+        using var input = new MemoryStream(hints.ToByteArray(MagickFormat.Png));
+        await Assert.ThrowsAsync<ValidationException>(() => Service(db, store, new()).RefineSelectionAsync(project.UserId, project.Id, project.Layers.Last().Id, input, Ct));
+        Assert.Empty(await db.ProcessingJobs.ToListAsync()); Assert.Single(store.Files);
+    }
+
     private sealed class CaptureProcessor : IProjectImageProcessor
     {
-        public bool Fail; public uint InputWidth; public byte SoftAlpha;
+        public bool Fail; public uint InputWidth; public byte SoftAlpha; public bool Selection;
         public bool Supports(ProcessingOperation operation) => operation == ProcessingOperation.Layers;
         public Task<ProjectProcessingResult> ProcessAsync(ProjectProcessingRequest request, CancellationToken ct)
         {
             if (Fail) throw new IOException("Simulated worker failure");
+            Selection = request.RefineSelection;
             using var source = new MagickImage(request.InputPath); InputWidth = source.Width;
             using var mask = new MagickImage(request.SubjectMaskPath!);
             using var pixels = mask.GetPixels(); SoftAlpha = pixels.GetPixel((int)(mask.Width / 2 - 1), 0).ToColor()!.R;

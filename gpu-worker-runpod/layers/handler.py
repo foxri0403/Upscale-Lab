@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 import requests
 import runpod
-from pipeline import LayerPipeline, MAX_BYTES, png_bytes, read_image, read_subject_mask
+from pipeline import LayerPipeline, MAX_BYTES, png_bytes, read_image, read_subject_mask, read_subject_selection
 
 pipeline = None
 gpu_lock = threading.Lock()
@@ -64,22 +64,28 @@ def handler(event):
         if hashlib.sha256(content).hexdigest().upper() != fingerprint.upper():
             raise ValueError("Input checksum does not match.")
         image = read_image(content, width, height)
-        alpha, mask_hash = None, data.get("mask_sha256")
+        alpha, selection, mask_hash = None, None, data.get("mask_sha256")
+        mask_mode = data.get("mask_mode")
+        if mask_mode not in (None, "selection"):
+            raise ValueError("Unsupported mask mode.")
         if data.get("mask_url") is not None:
             if not isinstance(mask_hash, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", mask_hash):
                 raise ValueError("Invalid mask checksum.")
             mask_content = download(signed_s3_url(data["mask_url"]))
             if hashlib.sha256(mask_content).hexdigest().upper() != mask_hash.upper():
                 raise ValueError("Subject mask checksum does not match.")
-            alpha = read_subject_mask(mask_content, width, height)
-        elif mask_hash is not None:
+            if mask_mode == "selection":
+                selection = read_subject_selection(mask_content, width, height)
+            else:
+                alpha = read_subject_mask(mask_content, width, height)
+        elif mask_hash is not None or mask_mode is not None:
             raise ValueError("Subject mask URL is missing.")
         with gpu_lock:
             if pipeline is None:
                 stage = "load_models"
                 pipeline = LayerPipeline()
             stage = "split"
-            background, foreground = pipeline.split(image, alpha)
+            background, foreground = pipeline.split(image, selection=selection) if selection is not None else pipeline.split(image, alpha)
         stage = "upload_results"
         upload(urls["background_url"], png_bytes(background), "image/png")
         upload(urls["foreground_url"], png_bytes(foreground), "image/png")
@@ -87,6 +93,8 @@ def handler(event):
                   "width": width, "height": height, "model": "BiRefNet_HR-matting", "inpainting": "big-lama"}
         if mask_hash is not None:
             result["maskSha256"] = mask_hash
+        if mask_mode is not None:
+            result["maskMode"] = mask_mode
         # Publish completion only after both PNGs are durable.
         upload(urls["completion_url"], json.dumps(result).encode(), "application/json")
         print(json.dumps({"event": "layers_completed", "seconds": round(time.monotonic() - started, 2)}), flush=True)

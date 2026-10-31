@@ -49,6 +49,40 @@ def generator_options(config_path):
     return OmegaConf.to_container(config.generator, resolve=True)
 
 
+def read_subject_selection(content, width, height):
+    """API-built RGB: original alpha, addition guide, eraser guide. Never raw client alpha."""
+    with Image.open(io.BytesIO(content)) as source:
+        if source.format != "PNG" or source.size != (width, height) or width * height > MAX_PIXELS:
+            raise ValueError("Selection must be a full-canvas PNG.")
+        if source.convert("RGBA").getchannel("A").getextrema() != (255, 255):
+            raise ValueError("Selection must be opaque.")
+        selection = source.convert("RGB")
+    prior, add, erase = selection.split()
+    background_mask(prior)
+    if add.getbbox() is None and erase.getbbox() is None:
+        raise ValueError("Selection has no edits.")
+    return selection
+
+
+def refine_selected(image, selection, matte):
+    """Run the same BiRefNet on the hinted ROI; preserve the rest of the native alpha."""
+    prior, guide, erase = selection.split()
+    values = np.asarray(prior).copy()
+    box = guide.getbbox()
+    if box is not None:
+        left, top, right, bottom = box
+        pad = max(32, round(max(right - left, bottom - top) * .1))
+        box = (max(0, left - pad), max(0, top - pad), min(image.width, right + pad), min(image.height, bottom + pad))
+        prediction = np.asarray(matte(image.crop(box)), dtype=np.uint16)
+        coverage = np.asarray(guide.crop(box), dtype=np.uint16)
+        addition = ((prediction * coverage + 127) // 255).astype(np.uint8)
+        left, top, right, bottom = box
+        values[top:bottom, left:right] = np.maximum(values[top:bottom, left:right], addition)
+    # Erasers remove selection explicitly; they are never promoted to a positive hint.
+    values = ((values.astype(np.uint16) * (255 - np.asarray(erase, dtype=np.uint16)) + 127) // 255).astype(np.uint8)
+    return Image.fromarray(values)
+
+
 class LayerPipeline:
     def __init__(self, root="/app/models"):
         import torch
@@ -70,16 +104,23 @@ class LayerPipeline:
         self.inpainter.load_state_dict(generator, strict=True)
         self.inpainter.eval().cuda()  # FFC/FFT stays FP32; only BiRefNet uses FP16.
 
-    def split(self, image, alpha=None):
+    def matte(self, image):
         torch = self.torch
         from torchvision import transforms
         transform = transforms.Compose([transforms.Resize((2048, 2048)), transforms.ToTensor(),
             transforms.Normalize([.485, .456, .406], [.229, .224, .225])])
         with torch.inference_mode():
-            if alpha is None:
-                prediction = self.segmenter(transform(image).unsqueeze(0).cuda().half())[-1].sigmoid()
-                alpha = Image.fromarray((prediction[0, 0].float().cpu().numpy() * 255).round().astype(np.uint8))
-                alpha = alpha.resize(image.size, Image.Resampling.LANCZOS)
+            prediction = self.segmenter(transform(image).unsqueeze(0).cuda().half())[-1].sigmoid()
+            alpha = Image.fromarray((prediction[0, 0].float().cpu().numpy() * 255).round().astype(np.uint8))
+        return alpha.resize(image.size, Image.Resampling.LANCZOS)
+
+    def split(self, image, alpha=None, selection=None):
+        torch = self.torch
+        with torch.inference_mode():
+            if selection is not None:
+                alpha = refine_selected(image, selection, self.matte)
+            elif alpha is None:
+                alpha = self.matte(image)
             holes = background_mask(alpha)
             # Use the global scene, not independent segmentation tiles. Bound LaMa's VRAM
             # while keeping all original unmasked pixels at their original resolution.

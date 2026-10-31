@@ -2,11 +2,13 @@ export type SmartSelectionInput = {
   imageKey: string; width: number; height: number; pixels: Uint8ClampedArray;
   guide: Uint8Array; prior: Uint8Array; reference: Uint8Array;
   mode: "restore" | "erase"; tool: "brush" | "lasso";
+  scope?: "painted";
 };
 export type SmartSelectionResult = { alpha: Uint8Array; score: number };
 export type SmartSelection = {
   refine: (input: SmartSelectionInput, progress: (message: string) => void) => Promise<SmartSelectionResult>;
   onRefined?: () => void;
+  additive?: boolean;
 };
 
 /** Find an interior point, rather than treating every roughly painted pixel as foreground. */
@@ -27,7 +29,7 @@ export function interiorPoint(mask: Uint8Array, width: number, height: number): 
   return best < 0 ? undefined : [best % width, Math.floor(best / width)];
 }
 
-export function selectionPrompts(input: Pick<SmartSelectionInput, "guide" | "prior" | "reference" | "width" | "height" | "mode" | "tool">) {
+export function selectionPrompts(input: Pick<SmartSelectionInput, "guide" | "prior" | "reference" | "width" | "height" | "mode" | "tool" | "scope">) {
   const { guide, prior, reference, width, height, mode } = input;
   if ([guide, prior, reference].some(x => x.length !== width * height)) throw new Error("Invalid selection canvas");
   const positive = new Uint8Array(guide.length), negative = new Uint8Array(guide.length);
@@ -47,8 +49,16 @@ export function selectionPrompts(input: Pick<SmartSelectionInput, "guide" | "pri
     if (!excluded) return { points, labels, referenceHits, unchanged: true };
     points.push(excluded); labels.push(0);
   }
-  // A rough lasso supplies background hints outside its bounds. Its interior is not a solid cutout.
-  if (input.tool === "lasso" && mode === "restore") {
+  // A painted-range edit is clipped after inference. Nearby pixels may still belong
+  // to the same object, so do not incorrectly label its neighboring body as background.
+  if (input.scope === "painted" && mode === "restore") {
+    for (const [x, y] of [[0, 0], [width - 1, 0], [0, height - 1], [width - 1, height - 1]]) {
+      const i = y * width + x;
+      if (reference[i] < 32 && guide[i] < 32) { points.push([x, y]); labels.push(0); }
+    }
+  }
+  // A rough legacy lasso supplies background hints outside its bounds.
+  else if (input.tool === "lasso" && mode === "restore") {
     let left = width, right = 0, top = height, bottom = 0;
     for (let i = 0; i < guide.length; i++) if (guide[i] > 127) {
       const x = i % width, y = Math.floor(i / width); left = Math.min(left, x); right = Math.max(right, x); top = Math.min(top, y); bottom = Math.max(bottom, y);
@@ -60,6 +70,12 @@ export function selectionPrompts(input: Pick<SmartSelectionInput, "guide" | "pri
     }
   }
   return { points, labels, referenceHits };
+}
+
+/** Only AI foreground inside the user's hint may be added; the hint itself is never foreground. */
+export function selectedAddition(predicted: Uint8Array, guide: Uint8Array) {
+  if (predicted.length !== guide.length) throw new Error("AI 선택 결과의 크기가 올바르지 않습니다.");
+  return Uint8Array.from(predicted, (value, i) => Math.min(value, guide[i]));
 }
 
 export function chooseSelection(logits: Float32Array, scores: Float32Array, input: Pick<SmartSelectionInput, "guide" | "prior" | "reference" | "width" | "height" | "mode" | "tool">, points: number[][], labels: number[], referenceHits: number): SmartSelectionResult {

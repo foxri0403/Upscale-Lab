@@ -32,8 +32,12 @@ public sealed class ProjectProcessingService(
         Stream mask, CancellationToken cancellationToken) =>
         StartCoreAsync(userId, projectId, new(), baseLayerId, mask, cancellationToken);
 
+    public Task<ProcessingStatusResponse> RefineSelectionAsync(Guid userId, Guid projectId, Guid baseLayerId,
+        Stream selection, CancellationToken cancellationToken) =>
+        StartCoreAsync(userId, projectId, new(), baseLayerId, selection, cancellationToken, true);
+
     private async Task<ProcessingStatusResponse> StartCoreAsync(Guid userId, Guid projectId,
-        ProcessProjectRequest request, Guid? baseLayerId, Stream? mask, CancellationToken cancellationToken)
+        ProcessProjectRequest request, Guid? baseLayerId, Stream? mask, CancellationToken cancellationToken, bool selection = false)
     {
         var project = await dbContext.LiveLayerProjects
             .Include(x => x.ProcessingJobs)
@@ -81,6 +85,7 @@ public sealed class ProjectProcessingService(
         {
             // Guid.Empty denotes a first manual selection, and is valid only before layers exist.
             var firstSelection = baseLayerId == Guid.Empty && project.Layers.Count == 0;
+            if (selection && firstSelection) throw new ConflictException("피사체 자동 분리를 먼저 실행해 주세요.");
             if (!firstSelection && (!project.Layers.Any(x => x.Id == baseLayerId && x.LayerType != LayerType.Background) ||
                 !project.Layers.Any(x => x.LayerType == LayerType.Background)))
                 throw new ConflictException("분리 결과가 변경되었습니다. 최신 결과를 불러온 뒤 수정해 주세요.");
@@ -88,8 +93,16 @@ public sealed class ProjectProcessingService(
                 .OrderByDescending(x => x.CreatedAt).FirstOrDefault();
             var width = latestImage?.ResultWidth ?? project.OriginalImage.OriginalWidth;
             var height = latestImage?.ResultHeight ?? project.OriginalImage.OriginalHeight;
-            using var normalized = await SubjectMask.ReadAsync(mask, width, height, cancellationToken);
-            job.SubjectMaskObjectKey = $"users/{userId:N}/projects/{projectId:N}/masks/{job.Id:N}.png";
+            using var foreground = new MemoryStream();
+            if (selection)
+            {
+                await storageService.DownloadAsync(project.Layers.Single(x => x.Id == baseLayerId).ObjectKey, foreground, cancellationToken);
+                foreground.Position = 0;
+            }
+            using var normalized = selection
+                ? await SubjectSelection.ReadAsync(mask, foreground, width, height, cancellationToken)
+                : await SubjectMask.ReadAsync(mask, width, height, cancellationToken);
+            job.SubjectMaskObjectKey = $"users/{userId:N}/projects/{projectId:N}/masks/{job.Id:N}{(selection ? ".selection" : "")}.png";
             await storageService.UploadAsync(normalized, job.SubjectMaskObjectKey, "image/png", cancellationToken);
         }
         project.Status = ProjectStatus.Processing;
@@ -318,7 +331,7 @@ public sealed class ProjectProcessingService(
                     job.TargetLongEdge, async (progress, ct) => {
                         job.Progress = Math.Clamp(progress, 15, 75);
                         await dbContext.SaveChangesAsync(ct);
-                    }, maskPath),
+                    }, maskPath, job.SubjectMaskObjectKey?.EndsWith(".selection.png", StringComparison.Ordinal) == true),
                 cancellationToken);
             var hasLayers = job.Operation != ProcessingOperation.Upscale;
             var hasImage = job.Operation != ProcessingOperation.Layers;
