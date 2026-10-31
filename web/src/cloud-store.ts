@@ -190,6 +190,7 @@ export async function fetchLibrary(
     library: {
       images,
       devices: mappedDevices,
+      commands: [],
       assets: ownPictures,
     },
     publicImages: mergeExploreFeed(

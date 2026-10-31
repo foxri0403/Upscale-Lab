@@ -9,7 +9,7 @@ const raw = fs.readFileSync(new URL("../src/character-rig.ts", import.meta.url),
   .replace(/^import \{ defaultHeadRig, type HeadRig \} from "\.\/model";/m, `const defaultHeadRig = {
     enabled: false, headTilt: 60, eyeMove: 35, hairSway: 55, pivotX: 50, pivotY: 16, idle: true,
   };`);
-const js = stripTypeScriptTypes(raw, { mode: "transform" });
+const js = stripTypeScriptTypes(raw, { mode: "strip" });
 const { rigPart, rigTargets, normalizeRig } = await import(`data:text/javascript,${encodeURIComponent(js)}`);
 
 test("character rig moves only semantic face, eyes and hair parts", () => {

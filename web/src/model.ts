@@ -88,11 +88,24 @@ export type Device = {
   online: boolean;
   connection?: "connected" | "connecting" | "disconnected";
   supportsWallpaperRemoval?: boolean;
+  manufacturer?: string;
+  model?: string;
+  architecture?: string;
   displays: Display[];
+};
+export type Command = {
+  id: string;
+  device: string;
+  display: string;
+  picture: string;
+  status: "대기" | "완료" | "실패";
+  created: string;
+  detail?: string;
 };
 export type Library = {
   images: Picture[];
   devices: Device[];
+  commands: Command[];
   assets?: Picture[];
 };
 export const defaultEdit: Edit = {
@@ -139,6 +152,7 @@ export function sampleImages(): Picture[] {
 export function sampleLibrary(): Library {
   return {
     images: sampleImages(),
+    commands: [],
     devices: [
       {
         id: "pc",
