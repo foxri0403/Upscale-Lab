@@ -27,3 +27,5 @@
 - `deploy/install-web.sh` Bash 문법 검사 통과. 기존 사용자 미커밋 파일 13개는 별도 해시로 보존을 확인한다.
 
 검증 자료와 복구 전 사본은 무시되는 `artifacts/manual-separation-restore-20261101/`에 보관한다. 실제 RunPod GPU 작업·실기기 배경화면 적용·운영 웹/API 배포는 이번 소스 복구 검증에 포함하지 않았다. 새 APK·EXE를 생성하지 않았으며 DB migration을 실행하거나 CI/CD를 추가하지 않았다.
+
+후속 실제 운영 배포와 GPU 검증은 [2026-11-01 운영 복구 배포 기록](production-restoration-deployment-20261101.md)에 정리했다.
