@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using UpscaleLab.Api.Authentication;
 using UpscaleLab.Application.Gallery;
 using UpscaleLab.Application.Images;
+using UpscaleLab.Application.Projects;
 
 namespace UpscaleLab.Api.Controllers;
 
@@ -10,6 +11,15 @@ namespace UpscaleLab.Api.Controllers;
 [Route("api/gallery")]
 public sealed class GalleryController(IGalleryService galleryService) : ControllerBase
 {
+    [Authorize(Policy = "AccountSession")]
+    [HttpPost("{id:guid}/import")]
+    public async Task<ActionResult<ProjectDetailResponse>> Import(Guid id,
+        [FromServices] IGalleryImportService imports, CancellationToken cancellationToken)
+    {
+        var project = await imports.ImportAsync(User.GetRequiredUserId(), id, cancellationToken);
+        return Created($"/api/projects/{project.Id}", project);
+    }
+
     [AllowAnonymous]
     [HttpGet("{id:guid}/thumbnail")]
     public async Task<IActionResult> Thumbnail(Guid id,

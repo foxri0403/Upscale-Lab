@@ -31,6 +31,7 @@ import {
 import { Modal, Notice, Busy, Empty, Link } from "./ui";
 import { cloud, request, post, type Job } from "./api";
 import { detailPicture, discardDraft, loadProjectPicture, processProject, refineSubject, resetProjectEffects, saveImageEdit } from "./cloud-store";
+import { processingStatus } from "./processing-status";
 import { useUnsavedWarning } from "./use-unsaved-warning";
 import { LayerPreviewSelector } from "./LayerPreviewSelector";
 import { LayerMotionControls } from "./LayerMotionControls";
@@ -586,9 +587,7 @@ export function Studio({ route }: { route: string }) {
               <p className="studio-separation-help">캐릭터용 분리는 완료까지 시간이 걸릴 수 있습니다. 기존 배경 분리와 다른 AI 서비스로 처리합니다.</p>}
             {job && job.status !== "Completed" && (
               <p className="job-state">
-                {job.status === "Failed"
-                    ? job.errorMessage || "처리 실패"
-                    : `처리 중 · ${job.progress}%`}
+                {processingStatus(job)}
               </p>
             )}
           </div>

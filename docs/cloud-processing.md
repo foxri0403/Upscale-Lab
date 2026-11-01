@@ -49,6 +49,8 @@ Task<ProjectProcessingResult> ProcessAsync(ProjectProcessingRequest request, Can
 
 웹의 배경 분리 버튼은 기존 Layers 작업에 연결한다. Live 2D ON/OFF와 강도는 저장/기기 적용에 반영한다. 분리된 결과물은 OFF에서도 레이어를 보존하며 manifest의 `motionEnabled=false`로 센서·프레임 갱신을 중단하고 중앙 합성본을 표시한다. 저장된 결과물의 설정 변경은 `/api/wallpapers/{id}/snapshot`으로 별도 버전을 생성한다. 모바일도 같은 클라우드 처리 후 레이어만 기기에 보관하며 ML Kit을 실행하지 않는다.
 
+Live 2D 캐릭터 파츠 작업(`CharacterLayers`)은 별도 See-through endpoint를 사용한다. 요청별 `policy.executionTimeout`과 `ttl`을 `SeeThrough:RunPodTimeoutSeconds`(60~3600초)에 맞춰 기본 endpoint 제한과의 불일치를 피한다. 20은 GPU 할당 대기, 45는 파츠 생성, 70~75는 결과 읽기·검증 단계다. 진행률은 실제 원격 단계이며 추론 완료율을 추정하지 않는다. 작업별 `cloud-jobs/character-layers/{jobId}/remote.json`에 원격 ID·입력 hash·endpoint·제출 시각·완료 여부를 저장한다. API 재시작은 동일 작업을 조회하고 원래 제한 시간을 유지하며, 시간 초과 시 원격 취소를 시도한다. ZIP과 완료 metadata는 결과 보존 기간이 지난 후에도 복구할 수 있게 보관한다. 운영자는 기존 photo layers와 함께 `cloud-jobs/`의 임시 파일에 7일 만료 lifecycle을 적용한다.
+
 움직임은 웹 `requestAnimationFrame`, Android `Choreographer`와 하드웨어 Canvas, Windows WPF의 `CompositionTarget.Rendering`으로 갱신한다. 클라우드에서 애니메이션 프레임을 계속 전송하지 않는다. 입력과 렌더링을 분리하고 경과 시간에 따라 보간한다. 60Hz 이상 화면의 전면 실행에서 60fps 이상을 목표로 하며, 실제 FPS/프레임 지연은 기기·해상도별 실측이 필요하다. 숨긴 웹 탭·OFF·화면 비표시는 갱신을 중단한다.
 
 ## 운영 경계

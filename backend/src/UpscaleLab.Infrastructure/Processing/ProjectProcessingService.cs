@@ -368,7 +368,9 @@ public sealed class ProjectProcessingService(
             }
             dbContext.ChangeTracker.Clear();
             job = await dbContext.ProcessingJobs.Include(x => x.Project).SingleAsync(x => x.Id == jobId, CancellationToken.None);
-            var message = $"이미지 처리에 실패했습니다. 작업 ID: {jobId}";
+            var message = exception is TimeoutException
+                ? $"클라우드 처리 대기 또는 실행 제한 시간을 초과했습니다. 잠시 후 다시 시도해 주세요. 작업 ID: {jobId}"
+                : $"이미지 처리에 실패했습니다. 작업 ID: {jobId}";
             job.Status = ProcessingJobStatus.Failed;
             job.ResultObjectKey = null; job.ResultWidth = 0; job.ResultHeight = 0;
             job.ErrorMessage = message;
