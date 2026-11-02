@@ -75,6 +75,24 @@ element<HTMLButtonElement>("#run-tests").onclick = async () => {
       assert(element(".character-demo").dataset.input === (mobile ? "gyro" : "mouse"), "wrong default input");
       assert(element(".subject-demo").dataset.input === (mobile ? "gyro" : "mouse"), "wrong subject input");
     });
+    await check("화면별 안내 박스와 가리지 않는 기기 배치", () => {
+      const hint = mobile || innerWidth <= 540
+        ? "핸드폰을 기울여서 자이로센서를 이용해 보세요."
+        : "마우스를 움직여 보세요.";
+      for (const demo of document.querySelectorAll<HTMLElement>(".motion-demo")) {
+        assert(demo.querySelector<HTMLElement>(".floating-label")!.innerText === hint, "wrong responsive hint");
+        assert(!demo.querySelector(".demo-stage-tag"), "image tag remains");
+      }
+      const foot = element(".monitor-foot").getBoundingClientRect();
+      for (const selector of [".mock-tablet", ".mock-phone"]) {
+        const device = element(selector).getBoundingClientRect();
+        assert(device.right <= foot.left || device.left >= foot.right || device.bottom <= foot.top || device.top >= foot.bottom,
+          `${selector} covers the monitor stand`);
+      }
+      assert(!document.querySelector(".phone-notch"), "phone notch remains");
+      const camera = element(".phone-punch-hole").getBoundingClientRect();
+      assert(camera.width > 0 && camera.width === camera.height, "punch-hole camera missing");
+    });
     await check("업스케일 비교 슬라이더", async () => {
       const slider = element<HTMLInputElement>(".compare-art input");
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(slider, "80");

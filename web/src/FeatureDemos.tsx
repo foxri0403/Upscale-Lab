@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { Check, ChevronsLeftRight, MousePointer2, Smartphone } from "lucide-react";
+import { BatteryFull, Check, ChevronsLeftRight, MousePointer2, Signal, Smartphone } from "lucide-react";
 import { useParallax } from "./use-parallax";
 import { useCharacterRig } from "./use-character-rig";
 import { showcaseCharacter, showcaseRig } from "./showcase-character";
@@ -135,41 +135,42 @@ export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
 
   return (
     <div className={`motion-demo ${variant}-demo`} data-input={input}>
-      <div className="demo-stage" ref={element => { motion.stage.current = element; rig.stage.current = element; }} tabIndex={0} role="group"
-        aria-label={`${title} 움직임 미리보기`} aria-describedby={instruction}
-        onKeyDown={moveWithKeys} onBlur={() => setKeyboard({ x: 0, y: 0 })}>
-        <div className="demo-planes" ref={motion.layers}>
-          {variant === "subject" ? <>
-            <img className="demo-background" src="/images/fox-background.png" alt="고정된 숲 배경" loading="lazy" />
-            <div className="demo-subject-plane">
-              <img src="/images/fox-foreground.png" alt="마우스와 기울기에 따라 움직이는 여우 피사체" loading="lazy" />
-            </div>
-          </> : <>
-            <div className="character-backdrop" aria-hidden="true"><span /></div>
-            <div className="demo-character-plane">
-              <div className="demo-character-rig" ref={rig.layers} role="img" aria-label="얼굴·눈동자·머리카락 파츠가 독립적으로 움직이는 여성 캐릭터"
-                style={{ aspectRatio: `${showcaseCharacter.width} / ${showcaseCharacter.height}` } as CSSProperties}>
-                <svg className="character-clip-defs" width="0" height="0" aria-hidden="true" focusable="false">
-                  <defs><clipPath id={neckOpening} clipPathUnits="objectBoundingBox">
-                    <path d="M0 0H1V.42H.572C.568 .435 .548 .442 .514 .442C.485 .442 .464 .436 .458 .42H0Z" />
-                  </clipPath></defs>
-                </svg>
-                {showcaseCharacter.layers.map(layer => <img key={layer.file} src={layer.src} alt="" aria-hidden="true"
-                  width={showcaseCharacter.width} height={showcaseCharacter.height} loading="lazy"
-                  data-rig-part={layer.part} data-layer-name={layer.name}
-                  style={{ zIndex: layer.renderOrder, clipPath: layer.name === "neck" ? `url("#${neckOpening}")` : undefined }}
-                  onError={() => setArtworkError(true)} />)}
+      <div className="demo-artwork">
+        <div className="demo-stage" ref={element => { motion.stage.current = element; rig.stage.current = element; }} tabIndex={0} role="group"
+          aria-label={`${title} 움직임 미리보기`} aria-describedby={instruction}
+          onKeyDown={moveWithKeys} onBlur={() => setKeyboard({ x: 0, y: 0 })}>
+          <div className="demo-planes" ref={motion.layers}>
+            {variant === "subject" ? <>
+              <img className="demo-background" src="/images/fox-background.png" alt="고정된 숲 배경" loading="lazy" />
+              <div className="demo-subject-plane">
+                <img src="/images/fox-foreground.png" alt="마우스와 기울기에 따라 움직이는 여우 피사체" loading="lazy" />
               </div>
-            </div>
-          </>}
+            </> : <>
+              <div className="character-backdrop" aria-hidden="true"><span /></div>
+              <div className="demo-character-plane">
+                <div className="demo-character-rig" ref={rig.layers} role="img" aria-label="얼굴·눈동자·머리카락 파츠가 독립적으로 움직이는 여성 캐릭터"
+                  style={{ aspectRatio: `${showcaseCharacter.width} / ${showcaseCharacter.height}` } as CSSProperties}>
+                  <svg className="character-clip-defs" width="0" height="0" aria-hidden="true" focusable="false">
+                    <defs><clipPath id={neckOpening} clipPathUnits="objectBoundingBox">
+                      <path d="M0 0H1V.42H.572C.568 .435 .548 .442 .514 .442C.485 .442 .464 .436 .458 .42H0Z" />
+                    </clipPath></defs>
+                  </svg>
+                  {showcaseCharacter.layers.map(layer => <img key={layer.file} src={layer.src} alt="" aria-hidden="true"
+                    width={showcaseCharacter.width} height={showcaseCharacter.height} loading="lazy"
+                    data-rig-part={layer.part} data-layer-name={layer.name}
+                    style={{ zIndex: layer.renderOrder, clipPath: layer.name === "neck" ? `url("#${neckOpening}")` : undefined }}
+                    onError={() => setArtworkError(true)} />)}
+                </div>
+              </div>
+            </>}
+          </div>
         </div>
-        <span className="demo-stage-tag" aria-hidden="true">{variant === "character" ? "LIVE 2D" : "BACKGROUND / SUBJECT"}</span>
+        <p id={instruction} className="floating-label demo-motion-hint">
+          <span className="motion-hint-desktop"><MousePointer2 size={16} /><span>마우스를 움직여 보세요.</span></span>
+          <span className="motion-hint-mobile"><Smartphone size={16} /><span>핸드폰을 기울여서 자이로센서를 이용해 보세요.</span></span>
+        </p>
       </div>
       {variant === "character" && artworkError && <p className="form-error" role="alert">캐릭터 파츠를 불러오지 못했어요. 페이지를 새로고침해 주세요.</p>}
-      <div className="demo-toolbar">
-        <p id={instruction}>{input === "gyro" ? <><Smartphone size={15} /> 기기를 천천히 기울여 보세요</>
-          : <><MousePointer2 size={15} /> 마우스를 움직여 보세요</>}</p>
-      </div>
       {status && <p className="demo-status" role="status">{status}</p>}
     </div>
   );
@@ -186,12 +187,16 @@ export function DeviceShowcase() {
         <img src="/images/fox.png" alt="여우 배경화면이 적용된 태블릿" loading="lazy" />
         <span className="tablet-camera" aria-hidden="true" />
       </div>
-      <div className="mock-phone">
+      <div className="mock-phone android-phone">
         <div className="phone-character-wallpaper">
           <img src={characterImage} alt="Live 2D 버튜버 캐릭터 배경화면이 적용된 휴대폰" width="1024" height="1536" loading="lazy" />
         </div>
-        <div className="phone-notch" />
-        <span aria-hidden="true">09:41</span>
+        <div className="phone-punch-hole" aria-hidden="true" />
+        <div className="android-status-bar" aria-hidden="true"><span>5G</span><Signal size={9} /><BatteryFull size={10} /></div>
+        <span className="android-lock-clock" aria-hidden="true">09:41</span>
+        <div className="android-navigation" aria-hidden="true">
+          <span className="android-recents" /><span className="android-home" /><span className="android-back" />
+        </div>
       </div>
       <span className="floating-label"><Check size={16} /> 나의 화면, 하나의 공간에서</span>
     </div>

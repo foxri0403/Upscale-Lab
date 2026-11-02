@@ -193,7 +193,8 @@ export function Landing() {
             </p>
             <div className="feature-points">
               <span>파츠별 움직임</span>
-              <span>마우스 · 자이로</span>
+              <span>마우스 반응</span>
+              <span>자이로 센서 반응</span>
             </div>
           </div>
           <MotionDemo variant="character" />
@@ -218,7 +219,6 @@ export function Landing() {
                 <Smartphone size={18} /> Android
               </span>
             </div>
-            <small>Windows·Android 연결 앱으로 적용합니다.</small>
           </div>
           <DeviceShowcase />
         </section>
