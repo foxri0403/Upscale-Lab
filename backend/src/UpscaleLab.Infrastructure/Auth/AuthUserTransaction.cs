@@ -14,9 +14,15 @@ internal static class AuthUserTransaction
         return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            // Also serializes the first registration where no row exists yet.
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtextextended({email}, 0))", cancellationToken);
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $"SELECT 1 FROM users WHERE \"Email\" = {email} FOR UPDATE", cancellationToken);
             foreach (var entry in db.ChangeTracker.Entries<Domain.Entities.User>()
+                         .Where(x => x.Entity.Email == email).ToList())
+                await entry.ReloadAsync(cancellationToken);
+            foreach (var entry in db.ChangeTracker.Entries<Domain.Entities.PendingRegistration>()
                          .Where(x => x.Entity.Email == email).ToList())
                 await entry.ReloadAsync(cancellationToken);
             var result = await action();

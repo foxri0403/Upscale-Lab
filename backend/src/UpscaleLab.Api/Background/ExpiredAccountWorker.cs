@@ -13,10 +13,10 @@ public sealed class ExpiredAccountWorker(IServiceScopeFactory scopes, ILogger<Ex
             try
             {
                 using var scope = scopes.CreateScope();
-                await scope.ServiceProvider.GetRequiredService<IAuthService>().DeleteExpiredAccountsAsync(stoppingToken);
+                await scope.ServiceProvider.GetRequiredService<IAuthService>().DeleteExpiredRegistrationsAndSessionsAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
-            catch (Exception error) { logger.LogError(error, "Account/session cleanup failed; retrying in 30 seconds."); }
+            catch (Exception error) { logger.LogError(error, "Pending registration/session cleanup failed; retrying in 30 seconds."); }
         } while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 }

@@ -50,7 +50,7 @@
 | [현재 서비스 동작](service-behavior.md) | 보관함·공유 가져오기·다운로드 수·편집 자동 저장·기기 UI·운영 경계 |
 | [피사체 선택](subject-selection.md) | 자동 분리·ROI 추가/제거·RGB 채널 계약·직접 알파 마스크 호환·검증 |
 | [Live 2D](live-2d.md) | 캐릭터 파츠·레이어 순서 API·웹 리깅·정지 PNG 적용과 미연결 기능 한계 |
-| [인증 API](auth-api.md) | 로그인·메일 인증·갱신 자격·세션 폐기·만료 미인증 계정 정리 |
+| [인증 API](auth-api.md) | 로그인·메일 인증·갱신 자격·세션 폐기·만료 인증 대기 정보 정리 |
 | [배포](deployment.md) | 현행 수동 API/웹·DB migration·다운로드 파일 보존·복구 절차 |
 | [README](../README.md)·[웹](../web/README.md)·[Android](../mobile/README.md) | 현재 구성과 실행·검증·서명·설치 파일 규칙 |
 

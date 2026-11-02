@@ -8,6 +8,7 @@ namespace UpscaleLab.Infrastructure.Database;
 public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
+    public DbSet<PendingRegistration> PendingRegistrations => Set<PendingRegistration>();
     public DbSet<PaymentOrder> PaymentOrders => Set<PaymentOrder>();
     public DbSet<UserSubscription> UserSubscriptions => Set<UserSubscription>();
     public DbSet<UserTokenWallet> UserTokenWallets => Set<UserTokenWallet>();
@@ -35,6 +36,15 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         base.OnModelCreating(modelBuilder);
 
         ConfigureUser(modelBuilder);
+        var pending = modelBuilder.Entity<PendingRegistration>();
+        pending.ToTable("pending_registrations");
+        pending.Property(x => x.Email).HasMaxLength(320).IsRequired();
+        pending.Property(x => x.Username).HasMaxLength(50).IsRequired();
+        pending.Property(x => x.PasswordHash).HasMaxLength(200).IsRequired();
+        pending.Property(x => x.ConsentTokenHash).HasMaxLength(64);
+        pending.HasIndex(x => x.Email).IsUnique();
+        pending.HasIndex(x => x.Username).IsUnique();
+        pending.HasIndex(x => x.ExpiresAt);
         ConfigureTokens(modelBuilder);
         ConfigurePayments(modelBuilder);
         ConfigureSubscriptions(modelBuilder);
@@ -79,6 +89,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         entity.Property(x => x.Email).HasMaxLength(320).IsRequired();
         entity.Property(x => x.Username).HasMaxLength(50).IsRequired();
         entity.Property(x => x.PasswordHash).HasMaxLength(200).IsRequired();
+        entity.Property(x => x.CopyrightTermsVersion).HasMaxLength(32);
+        entity.Property(x => x.CopyrightTermsDocumentHash).HasMaxLength(64);
+        entity.Property(x => x.CopyrightSignature).HasMaxLength(50);
         entity.HasIndex(x => x.Email).IsUnique();
         entity.HasIndex(x => x.Username).IsUnique();
     }

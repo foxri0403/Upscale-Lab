@@ -35,8 +35,8 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
 
     [AllowAnonymous]
     [HttpPost("verify-email")]
-    [ProducesResponseType<AuthResponse>(StatusCodes.Status200OK)]
-    public async Task<ActionResult<AuthResponse>> VerifyEmail(
+    [ProducesResponseType<RegistrationChallenge>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<RegistrationChallenge>> VerifyEmail(
         VerifyEmailRequest request,
         CancellationToken cancellationToken)
     {
@@ -44,14 +44,19 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     }
 
     [AllowAnonymous]
+    [HttpPost("accept-registration-terms")]
+    public async Task<ActionResult<AuthResponse>> AcceptRegistrationTerms(
+        AcceptRegistrationTermsRequest request, CancellationToken cancellationToken) =>
+        Ok(await authService.AcceptRegistrationTermsAsync(request, cancellationToken));
+
+    [AllowAnonymous]
     [HttpPost("resend-verification")]
-    [ProducesResponseType<MessageResponse>(StatusCodes.Status202Accepted)]
-    public async Task<ActionResult<MessageResponse>> ResendVerificationEmail(
+    [ProducesResponseType<VerificationEmailResponse>(StatusCodes.Status202Accepted)]
+    public async Task<ActionResult<VerificationEmailResponse>> ResendVerificationEmail(
         ResendVerificationEmailRequest request,
         CancellationToken cancellationToken)
     {
-        await authService.ResendVerificationEmailAsync(request, cancellationToken);
-        return Accepted(new MessageResponse("인증 메일 요청이 접수되었습니다."));
+        return Accepted(await authService.ResendVerificationEmailAsync(request, cancellationToken));
     }
 
     [AllowAnonymous]

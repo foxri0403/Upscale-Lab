@@ -1,5 +1,9 @@
 import type { Session } from "./auth";
 import type { Edit } from "./model";
+import type { VerificationTiming } from "./signup-validation";
+import type { ConsentValues } from "./CopyrightConsent";
+export type RegistrationChallenge = { email: string; username: string; token: string; expiresAt: string; termsVersion: string };
+export type RegistrationResponse = VerificationTiming & { email: string; username: string; requiresEmailVerification: boolean; registration?: RegistrationChallenge };
 export type SavedEdit = Edit & { savedAt: string; tags?: string[] };
 declare global {
   interface Window {
@@ -174,13 +178,21 @@ export async function cloudLogin(
 export async function cloudVerify(
   email: string,
   code: string,
-): Promise<Session> {
-  const result = await request<AuthResponse>(
+): Promise<RegistrationChallenge> {
+  return request<RegistrationChallenge>(
     "/api/auth/verify-email",
     { method: "POST", body: JSON.stringify({ email, code }) },
     false,
   );
+}
+export async function cloudAcceptRegistration(challenge: RegistrationChallenge, consent: ConsentValues): Promise<Session> {
+  const result = await request<AuthResponse>("/api/auth/accept-registration-terms", {
+    method: "POST", body: JSON.stringify({ email: challenge.email, token: challenge.token, ...consent }),
+  }, false);
   memoryEpoch++;
+  sessionStorage.removeItem(tokenKey);
+  localStorage.removeItem(tokenKey);
+  tokenStorage = sessionStorage;
   storeTokens(result);
   return {
     id: result.user.id,

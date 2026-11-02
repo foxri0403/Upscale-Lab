@@ -34,6 +34,18 @@ pnpm build는 TypeScript 검사와 일반 Vite 빌드를 수행한다. build:clo
 
 [브라우저 회귀 검사](http://localhost:5173/tests/feature-showcase.html)에서 PC 마우스·모바일 자동 센서·첫 터치 권한·권한 거부 시나리오를 선택한다. 실행 버튼은 검사 페이지에만 있으며 실제 소개 화면에는 없다. 기본 입력·전체 합성·목/옷깃 픽셀 합성·고정 몸통·개별 파츠 리그·방향키·움직임 줄이기·배경 고정을 검사한다. 센서와 포인터 종류의 모의 응답은 이 개발용 검사 페이지에만 적용되며 실제 휴대폰의 물리 센서 검증을 대신하지 않는다. 이 검사 페이지는 Vite 개발 서버에서 제공하며 빌드된 운영 번들에는 포함하지 않는다.
 
+## 회원가입 로컬 테스트
+
+`pnpm dev:production-ui`의 [회원가입 화면](http://localhost:5173/signup)은 운영 UI와 같은 입력·인증·동의 절차를 사용한다. 실제 메일은 로컬 API와 Cognito 설정, `AddPendingRegistrationConsent` DB 마이그레이션 적용이 필요하다. 회원 생성 시점과 수동 전환 절차는 [인증 API](../docs/auth-api.md)를 따른다.
+
+실제 이메일이나 계정을 만들지 않고 확인하려면 [개발용 가입 검증 화면](http://localhost:5173/tests/signup-flow.html)을 사용한다. 예시 이메일 `preview@example.test`, 아이디 `preview`, 비밀번호 `Preview-password1!`, 코드 `123456`으로 확인한다. 이 페이지에서만 API 응답을 모의하고 실제 동의·회원·JWT는 생성하지 않는다. 운영 번들에 포함되지 않으며 실제 서비스로 자동 대체되는 테스트 경로도 없다.
+
+- 한글 아이디로 제출하면 브라우저 기본 유효성 팝업이 표시되고 메일 요청이 없어야 한다.
+- 회원가입을 누르면 이메일 아래 코드 입력란과 남은 시간이 나타난다. 모의 발송은 10초 전에 발송된 응답이므로 처음부터 `14:50` 정도로 표시된다.
+- 잘못된 코드·미동의·필수 체크 또는 서명 누락 시 회원 0명/로그인 0건이어야 한다. 올바른 코드 확인 후에만 약관이 열리며, 동의·전자서명 완료 후 회원 1명/로그인 1건이 된다.
+- [만료 시나리오](http://localhost:5173/tests/signup-flow.html?scenario=expired)에서 `00:00`과 재입력 안내, 인증 버튼 비활성을 확인한다. 이전 진행 상태가 남아 있으면 ‘가입 정보 변경/다시 입력’을 눌러 초기화한다.
+- 이메일 인증 전 진행 정보와 서버 만료 시각만 sessionStorage에 보관한다. 비밀번호와 코드, 약관 확인용 임시 자격은 저장하지 않는다. 이메일 인증 후 새로고침했다면 같은 가입 정보를 다시 입력해 약관을 이어서 확인한다.
+
 ## 연결 앱 다운로드
 
 public/downloads/manifest.json과 그 manifest가 가리키는 서명된 Android APK·Windows EXE가 필요하다. Git에서 제외된 현재 배포 파일이므로 정리할 때 일반 빌드 산출물로 취급하지 않는다. `node scripts/verify-downloads.mjs public/downloads`로 크기·SHA-256을 검증한다. iOS는 준비 중이다. [연결 앱 빌드와 제약](../docs/companion-apps.md)을 따른다.

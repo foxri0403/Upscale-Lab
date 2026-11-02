@@ -11,6 +11,10 @@ public sealed class User : BaseEntity
     public DateTime? EmailVerifiedAt { get; set; }
     public DateTime? EmailVerificationSentAt { get; set; }
     public DateTime? EmailVerificationExpiresAt { get; set; }
+    public DateTime? CopyrightTermsAcceptedAt { get; set; }
+    public string? CopyrightTermsVersion { get; set; }
+    public string? CopyrightTermsDocumentHash { get; set; }
+    public string? CopyrightSignature { get; set; }
 
     public UserSetting? Setting { get; set; }
     public ICollection<Device> Devices { get; set; } = new List<Device>();

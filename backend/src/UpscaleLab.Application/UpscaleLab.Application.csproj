@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="..\UpscaleLab.Domain\UpscaleLab.Domain.csproj" />
+    <EmbeddedResource Include="..\..\..\web\src\legal\image-copyright-terms.json" LogicalName="ImageCopyrightTerms.json" />
   </ItemGroup>
 </Project>

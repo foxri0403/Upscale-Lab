@@ -1,100 +1,92 @@
 # 인증 API 연동 가이드
 
-이 문서는 Windows(WPF)와 Android(Flutter) 클라이언트에서 회원가입, 이메일 인증, 로그인, 아이디 찾기 및 비밀번호 재설정 API를 연동하기 위한 계약을 설명합니다. JSON 필드명은 camelCase입니다.
+JSON 필드명은 camelCase입니다. Windows/Android 연결 앱의 기존 로그인·세션 갱신은 그대로 사용합니다. 신규 회원가입은 이메일 인증과 약관·전자서명 동의를 모두 마쳐야 완료됩니다.
 
-## 인증 흐름
+## 가입 상태와 계정 생성 시점
 
-1. 클라이언트가 `POST /api/auth/register`로 회원가입합니다.
-2. 서버가 Amazon Cognito에 사용자를 등록하고 Cognito가 6자리 인증 코드를 이메일로 전송합니다.
-3. 클라이언트가 이메일과 코드를 `POST /api/auth/verify-email`로 제출합니다.
-4. 인증 성공 응답의 JWT를 저장하고 인증이 필요한 API에 사용합니다.
-5. 코드가 오지 않으면 `POST /api/auth/resend-verification`으로 재전송을 요청합니다.
-6. 로그인 이메일을 잊은 사용자는 사용자 이름으로 `POST /api/auth/find-id`를 호출합니다.
-7. 비밀번호를 잊은 사용자는 `POST /api/auth/forgot-password`로 코드를 요청하고 `POST /api/auth/reset-password`로 새 비밀번호를 설정합니다.
+1. `POST /api/auth/register`: 이메일·영문 아이디·비밀번호를 받고 Cognito가 인증 메일을 보냅니다. 임시 `pending_registrations`만 저장합니다. 이때 `users`, 기본 설정, 로그인 세션, JWT는 생성하지 않습니다.
+2. 웹은 같은 회원가입 화면의 이메일 바로 아래에 6자리 코드 입력란을 표시합니다. 서버가 돌려준 발송·만료 시각과 `serverTime`으로 클라이언트 시계 차이를 보정하여 카운트다운합니다. 새로고침해도 발송 시각을 초기화하지 않습니다. 비밀번호와 코드는 브라우저 저장소에 저장하지 않습니다.
+3. `POST /api/auth/verify-email`: 이메일 인증만 완료하고 약관 동의용 15분짜리 일회용 자격을 반환합니다. 회원·JWT·세션은 아직 없습니다.
+4. 웹에서 약관 전문, 중요 내용 요약, 사본 다운로드, 별도의 약관/전자서명 확인란과 아이디 서명을 제공합니다. 미리 체크된 항목은 없습니다. 미동의·창 닫기·잘못된 서명으로 가입은 완료되지 않습니다.
+5. `POST /api/auth/accept-registration-terms`: 서버가 인증 완료, 자격 유효기간, 약관 버전, 두 동의와 서명을 검증한 뒤 한 트랜잭션에서 회원·기본 설정·세션을 만들고 대기 정보를 제거합니다. 약관 버전·SHA-256 원문 확인값·UTC 동의 시각·서명·이메일 인증 시각은 회원에 기록합니다.
 
-이메일 인증 전에는 로그인할 수 없습니다. Cognito 인증 코드는 24시간 동안 유효하며, API의 재전송 요청은 60초 간격으로 제한됩니다. 잘못된 코드 입력 제한과 추가 요청 제한은 Cognito 정책을 따릅니다.
+Cognito에는 이메일 확인을 위한 외부 인증 레코드가 먼저 생깁니다. 이것은 애플리케이션 DB의 회원이나 서비스 로그인 권한이 아닙니다. 서비스의 신규 회원 레코드는 마지막 동의 단계에서만 생깁니다.
 
-## 회원가입
+## 가입 신청
 
 `POST /api/auth/register`
+
+```json
+{ "email": "user@example.com", "username": "tester", "password": "Correct-horse1!" }
+```
+
+이메일 최대 320자, 아이디는 영문 대·소문자 2~50자(웹 2~24자), 비밀번호는 10~128자이며 대문자·숫자·공백이 아닌 특수문자를 각각 포함해야 합니다. 비밀번호는 BCrypt 해시만 임시 저장하며 코드 생성·전송·검증은 Cognito가 담당합니다.
+
+성공 시 `201 Created`:
 
 ```json
 {
   "email": "user@example.com",
   "username": "tester",
-  "password": "Correct-horse1!"
-}
-```
-
-- `email`: 유효한 이메일 주소, 최대 320자, 대소문자를 구분하지 않음
-- `username`: 앞뒤 공백을 제외한 사용자 이름, 2~50자, 중복 불가
-- `password`: 10~128자이며 대문자, 숫자, 공백이 아닌 특수문자를 각각 하나 이상 포함
-
-성공 시 `201 Created`를 반환합니다. 이 단계에서는 JWT를 발급하지 않습니다.
-
-```json
-{
-  "user": {
-    "id": "00000000-0000-0000-0000-000000000000",
-    "email": "user@example.com",
-    "username": "tester",
-    "isEmailVerified": false,
-    "createdAt": "2026-10-02T11:00:00Z"
-  },
   "requiresEmailVerification": true,
-  "verificationCodeExpiresAt": "2026-10-03T11:00:00Z"
+  "verificationCodeSentAt": "2026-11-02T11:00:00Z",
+  "verificationCodeExpiresAt": "2026-11-02T11:15:00Z",
+  "resendAvailableAt": "2026-11-02T11:01:00Z",
+  "serverTime": "2026-11-02T11:00:01Z",
+  "registration": null
 }
 ```
 
-비밀번호는 애플리케이션 DB에 BCrypt(work factor 12) 단방향 해시만 저장합니다. Cognito 가입 요청에도 전달되지만 애플리케이션은 비밀번호 원문을 저장하거나 로그에 남기지 않습니다. 인증 코드 생성·전송·검증은 Cognito가 담당하며 애플리케이션 DB에는 인증 코드가 저장되지 않습니다.
+같은 원래 가입 정보로 다시 요청하면 진행 중인 인증을 이어갑니다. 이미 이메일 인증을 마쳤다면 `requiresEmailVerification: false`와 새 `registration` 자격을 반환하여 약관을 다시 확인할 수 있습니다. 이메일만 알아서는 동의 자격을 재발급받을 수 없습니다. 이전 자격은 무효화됩니다.
 
 ## 이메일 인증
 
 `POST /api/auth/verify-email`
 
 ```json
-{
-  "email": "user@example.com",
-  "code": "123456"
-}
+{ "email": "user@example.com", "code": "123456" }
 ```
 
-성공 시 `200 OK`와 JWT를 반환합니다.
+성공 시 `200 OK`와 약관 동의 자격을 반환합니다. 로그인 JWT가 아닙니다.
 
 ```json
 {
-  "accessToken": "eyJ...",
-  "expiresAt": "2026-10-02T12:00:00Z",
-  "user": {
-    "id": "00000000-0000-0000-0000-000000000000",
-    "email": "user@example.com",
-    "username": "tester",
-    "isEmailVerified": true,
-    "createdAt": "2026-10-02T11:00:00Z"
-  }
+  "email": "user@example.com",
+  "username": "tester",
+  "token": "64자리 임의의 16진수",
+  "expiresAt": "2026-11-02T11:20:00Z",
+  "termsVersion": "2026-11-02.1"
 }
 ```
 
-잘못되거나 만료된 코드는 동일한 `400` 오류를 반환합니다. Cognito가 요청을 제한한 경우 잠시 후 새 코드를 요청해야 합니다.
+잘못되거나 만료된 코드는 `400`입니다. 자격 원문은 서버 DB에 보관하지 않고 SHA-256 해시만 저장합니다. 웹에서는 동의 자격을 메모리에만 두므로 이 단계에서 새로고침한 경우 가입 화면에 원래 정보를 다시 입력하여 이어갑니다.
+
+## 약관 동의 및 회원가입 완료
+
+`POST /api/auth/accept-registration-terms`
+
+```json
+{
+  "email": "user@example.com",
+  "token": "64자리 임의의 16진수",
+  "termsVersion": "2026-11-02.1",
+  "acceptTerms": true,
+  "confirmSignature": true,
+  "signature": "tester"
+}
+```
+
+성공 시 기존 로그인과 같은 `AuthResponse`를 반환합니다. 동의 누락·다른 서명·구 버전은 `400`, 미인증·만료·다른 이메일·잘못된 자격·재사용은 `401`이며 회원과 세션을 생성하지 않습니다. 서명은 가입한 아이디와 정확히 일치해야 합니다.
 
 ## 인증 코드 재전송
 
 `POST /api/auth/resend-verification`
 
 ```json
-{
-  "email": "user@example.com"
-}
+{ "email": "user@example.com" }
 ```
 
-계정 존재 여부가 노출되지 않도록 존재하지 않는 이메일, 이미 인증된 이메일, 재전송 대기 중인 이메일 모두 동일한 `202 Accepted` 응답을 사용합니다.
-
-```json
-{
-  "message": "인증 메일 요청이 접수되었습니다."
-}
-```
-
+항상 일반적인 메시지와 `202 Accepted`를 사용합니다. 유효한 인증 대기에 대해서만 `verificationCodeSentAt`, `verificationCodeExpiresAt`, `resendAvailableAt`, `serverTime`을 반환합니다. 존재하지 않거나 이미 이메일 인증을 끝낸 이메일은 시간 필드가 null입니다. 60초 재전송 대기 중에는 실제 메일을 보내거나 기존 만료 시각을 연장하지 않습니다. 실제 재전송 성공 시에만 새 발송 시각부터 15분을 계산합니다. 이미 만료된 대기는 가입 신청을 다시 해야 합니다.
 ## 로그인
 
 `POST /api/auth/login`
@@ -106,7 +98,7 @@
 }
 ```
 
-하위 호환성을 위해 요청 필드명은 `email`을 유지하지만 값에는 이메일 또는 사용자 아이디를 입력할 수 있습니다. 이메일 인증 완료 후 `200 OK`와 `AuthResponse`를 반환합니다. 인증 전 로그인은 `403 Forbidden`, 로그인 정보 불일치는 `401 Unauthorized`입니다.
+하위 호환성을 위해 요청 필드명은 `email`을 유지하지만 값에는 이메일 또는 사용자 아이디를 입력할 수 있습니다. 이메일 인증과 약관 동의로 가입을 완료한 뒤 `200 OK`와 `AuthResponse`를 반환합니다. 인증 전 로그인은 `403 Forbidden`, 로그인 정보 불일치는 `401 Unauthorized`입니다.
 
 인증이 필요한 후속 API에는 다음 헤더를 사용합니다.
 
@@ -233,19 +225,24 @@ dotnet ef database update --project backend/src/UpscaleLab.Infrastructure --star
 Migration은 기존 계정의 인증 완료 상태를 보존하고 로컬 인증 코드 관련 컬럼을 제거합니다. 이전 Resend 흐름에서 아직 인증되지 않은 계정은 Cognito에 존재하지 않으므로 운영 적용 전에 별도로 정리하거나 마이그레이션해야 합니다.
 
 
-## 로그인 세션과 만료 계정 정리
+## 로그인 세션과 인증 대기 정보 정리
 
+신규 JWT는 `sid`로 로그인 세션에 연결되며 세션 폐기/만료, 이메일 인증, 비밀번호 fingerprint를 검증합니다. 기존 회원의 로그인·갱신·로그아웃과 기기 인증 정책은 유지합니다. 세션 갱신은 90일 미사용 또는 최초 발급 후 1년이 지나면 만료됩니다. [연결 앱의 계정+기기 인증](agent-api.md)을 따릅니다.
 
-신규 JWT는 `sid`로 로그인 세션에 연결되며 서버가 매 요청에서 세션 폐기/만료, 이메일 인증, 비밀번호 fingerprint를 검증합니다. 서버 로그아웃 후 아직 만료되지 않은 신규 액세스 토큰도 거부합니다. 기존 sid 없는 토큰은 기존 API 호환에만 허용하고 새 기기 제어/배경화면 관리 API에는 재로그인이 필요합니다. 설치형 에이전트의 계정+기기 이중 인증은 [연동 규격](agent-api.md)을 따릅니다.
+정리 작업은 시작 시 한 번, 이후 30초마다 실행하며 `users`를 삭제하지 않습니다. 이메일 미인증 대기는 마지막 실제 발송부터 15분, 이메일 인증 후 미동의 대기는 인증부터 24시간이 지나면 정리합니다. 정리 시 같은 이메일의 회원이 있으면 그 외부 인증 레코드는 삭제하지 않습니다. 회원이 없는 만료 대기의 Cognito 레코드만 정리하며 외부 정리 실패 시 임시 기록을 남겨 재시도합니다. PostgreSQL 이메일 단위 advisory lock으로 신규 가입·인증·동의·정리를 직렬화하고 아이디 예약도 잠급니다.
 
-`AddPersistentAuthSessions` 마이그레이션을 검토하고 수동 적용한 뒤 새 API를 배포합니다. 클라이언트만 업데이트하면 서버의 인증 만료·정리 정책은 바뀌지 않습니다. Cognito의 기존 인증 코드는 서비스 자체에서 24시간 유효하므로, API가 가입 시점부터 **15분**을 별도로 제한합니다. 재전송은 최초 가입의 만료 시점을 연장하지 않습니다. 이메일 인증 완료 후에는 만료 시각을 지우며 계정을 자동 삭제하지 않습니다.
+필수 설정은 기존 `Cognito:UserPoolId`, `Cognito:ClientId`, `Cognito:Region`이며 필요 시 `Cognito:ClientSecret`을 사용합니다. 외부 임시 레코드 정리는 서버 IAM Role/로컬 AWS 프로필의 대상 pool `AdminGetUser`·`AdminDeleteUser` 권한을 사용합니다. 새 IAM 권한이나 자동 배포를 추가하지 않습니다.
 
-API의 정리 작업은 시작할 때 한 번, 이후 30초마다 실행합니다. 15분이 지난 코드는 즉시 거부하고, 미인증 계정은 다음 정리에서 Cognito와 PostgreSQL 양쪽에서 삭제합니다. 기존 미인증 계정도 생성 시각부터 15분으로 계산합니다. Cognito 삭제 실패 시 DB 기록을 유지하고 로그를 남겨 다음 주기에 재시도합니다. 해당 이메일/사용자 이름으로 다시 가입할 때도 먼저 만료된 계정을 정리합니다. PostgreSQL 행 잠금으로 인증·재전송과 정리가 충돌하지 않게 합니다. Cognito에서 이미 확인된 계정은 정리 대상에서 보호합니다.
+## 수동 전환 및 로컬 검증
 
-필수 설정은 `Cognito:UserPoolId`, `Cognito:ClientId`, `Cognito:Region`이며 선택적으로 `Cognito:ClientSecret`을 사용합니다. 삭제 API는 AWS 기본 credential chain(서버 IAM Role/로컬 프로필 등)을 사용합니다. 대상 User Pool ARN에 `cognito-idp:AdminGetUser`, `cognito-idp:AdminDeleteUser` 권한을 부여해야 합니다. 실제 AWS 권한/설정은 이 작업에서 변경하지 않았습니다.
+- `AddPendingRegistrationConsent` 마이그레이션을 검토하고 수동 적용한 뒤 API와 웹을 함께 업데이트합니다. 이 변경으로 실제 DB나 운영 서버를 자동 업데이트하지 않습니다.
+- 이전 버전의 미인증 `users`가 남아 있으면 전환 전에 기존 정리 정책의 15분 창이 끝나도록 가입을 잠시 멈추고 기존 정리 작업의 완료를 확인합니다. 새 마이그레이션은 기존 회원을 삭제하거나 동의한 것으로 소급 표시하지 않습니다.
+- 생성된 EF 스냅샷은 이미 이전 마이그레이션에 포함된 결제/구독 모델과의 기존 차이도 정합화합니다. 이번 `Up/Down`에는 인증 대기 테이블과 회원의 약관 기록 열만 포함하며 결제/구독 테이블을 다시 생성하지 않습니다.
+- 백엔드 폴더에서 기존 보안 설정을 사용해 `dotnet ef database update --project src/UpscaleLab.Infrastructure --startup-project src/UpscaleLab.Api`와 README의 API 시작 절차를 실행합니다. 메일 발송은 실제 Cognito 설정이 있어야 합니다.
+- UI만 확인할 때는 웹에서 `pnpm dev:production-ui` 후 `/signup`을 엽니다. 실제 발송 없이 전 과정을 확인하는 개발 전용 `/tests/signup-flow.html`은 [웹 가이드](../web/README.md)를 따릅니다.
 
-로그인·이메일 인증 응답에 `refreshToken`, `refreshExpiresAt`이 추가됩니다. `POST /api/auth/refresh`는 `{ "refreshToken": "…" }`으로 새 액세스 토큰을 발급하며 `POST /api/auth/logout`은 해당 기기의 갱신 자격을 폐기합니다. 액세스 토큰은 기존 JWT 만료 설정(기본 60분)을 따릅니다. 갱신 자격은 256비트 난수이며 DB에는 SHA-256 해시만 저장합니다. 같은 자격으로 재시도할 수 있어 갱신 응답이 유실되어도 다음 요청에서 복구됩니다. 90일 미사용 또는 최초 발급 후 1년이 지나면 다시 로그인해야 합니다. 비밀번호 재설정 후 이전 갱신 자격도 무효입니다. 로그아웃은 오프라인에서도 기기의 자격을 삭제하며 서버 폐기는 연결이 가능한 경우에 수행합니다.
+## 약관 원문과 법적 범위
 
-Windows/Android 연결 앱의 세션 저장과 로그아웃 처리는 [연결 앱](companion-apps.md)을 따른다. 웹은 자동 로그인 선택 여부에 따라 sessionStorage/localStorage를 사용한다. 인증 계약은 백엔드 테스트로 검증하고 실제 AWS 권한과 실기기는 별도로 확인한다.
+정식 원문은 [버전이 고정된 JSON](../web/src/legal/image-copyright-terms.json)입니다. 웹과 API가 같은 파일을 번들/리소스로 사용하며 API는 줄바꿈을 LF로 정규화한 원문의 SHA-256을 기록합니다. 이미 동의된 버전의 내용은 덮어쓰지 말고 새 버전과 필요한 재동의 절차로 변경해야 합니다.
 
-참고: [Cognito 인증 코드 수명](https://docs.aws.amazon.com/cognito/latest/developerguide/quotas.html), [AdminDeleteUser IAM 요구사항](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminDeleteUser.html).
+권리 귀속과 이용허락은 [저작권법 제46조](https://www.law.go.kr/법령/저작권법/제46조), 명확한 중요 내용 표시와 설명은 [약관법 제3조](https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029708921), 면책 범위는 [약관법 제7조](https://www.law.go.kr/법령/약관의규제에관한법률/제7조), 전자적 동의 방식은 [전자서명법 제3조](https://www.law.go.kr/LSW/lsInfoP.do?efYd=20221020&lsiSeq=236201)를 참고했습니다. 제작팀 자신의 위법행위·고의·중대한 과실 및 법률상 배제 불가능한 책임, 제3자의 권리, 이용자의 법정 구제 권리를 일괄 면제하지 않습니다. 실제 효력은 운영 주체와 구체적 사실관계에 따라 판단되므로 법률 전문가 검토 없이 효력이 보장된다고 설명하면 안 됩니다. 개인정보 처리에 필요한 고지·동의는 별도로 제공해야 합니다.

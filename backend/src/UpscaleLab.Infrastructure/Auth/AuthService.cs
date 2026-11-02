@@ -27,117 +27,155 @@ public sealed class AuthService(
     private const string InvalidPasswordResetMessage =
         "재설정 코드가 올바르지 않거나 만료되었습니다. 새 코드를 요청해 주세요.";
 
-    public async Task<RegisterResponse> RegisterAsync(
-        RegisterRequest request,
-        CancellationToken cancellationToken)
+    public async Task<RegisterResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken)
     {
         var email = NormalizeEmail(request.Email);
         var username = request.Username.Trim();
-
+        if (!System.Text.RegularExpressions.Regex.IsMatch(username, "^[A-Za-z]{2,50}$"))
+            throw new ValidationException("아이디는 영문으로만 이용 가능합니다.");
         if (!PasswordPolicy.IsSatisfiedBy(request.Password))
-        {
             throw new ValidationException(PasswordPolicy.ErrorMessage);
-        }
 
-        var expiredCandidates = await dbContext.Users.AsNoTracking()
-            .Where(x => !x.IsEmailVerified && (x.Email == email || x.Username == username))
+        var staleEmails = await dbContext.PendingRegistrations.AsNoTracking()
+            .Where(x => x.ExpiresAt <= Now && (x.Email == email || x.Username == username))
             .Select(x => x.Email).ToListAsync(cancellationToken);
-        foreach (var candidate in expiredCandidates)
-            await DeleteExpiredEmailAsync(candidate, cancellationToken);
+        foreach (var stale in staleEmails) await DeleteExpiredPendingAsync(stale, cancellationToken);
 
-        if (await dbContext.Users.AnyAsync(x => x.Email == email, cancellationToken))
+        return await AuthUserTransaction.RunAsync(dbContext, email, async () =>
         {
-            throw new ConflictException("이미 사용 중인 이메일입니다.");
-        }
+            if (dbContext.Database.IsRelational())
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT pg_advisory_xact_lock(hashtextextended({"registration-username:" + username}, 0))", cancellationToken);
+            if (await dbContext.Users.AnyAsync(x => x.Email == email || x.Username == username, cancellationToken))
+                throw new ConflictException("이미 사용 중인 이메일 또는 아이디입니다.");
+            var pending = await dbContext.PendingRegistrations.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+            if (pending is not null)
+            {
+                if (pending.ExpiresAt <= Now || pending.Username != username ||
+                    !passwordHasher.Verify(request.Password, pending.PasswordHash))
+                    throw new ConflictException("가입 대기 중인 이메일입니다. 입력 정보를 확인하거나 잠시 후 다시 시도해 주세요.");
+                // Resume only with the original credentials, without creating a member or session.
+                if (pending.EmailVerifiedAt is not null)
+                {
+                    var challenge = NewChallenge(pending);
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    return RegistrationResponse(pending, challenge);
+                }
+                if (pending.VerificationSentAt.AddSeconds(cognitoOptions.ResendCooldownSeconds) <= Now)
+                    await SendAgainAsync(pending, cancellationToken);
+                return RegistrationResponse(pending);
+            }
+            if (await dbContext.PendingRegistrations.AnyAsync(x => x.Username == username, cancellationToken))
+                throw new ConflictException("이미 사용 중이거나 가입 대기 중인 아이디입니다.");
 
-        if (await dbContext.Users.AnyAsync(x => x.Username == username, cancellationToken))
-        {
-            throw new ConflictException("이미 사용 중인 사용자 이름입니다.");
-        }
-
-        var now = Now;
-        var user = new User
-        {
-            Email = email,
-            Username = username,
-            PasswordHash = passwordHasher.Hash(request.Password),
-            EmailVerificationSentAt = now,
-            EmailVerificationExpiresAt = now.Add(VerificationLifetime),
-            Setting = new UserSetting()
-        };
-
-        await emailVerificationProvider.SignUpAsync(
-            email,
-            request.Password,
-            cancellationToken);
-
-        dbContext.Users.Add(user);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return new RegisterResponse(
-            MapUser(user),
-            RequiresEmailVerification: true,
-            user.EmailVerificationExpiresAt.Value);
+            var hash = passwordHasher.Hash(request.Password);
+            await emailVerificationProvider.SignUpAsync(email, request.Password, cancellationToken);
+            var sent = Now;
+            pending = new PendingRegistration
+            {
+                Email = email, Username = username, PasswordHash = hash,
+                VerificationSentAt = sent, VerificationExpiresAt = sent.Add(VerificationLifetime),
+                ExpiresAt = sent.Add(VerificationLifetime)
+            };
+            dbContext.PendingRegistrations.Add(pending);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return RegistrationResponse(pending);
+        }, cancellationToken);
     }
 
-    public async Task<AuthResponse> VerifyEmailAsync(
-        VerifyEmailRequest request,
-        CancellationToken cancellationToken)
+    public async Task<RegistrationChallenge> VerifyEmailAsync(VerifyEmailRequest request, CancellationToken cancellationToken)
     {
         var email = NormalizeEmail(request.Email);
         return await AuthUserTransaction.RunAsync(dbContext, email, async () =>
         {
-            var user = await dbContext.Users.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
-
-            if (user is null || user.IsEmailVerified)
-            {
+            var pending = await dbContext.PendingRegistrations.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+            if (pending is null || pending.EmailVerifiedAt is not null)
                 throw new ValidationException(InvalidVerificationCodeMessage);
-            }
-
-            EnsureVerificationActive(user);
-
+            EnsureVerificationActive(pending);
             await emailVerificationProvider.ConfirmSignUpAsync(email, request.Code, cancellationToken);
-
-            user.IsEmailVerified = true;
-            user.EmailVerifiedAt = Now;
-            user.EmailVerificationSentAt = null;
-            user.EmailVerificationExpiresAt = null;
+            pending.EmailVerifiedAt = Now;
+            pending.ExpiresAt = Now.AddHours(24);
+            var challenge = NewChallenge(pending);
             await dbContext.SaveChangesAsync(cancellationToken);
+            return challenge;
+        }, cancellationToken);
+    }
 
+    public async Task<AuthResponse> AcceptRegistrationTermsAsync(AcceptRegistrationTermsRequest request, CancellationToken cancellationToken)
+    {
+        if (!request.AcceptTerms || !request.ConfirmSignature)
+            throw new ValidationException("약관 동의와 전자서명 확인을 모두 선택해야 회원가입을 완료할 수 있습니다.");
+        if (request.TermsVersion != CopyrightTerms.Version)
+            throw new ValidationException("약관이 변경되었습니다. 페이지를 새로고침하고 최신 약관을 확인해 주세요.");
+        var email = NormalizeEmail(request.Email);
+        return await AuthUserTransaction.RunAsync(dbContext, email, async () =>
+        {
+            var pending = await dbContext.PendingRegistrations.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+            if (pending is null || pending.EmailVerifiedAt is null || pending.ExpiresAt <= Now ||
+                pending.ConsentTokenExpiresAt is null || pending.ConsentTokenExpiresAt <= Now ||
+                pending.ConsentTokenHash is null || !CryptographicOperations.FixedTimeEquals(
+                    Encoding.UTF8.GetBytes(pending.ConsentTokenHash), Encoding.UTF8.GetBytes(Hash(request.Token))))
+                throw new UnauthorizedException("가입 확인 시간이 만료되었거나 올바르지 않습니다. 회원가입 정보를 다시 입력해 주세요.");
+            if (!string.Equals(request.Signature.Trim(), pending.Username, StringComparison.Ordinal))
+                throw new ValidationException("전자서명란에 가입한 아이디를 정확히 입력해 주세요.");
+            if (dbContext.Database.IsRelational())
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT pg_advisory_xact_lock(hashtextextended({"registration-username:" + pending.Username}, 0))", cancellationToken);
+            if (await dbContext.Users.AnyAsync(x => x.Email == email || x.Username == pending.Username, cancellationToken))
+                throw new ConflictException("이미 사용 중인 이메일 또는 아이디입니다.");
+
+            var user = new User
+            {
+                Email = pending.Email, Username = pending.Username, PasswordHash = pending.PasswordHash,
+                IsEmailVerified = true, EmailVerifiedAt = pending.EmailVerifiedAt,
+                CopyrightTermsAcceptedAt = Now, CopyrightTermsVersion = CopyrightTerms.Version,
+                CopyrightTermsDocumentHash = CopyrightTerms.DocumentHash, CopyrightSignature = request.Signature.Trim(),
+                Setting = new UserSetting()
+            };
+            dbContext.Users.Add(user);
+            dbContext.PendingRegistrations.Remove(pending);
+            await dbContext.SaveChangesAsync(cancellationToken);
             return await CreateResponseAsync(user, cancellationToken);
         }, cancellationToken);
     }
 
-    public async Task ResendVerificationEmailAsync(
-        ResendVerificationEmailRequest request,
-        CancellationToken cancellationToken)
+    public async Task<VerificationEmailResponse> ResendVerificationEmailAsync(ResendVerificationEmailRequest request, CancellationToken cancellationToken)
     {
         var email = NormalizeEmail(request.Email);
-        await AuthUserTransaction.RunAsync(dbContext, email, async () =>
+        return await AuthUserTransaction.RunAsync(dbContext, email, async () =>
         {
-            var user = await dbContext.Users.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
-            var now = Now;
-
-            if (user is null || user.IsEmailVerified)
-            {
-                return false;
-            }
-
-            EnsureVerificationActive(user);
-
-            if (user.EmailVerificationSentAt is not null &&
-                user.EmailVerificationSentAt.Value.AddSeconds(cognitoOptions.ResendCooldownSeconds) > now)
-            {
-                return false;
-            }
-
-            await emailVerificationProvider.ResendConfirmationCodeAsync(email, cancellationToken);
-            user.EmailVerificationSentAt = now;
-            await dbContext.SaveChangesAsync(cancellationToken);
-            return true;
+            var pending = await dbContext.PendingRegistrations.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+            if (pending is null || pending.EmailVerifiedAt is not null)
+                return new VerificationEmailResponse("인증 메일 요청이 접수되었습니다.", null, null, null, Now);
+            EnsureVerificationActive(pending);
+            if (pending.VerificationSentAt.AddSeconds(cognitoOptions.ResendCooldownSeconds) <= Now)
+                await SendAgainAsync(pending, cancellationToken);
+            return new VerificationEmailResponse("인증 메일 요청이 접수되었습니다.", pending.VerificationSentAt,
+                pending.VerificationExpiresAt, pending.VerificationSentAt.AddSeconds(cognitoOptions.ResendCooldownSeconds), Now);
         }, cancellationToken);
     }
 
+    private async Task SendAgainAsync(PendingRegistration pending, CancellationToken cancellationToken)
+    {
+        await emailVerificationProvider.ResendConfirmationCodeAsync(pending.Email, cancellationToken);
+        pending.VerificationSentAt = Now;
+        pending.VerificationExpiresAt = Now.Add(VerificationLifetime);
+        pending.ExpiresAt = pending.VerificationExpiresAt;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private RegistrationChallenge NewChallenge(PendingRegistration pending)
+    {
+        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        pending.ConsentTokenHash = Hash(token);
+        pending.ConsentTokenExpiresAt = Now.AddMinutes(15);
+        return new RegistrationChallenge(pending.Email, pending.Username, token,
+            pending.ConsentTokenExpiresAt.Value, CopyrightTerms.Version);
+    }
+
+    private RegisterResponse RegistrationResponse(PendingRegistration pending, RegistrationChallenge? challenge = null) =>
+        new(pending.Email, pending.Username, pending.EmailVerifiedAt is null, pending.VerificationSentAt,
+            pending.VerificationExpiresAt, pending.VerificationSentAt.AddSeconds(cognitoOptions.ResendCooldownSeconds), Now, challenge);
     public async Task<FindIdResponse> FindIdAsync(
         FindIdRequest request,
         CancellationToken cancellationToken)
@@ -214,6 +252,14 @@ public sealed class AuthService(
             user = await dbContext.Users.SingleOrDefaultAsync(x => x.Username == identifier, cancellationToken);
         }
 
+        if (user is null)
+        {
+            var pendingEmail = NormalizeEmail(identifier);
+            var pending = await dbContext.PendingRegistrations.AsNoTracking().SingleOrDefaultAsync(
+                x => x.Email == pendingEmail || x.Username == identifier, cancellationToken);
+            if (pending is not null && pending.ExpiresAt > Now && passwordHasher.Verify(request.Password, pending.PasswordHash))
+                throw new ForbiddenException("이메일 인증과 약관 동의가 필요합니다. 회원가입 화면에 같은 정보를 입력해 이어서 진행해 주세요.");
+        }
         if (user is null || !passwordHasher.Verify(request.Password, user.PasswordHash))
         {
             throw new UnauthorizedException("이메일/사용자 아이디 또는 비밀번호가 올바르지 않습니다.");
@@ -285,19 +331,17 @@ public sealed class AuthService(
         catch (DbUpdateConcurrencyException) { /* Another logout already revoked it. */ }
     }
 
-    public async Task DeleteExpiredAccountsAsync(CancellationToken cancellationToken)
+    public async Task DeleteExpiredRegistrationsAndSessionsAsync(CancellationToken cancellationToken)
     {
         var now = Now;
-        var legacyCutoff = now.Subtract(VerificationLifetime);
-        var emails = await dbContext.Users.AsNoTracking().Where(x => !x.IsEmailVerified &&
-            (x.EmailVerificationExpiresAt != null ? x.EmailVerificationExpiresAt <= now : x.CreatedAt <= legacyCutoff))
+        var emails = await dbContext.PendingRegistrations.AsNoTracking().Where(x => x.ExpiresAt <= now)
             .Select(x => x.Email).ToListAsync(cancellationToken);
         foreach (var email in emails)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            try { await DeleteExpiredEmailAsync(email, cancellationToken); }
+            try { await DeleteExpiredPendingAsync(email, cancellationToken); }
             catch (Exception error) when (error is not OperationCanceledException)
-            { logger?.LogError(error, "Expired account cleanup failed; it will be retried."); }
+            { logger?.LogError(error, "Expired pending registration cleanup failed; it will be retried."); }
         }
         var expiredSessions = await dbContext.AuthSessions
             .Where(x => x.ExpiresAt <= now || x.RevokedAt != null || x.CreatedAt <= now.AddDays(-365))
@@ -306,27 +350,27 @@ public sealed class AuthService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private Task<bool> DeleteExpiredEmailAsync(string email, CancellationToken cancellationToken) =>
+    private Task<bool> DeleteExpiredPendingAsync(string email, CancellationToken cancellationToken) =>
         AuthUserTransaction.RunAsync(dbContext, email, async () =>
         {
-            var user = await dbContext.Users.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
-            if (user is null || user.IsEmailVerified || VerificationExpiry(user) > Now) return false;
-            if (accountCleaner is null) throw new InvalidOperationException("Account cleanup provider is required.");
-            if (!await accountCleaner.DeleteUnconfirmedAsync(email, cancellationToken)) return false;
-            dbContext.Users.Remove(user);
+            var pending = await dbContext.PendingRegistrations.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+            if (pending is null || pending.ExpiresAt > Now) return false;
+            // Never delete a member or its external identity.
+            if (!await dbContext.Users.AnyAsync(x => x.Email == email, cancellationToken))
+            {
+                if (accountCleaner is null) throw new InvalidOperationException("Pending registration cleanup provider is required.");
+                if (!await accountCleaner.DeletePendingRegistrationAsync(email, pending.EmailVerifiedAt is not null, cancellationToken)) return false;
+            }
+            dbContext.PendingRegistrations.Remove(pending);
             await dbContext.SaveChangesAsync(cancellationToken);
             return true;
         }, cancellationToken);
 
-    private void EnsureVerificationActive(User user)
+    private void EnsureVerificationActive(PendingRegistration pending)
     {
-        if (VerificationExpiry(user) <= Now)
-            throw new ValidationException("이메일 인증 시간이 만료되었습니다. 15분 이내에 인증을 완료해야 합니다. 다시 가입해 주세요.");
+        if (pending.VerificationExpiresAt <= Now)
+            throw new ValidationException("이메일 인증 시간이 만료되었습니다. 회원가입 정보를 다시 입력해 주세요.");
     }
-
-    private static DateTime VerificationExpiry(User user) =>
-        user.EmailVerificationExpiresAt ?? user.CreatedAt.Add(VerificationLifetime);
-
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private static UserResponse MapUser(User user) =>

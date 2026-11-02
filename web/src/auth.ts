@@ -6,6 +6,7 @@ export type Account = {
   salt: string;
   hash: string;
   avatarUrl?: string;
+  copyrightConsent?: { version: string; signature: string; acceptedAt: string };
 };
 export type Session = Pick<Account, "id" | "email" | "name" | "avatarUrl">;
 const ACCOUNTS = "upscale.demo.accounts.v1";
@@ -39,6 +40,7 @@ export async function register(
   email: string,
   name: string,
   password: string,
+  copyrightConsent?: Account["copyrightConsent"],
 ): Promise<Account> {
   email = email.trim().toLowerCase();
   name = name.trim();
@@ -64,7 +66,7 @@ export async function register(
     throw new Error("이미 사용 중인 이메일 또는 사용자 이름입니다.");
   const salt = crypto.randomUUID();
   const hash = await passwordHash(password, salt);
-  const account = { id: crypto.randomUUID(), email, name, salt, hash };
+  const account = { id: crypto.randomUUID(), email, name, salt, hash, copyrightConsent };
   // Re-read after async hashing to avoid overwriting an account created in another tab.
   const latest = read<Account[]>(ACCOUNTS, []);
   if (

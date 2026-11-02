@@ -1,0 +1,25 @@
+.signup-form input[readonly] { background: #fafbff; color: var(--muted); }
+.signup-verification { margin: -2px 0 22px; padding: 16px; border: 1px solid #e2e7ff; border-radius: 10px; background: #fafbff; }
+.signup-verification > label { margin-bottom: 10px; }
+.signup-code-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: .75rem; color: #707e98; }
+.signup-code-actions strong { color: var(--primary); font-variant-numeric: tabular-nums; }
+.signup-code-actions button { color: var(--primary); }
+.signup-reset { display: block; margin: 16px auto 0; color: #707e98; font-size: .8rem; }
+.copyright-consent { font-size: .8571429rem; line-height: 1.8; color: #69758c; }
+.consent-intro { margin-bottom: 16px; }
+.consent-summary { padding: 16px 20px; background: #f2f4ff; border-radius: 10px; color: #465578; }
+.consent-summary strong { display: block; margin-bottom: 6px; }
+.consent-summary ul { padding-left: 18px; }
+.consent-summary li + li { margin-top: 5px; }
+.consent-document { max-height: 30vh; min-height: 160px; overflow-y: auto; overscroll-behavior: contain; margin-top: 18px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px; background: #fcfcff; }
+.consent-document h3 { color: var(--ink); font-size: 1rem; }
+.consent-document h4 { margin: 20px 0 8px; color: var(--ink); font-size: .9rem; }
+.consent-document p + p { margin-top: 8px; }
+.consent-version { color: var(--muted); font-size: .75rem; }
+.consent-download { display: inline-block; margin: 10px 0 18px; color: var(--primary); }
+.consent-check { align-items: flex-start; margin: 0 0 18px; color: #53617b; line-height: 1.7; }
+.consent-check input { flex-shrink: 0; margin-top: 4px; }
+.consent-signature { margin-bottom: 6px; }
+.consent-help { margin: 0 0 16px; font-size: .75rem; }
+.consent-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+@media (max-width: 540px) { .consent-actions { flex-direction: column-reverse; } .consent-actions > button { width: 100%; } .consent-document { padding: 14px; } }

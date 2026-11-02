@@ -4,7 +4,7 @@ namespace UpscaleLab.Application.Auth;
 
 public sealed record RegisterRequest(
     [param: Required, EmailAddress, MaxLength(320)] string Email,
-    [param: Required, MinLength(2), MaxLength(50)] string Username,
+    [param: Required, MinLength(2), MaxLength(50), RegularExpression("^[A-Za-z]+$", ErrorMessage = "아이디는 영문으로만 이용 가능합니다.")] string Username,
     [param: Required, PasswordPolicy] string Password);
 
 public sealed record LoginRequest(
@@ -40,9 +40,28 @@ public sealed record UserResponse(
     DateTime CreatedAt);
 
 public sealed record RegisterResponse(
-    UserResponse User,
+    string Email,
+    string Username,
     bool RequiresEmailVerification,
-    DateTime VerificationCodeExpiresAt);
+    DateTime VerificationCodeSentAt,
+    DateTime VerificationCodeExpiresAt,
+    DateTime ResendAvailableAt,
+    DateTime ServerTime,
+    RegistrationChallenge? Registration = null);
+
+public sealed record RegistrationChallenge(string Email, string Username, string Token,
+    DateTime ExpiresAt, string TermsVersion);
+
+public sealed record AcceptRegistrationTermsRequest(
+    [param: Required, EmailAddress, MaxLength(320)] string Email,
+    [param: Required, StringLength(64, MinimumLength = 64)] string Token,
+    [param: Required, MaxLength(32)] string TermsVersion,
+    bool AcceptTerms,
+    bool ConfirmSignature,
+    [param: Required, MaxLength(50)] string Signature);
+
+public sealed record VerificationEmailResponse(string Message, DateTime? VerificationCodeSentAt,
+    DateTime? VerificationCodeExpiresAt, DateTime? ResendAvailableAt, DateTime ServerTime);
 
 public sealed record AuthResponse(string AccessToken, DateTime ExpiresAt, UserResponse User,
     string? RefreshToken = null, DateTime? RefreshExpiresAt = null);

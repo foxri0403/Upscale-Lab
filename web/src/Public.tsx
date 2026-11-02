@@ -8,18 +8,17 @@ import {
   Smartphone,
   Layers3,
   MoveUpRight,
-  Check,
 } from "lucide-react";
-import { Brand, Link, Busy, Notice, navigate } from "./ui";
+import { Brand, Link, Busy, navigate } from "./ui";
 import {
   demoEmail,
   demoPassword,
-  register,
   signIn,
   type Session,
 } from "./auth";
 import { DeviceShowcase, MotionDemo, UpscaleDemo } from "./FeatureDemos";
-import { cloud, cloudLogin, cloudVerify, request } from "./api";
+import { cloud, cloudLogin } from "./api";
+import { SignupForm } from "./SignupForm";
 import { AccountRecovery, type RecoveryMode } from "./AccountRecovery";
 import {
   rememberLoginIdentifier,
@@ -225,341 +224,58 @@ export function Landing() {
     </div>
   );
 }
-export function AuthPage({
-  signup,
-  onLogin,
-}: {
-  signup: boolean;
-  onLogin: (session: Session) => void;
-}) {
+export function AuthPage({ signup, onLogin }: { signup: boolean; onLogin: (session: Session) => void }) {
   const [savedIdentifier] = useState(savedLoginIdentifier);
-  const [email, setEmail] = useState(signup ? "" : savedIdentifier);
-  const [name, setName] = useState("");
+  const [email, setEmail] = useState(savedIdentifier);
   const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
   const [show, setShow] = useState(false);
   const [remember, setRemember] = useState(false);
-  const [rememberId, setRememberId] = useState(!signup && !!savedIdentifier);
+  const [rememberId, setRememberId] = useState(!!savedIdentifier);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [complete, setComplete] = useState(false);
   const [recovery, setRecovery] = useState<RecoveryMode | null>(null);
-  const [code, setCode] = useState("");
-  const [recoveryMessage, setRecoveryMessage] = useState("");
-  async function submit(e: FormEvent) {
-    e.preventDefault();
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
     if (busy) return;
-    setError("");
-    setBusy(true);
+    setError(""); setBusy(true);
     try {
-      if (signup) {
-        if (password !== confirm)
-          throw new Error("비밀번호가 일치하지 않습니다.");
-        if (cloud)
-          await request(
-            "/api/auth/register",
-            {
-              method: "POST",
-              body: JSON.stringify({ email, username: name, password }),
-            },
-            false,
-          );
-        else await register(email, name, password);
-        setComplete(true);
-      } else {
-        const session = cloud
-          ? await cloudLogin(email, password, remember)
-          : await signIn(email, password, remember);
-        rememberLoginIdentifier(email, rememberId);
-        onLogin(session);
-        navigate("/app/images", true);
-      }
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+      const session = cloud ? await cloudLogin(email, password, remember) : await signIn(email, password, remember);
+      rememberLoginIdentifier(email, rememberId);
+      onLogin(session); navigate("/app/images", true);
+    } catch (error) { setError((error as Error).message); }
+    finally { setBusy(false); }
   }
-  return (
-    <main className="auth-page">
-      <div className="auth-decoration">
-        <span className="eyebrow">A NEW PERSPECTIVE</span>
-        <h2>
-          당신의 이미지에,
-          <br />
-          새로운 가능성을.
-        </h2>
-        <div className="auth-picture">
-          <img src="/images/fox.png" alt="숲속 여우 배경화면" />
-          <span>
-            <Layers3 size={18} /> Upscale Lab
-          </span>
+  return <main className="auth-page">
+    <div className="auth-decoration">
+      <h2>당신의 이미지에,<br />새로운 가능성을.</h2>
+      <div className="auth-picture"><img src="/images/fox.png" alt="숲속 여우 배경화면" /><span><Layers3 size={18} /> Upscale Lab</span></div>
+    </div>
+    <div className="auth-card" key={signup ? "signup" : "login"}>
+      <h1>{signup ? "새로운 시작, 회원가입" : "다시 만나 반가워요"}</h1>
+      <p>{signup ? "나만의 화면을 만드는 첫걸음." : "로그인하고 나만의 이미지를 만나보세요."}</p>
+      {signup ? <SignupForm onLogin={onLogin} /> : <form onSubmit={submit}>
+        <label>이메일 또는 아이디<input type="text" autoComplete="username" required value={email} onChange={event => setEmail(event.target.value)} placeholder="이메일 또는 아이디를 입력해 주세요" maxLength={320} disabled={busy} /></label>
+        <label>비밀번호<div className="password-field">
+          <input autoComplete="current-password" required type={show ? "text" : "password"} value={password} onChange={event => setPassword(event.target.value)} placeholder="비밀번호를 입력해 주세요" maxLength={128} />
+          <button type="button" aria-label={show ? "비밀번호 숨기기" : "비밀번호 보기"} onClick={() => setShow(!show)}>{show ? <EyeOff size={19} /> : <Eye size={19} />}</button>
+        </div></label>
+        <div className="form-options">
+          <label className="check-label"><input type="checkbox" checked={rememberId} disabled={busy} onChange={event => { setRememberId(event.target.checked); if (!event.target.checked) rememberLoginIdentifier("", false); }} />아이디 저장</label>
+          <label className="check-label"><input type="checkbox" checked={remember} disabled={busy} onChange={event => setRemember(event.target.checked)} />자동 로그인</label>
         </div>
-      </div>
-      <div className="auth-card" key={signup ? "signup" : "login"}>
-        <span className="auth-kicker">UPSCALE LAB</span>
-        <h1>
-          {complete
-            ? cloud
-              ? "이메일을 확인해 주세요"
-              : "가입이 완료되었어요"
-            : signup
-              ? "새로운 시작, 회원가입"
-              : "다시 만나 반가워요"}
-        </h1>
-        <p>
-          {complete
-            ? cloud
-              ? "이메일로 전송된 인증 코드를 입력해 주세요."
-              : "이제 나만의 이미지를 만들어 볼까요?"
-            : signup
-              ? "나만의 화면을 만드는 첫걸음."
-              : "로그인하고 나만의 이미지를 만나보세요."}
-        </p>
-        {complete ? (
-          cloud ? (
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                setBusy(true);
-                setError("");
-                try {
-                  onLogin(await cloudVerify(email, code));
-                  navigate("/app/images", true);
-                } catch (e) {
-                  setError((e as Error).message);
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              <label>
-                인증 코드
-                <input
-                  inputMode="numeric"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
-                  required
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  placeholder="6자리 인증 코드"
-                />
-              </label>
-              {error && (
-                <p role="alert" className="form-error">
-                  {error}
-                </p>
-              )}
-              <button className="button primary full" disabled={busy}>
-                {busy ? <Busy /> : "인증하고 시작하기"}
-              </button>
-              <button
-                type="button"
-                className="text-button resend-code"
-                onClick={async () => {
-                  try {
-                    await request(
-                      "/api/auth/resend-verification",
-                      { method: "POST", body: JSON.stringify({ email }) },
-                      false,
-                    );
-                    setRecoveryMessage("인증 메일을 다시 요청했습니다.");
-                  } catch (e) {
-                    setError((e as Error).message);
-                  }
-                }}
-              >
-                인증 코드 다시 받기
-              </button>
-              {recoveryMessage && <Notice>{recoveryMessage}</Notice>}
-            </form>
-          ) : (
-            <>
-              <div className="success-mark">
-                <Check size={30} />
-              </div>
-              <Notice>
-                로컬 테스트 계정이 생성되었습니다. 이메일은 발송하지 않습니다.
-              </Notice>
-              <Link to="/login" className="button primary full">
-                로그인하기 <ArrowRight size={17} />
-              </Link>
-            </>
-          )
-        ) : (
-          <form onSubmit={submit}>
-            <label>
-              {signup ? "이메일" : "이메일 또는 아이디"}
-              <input
-                type={signup ? "email" : "text"}
-                autoComplete={signup ? "email" : "username"}
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder={
-                  signup ? "you@example.com" : "이메일 또는 아이디를 입력해 주세요"
-                }
-                maxLength={320}
-                disabled={busy}
-              />
-            </label>
-            {signup && (
-              <label>
-                사용자 이름
-                <input
-                  required
-                  autoComplete="nickname"
-                  minLength={2}
-                  maxLength={24}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="어떻게 불러드릴까요?"
-                />
-              </label>
-            )}
-            <label>
-              비밀번호
-              <div className="password-field">
-                <input
-                  autoComplete={signup ? "new-password" : "current-password"}
-                  required
-                  type={show ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder={
-                    signup
-                      ? "10자 이상으로 입력해 주세요"
-                      : "비밀번호를 입력해 주세요"
-                  }
-                  maxLength={128}
-                />
-                <button
-                  type="button"
-                  aria-label={show ? "비밀번호 숨기기" : "비밀번호 보기"}
-                  onClick={() => setShow(!show)}
-                >
-                  {show ? <EyeOff size={19} /> : <Eye size={19} />}
-                </button>
-              </div>
-            </label>
-            {signup && (
-              <>
-                <p className="field-help">
-                  대문자·숫자·특수문자를 포함해 10자 이상
-                </p>
-                <label>
-                  비밀번호 확인
-                  <input
-                    required
-                    type="password"
-                    autoComplete="new-password"
-                    value={confirm}
-                    onChange={(e) => setConfirm(e.target.value)}
-                    placeholder="비밀번호를 한 번 더 입력해 주세요"
-                    maxLength={128}
-                  />
-                </label>
-              </>
-            )}
-            {!signup && (
-              <div className="form-options">
-                <label className="check-label">
-                  <input
-                    type="checkbox"
-                    checked={rememberId}
-                    disabled={busy}
-                    onChange={(event) => {
-                      setRememberId(event.target.checked);
-                      if (!event.target.checked)
-                        rememberLoginIdentifier("", false);
-                    }}
-                  />
-                  아이디 저장
-                </label>
-                <label className="check-label">
-                  <input
-                    type="checkbox"
-                    checked={remember}
-                    disabled={busy}
-                    onChange={(e) => setRemember(e.target.checked)}
-                  />{" "}
-                  자동 로그인
-                </label>
-              </div>
-            )}
-            {error && (
-              <p role="alert" className="form-error">
-                {error}
-              </p>
-            )}
-            <button
-              disabled={busy}
-              type="submit"
-              className="button primary full"
-            >
-              {busy ? <Busy /> : signup ? "회원가입" : "로그인"}
-              {!busy && <ArrowRight size={17} />}
-            </button>
-          </form>
-        )}
-        {!complete && (
-          <p className="auth-switch">
-            {signup ? "이미 계정이 있나요?" : "아직 계정이 없나요?"}{" "}
-            <Link to={signup ? "/login" : "/signup"}>
-              {signup ? "로그인" : "회원가입"}
-            </Link>
-          </p>
-        )}
-        {!signup && !complete && (
-          <nav className="auth-recovery-links" aria-label="계정 복구">
-            <button
-              type="button"
-              className="text-button"
-              onClick={() => setRecovery("id")}
-            >
-              아이디 찾기
-            </button>
-            <span aria-hidden="true">|</span>
-            <button
-              type="button"
-              className="text-button"
-              onClick={() => setRecovery("password")}
-            >
-              비밀번호 재설정
-            </button>
-          </nav>
-        )}
-        {!cloud && (
-          <div className="demo-credentials">
-            <span className="demo-tag">LOCAL PREVIEW</span>
-            <p>이 브라우저에만 저장되는 테스트 계정입니다.</p>
-            {!signup && !complete && (
-              <button
-                className="text-button"
-                onClick={() => {
-                  setEmail(demoEmail);
-                  setPassword(demoPassword);
-                  setError("");
-                }}
-              >
-                데모 계정 입력 <MoveUpRight size={13} />
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-      {recovery && (
-        <AccountRecovery
-          mode={recovery}
-          identifier={email}
-          close={() => setRecovery(null)}
-          useIdentifier={(identifier) => {
-            setEmail(identifier);
-            setPassword("");
-            setError("");
-          }}
-        />
-      )}
-    </main>
-  );
+        {error && <p role="alert" className="form-error">{error}</p>}
+        <button disabled={busy} type="submit" className="button primary full">{busy ? <Busy /> : "로그인"}{!busy && <ArrowRight size={17} />}</button>
+      </form>}
+      <p className="auth-switch">{signup ? "이미 계정이 있나요?" : "아직 계정이 없나요?"} <Link to={signup ? "/login" : "/signup"}>{signup ? "로그인" : "회원가입"}</Link></p>
+      {!signup && <nav className="auth-recovery-links" aria-label="계정 복구">
+        <button type="button" className="text-button" onClick={() => setRecovery("id")}>아이디 찾기</button><span aria-hidden="true">|</span>
+        <button type="button" className="text-button" onClick={() => setRecovery("password")}>비밀번호 재설정</button>
+      </nav>}
+      {!cloud && <div className="demo-credentials"><span className="demo-tag">LOCAL PREVIEW</span><p>이 브라우저에만 저장되는 테스트 계정입니다.</p>
+        {!signup && <button className="text-button" onClick={() => { setEmail(demoEmail); setPassword(demoPassword); setError(""); }}>데모 계정 입력 <MoveUpRight size={13} /></button>}
+      </div>}
+    </div>
+    {recovery && <AccountRecovery mode={recovery} identifier={email} close={() => setRecovery(null)} useIdentifier={identifier => { setEmail(identifier); setPassword(""); setError(""); }} />}
+  </main>;
 }

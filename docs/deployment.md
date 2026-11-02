@@ -6,7 +6,7 @@
 
 현재 실행 서비스·웹 symlink·API SOURCE_REVISION/SOURCE_DIRECTORY와 DB migration history를 확인한다. 기존 API/웹 릴리스와 공급자·결제·메일·S3 설정을 보존하고 실행 파일을 교체 전에 백업한다. 최신 소스와 서버가 별도로 수정된 경우 차이를 먼저 검토한다.
 
-RDS는 대상 DB·소유자·스키마·백업과 보안 그룹을 확인한다. EC2에서만 필요한 DB 포트에 접근하도록 구성하고 API 5080 포트를 인터넷에 직접 노출하지 않는다. S3 public access block을 유지하고 제한된 IAM Role의 GetObject/PutObject/DeleteObject와 서명 URL을 사용한다. Cognito 미인증 계정 정리에는 대상 pool의 AdminGetUser/AdminDeleteUser 권한이 필요하다.
+RDS는 대상 DB·소유자·스키마·백업과 보안 그룹을 확인한다. EC2에서만 필요한 DB 포트에 접근하도록 구성하고 API 5080 포트를 인터넷에 직접 노출하지 않는다. S3 public access block을 유지하고 제한된 IAM Role의 GetObject/PutObject/DeleteObject와 서명 URL을 사용한다. 회원이 없는 만료 인증 대기의 Cognito 레코드 정리에는 대상 pool의 AdminGetUser/AdminDeleteUser 권한이 필요하다.
 
 ## API
 

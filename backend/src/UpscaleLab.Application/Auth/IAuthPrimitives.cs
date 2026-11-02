@@ -45,4 +45,7 @@ public interface IUnverifiedAccountCleaner
 {
     // False protects a Cognito account that was already confirmed outside this API.
     Task<bool> DeleteUnconfirmedAsync(string email, CancellationToken cancellationToken);
+    // Only for an expired pending registration, after verifying that no member
+    // exists under the same email while holding the registration lock.
+    Task<bool> DeletePendingRegistrationAsync(string email, bool emailVerified, CancellationToken cancellationToken);
 }
