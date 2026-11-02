@@ -61,7 +61,6 @@ export function Landing() {
     <div className="landing">
       <section className="hero">
         <div className="hero-copy">
-          <div className="eyebrow">YOUR IMAGE, REIMAGINED</div>
           <h1>
             더 선명한 이미지,
             <br />더 생생한
@@ -79,13 +78,13 @@ export function Landing() {
         </div>
         <div
           className="hero-art"
-          aria-label="숲속 여우 이미지의 배경과 피사체 레이어 미리보기"
+          aria-label="호수 풍경과 여우 이미지 레이어 미리보기"
         >
           <div className="hero-grid" />
           <img
             className="hero-back"
-            src="/images/fox-background.png"
-            alt="햇살이 비치는 숲 배경"
+            src="/images/lake.jpg"
+            alt="푸른 호수 풍경"
           />
           <div className="hero-front">
             <img src="/images/fox.png" alt="숲속의 여우" />
