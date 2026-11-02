@@ -1,0 +1,268 @@
+[cleanup-backend-final.log]
+  UpscaleLab.Domain -> <repo>\backend\src\UpscaleLab.Domain\bin\Debug\net8.0\UpscaleLab.Domain.dll
+  UpscaleLab.Application -> <repo>\backend\src\UpscaleLab.Application\bin\Debug\net8.0\UpscaleLab.Application.dll
+  UpscaleLab.Infrastructure -> <repo>\backend\src\UpscaleLab.Infrastructure\bin\Debug\net8.0\UpscaleLab.Infrastructure.dll
+  UpscaleLab.Api -> <repo>\backend\src\UpscaleLab.Api\bin\Debug\net8.0\UpscaleLab.Api.dll
+  UpscaleLab.Tests -> <repo>\backend\tests\UpscaleLab.Tests\bin\Debug\net8.0\UpscaleLab.Tests.dll
+<repo>\backend\tests\UpscaleLab.Tests\bin\Debug\net8.0\UpscaleLab.Tests.dll(.NETCoreApp,Version=v8.0)에 대한 테스트 실행
+VSTest 버전 17.11.1 (x64)
+
+테스트 실행을 시작하는 중입니다. 잠시 기다려 주세요...
+지정된 패턴과 일치한 총 테스트 파일 수는 1개입니다.
+
+통과!  - 실패:     0, 통과:   249, 건너뜀:     0, 전체:   249, 기간: 17 s - UpscaleLab.Tests.dll (net8.0)
+
+[cleanup-web-final.log]
+$ node --experimental-strip-types --test tests/*.test.mjs
+✔ background mode continues using the original Layers operation (0.8972ms)
+✔ character mode uses a separate API operation (0.1519ms)
+✔ character mode cannot start if the separate endpoint is unavailable (0.1565ms)
+✔ background mode preserves previous behavior and capability check (0.1388ms)
+(node:340) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ character rig moves only semantic face, eyes and hair parts (7.4059ms)
+✔ no head turn, eyes or hair when intensity is zero (1.0722ms)
+✔ head turns and eyes move only within the bounded inputs (0.2518ms)
+✔ rig settings clamp invalid values and old records get defaults (0.1807ms)
+✔ character processing and rig options are isolated to the Live tab (1.4952ms)
+﹣ companion release manifest points to real Windows and signed Android binaries (1.0087ms) # SKIP
+﹣ missing companion download returns 404 instead of the SPA shell (0.1128ms) # SKIP
+﹣ cloud serves the landing page and a real compiled JavaScript bundle (0.0898ms) # SKIP
+﹣ runtime configuration enables same-origin cloud API (0.0874ms) # SKIP
+﹣ direct navigation to every page returns the SPA (0.1011ms) # SKIP
+﹣ backend health stays available behind frontend routing (0.0824ms) # SKIP
+﹣ private API routes still reject unauthenticated requests (0.6977ms) # SKIP
+﹣ link sharing has an anonymous read route and an authenticated creation route (0.1204ms) # SKIP
+﹣ shared wallpaper API returns JSON, never the SPA fallback (0.1165ms) # SKIP
+﹣ image settings PATCH routes exist and require authentication (0.1656ms) # SKIP
+﹣ the explore feed includes existing mobile posts alongside new wallpapers (0.0891ms) # SKIP
+﹣ invalid login is validated by the actual API without creating a session (0.0831ms) # SKIP
+﹣ mobile account recovery endpoints validate requests without sending email or changing passwords (0.077ms) # SKIP
+﹣ missing asset and API endpoints return 404 instead of the HTML shell (0.0582ms) # SKIP
+✔ preset order and inscribed pixel bounds preserve the source (1.8319ms)
+✔ movement is constrained to the source and does not change aspect (0.3044ms)
+✔ custom handles resize each edge, keep the opposite corner and stay in bounds (0.4477ms)
+✔ zoom keeps its aspect, remains bounded, and never shrinks below one source pixel (1.7959ms)
+✔ persisted non-centered selections resolve to the exact pixels after reload and upscale (0.2819ms)
+✔ crop drafts compare the selected region and disregard obsolete original-crop coordinates (0.2391ms)
+✔ all layer previews and thumbnails use the saved crop while retaining full-source editing coordinates (0.4911ms)
+✔ registration order survives refresh order and uses stable ID ties (15.5699ms)
+✔ Android always shows lock then home even when the agent only reports home (0.5716ms)
+✔ linked devices distinguish first connection, fresh heartbeat, stale heartbeat and revoked access (1.7534ms)
+✔ pending removal keeps the current preview until the agent reports actual completion (0.4897ms)
+✔ server notifications refresh immediately, unchanged cursors do not refetch, and unmount cancels the wait (7.1382ms)
+✔ Android home and lock count as one physical display; extra screens retain their actual information (0.9212ms)
+✔ applying the same project to several screens does not add duplicate My Images cards (0.281ms)
+✔ imported wallpapers and saved versions whose source was deleted remain accessible (0.1896ms)
+✔ cloud releases retain both companion installers with matching bytes and hashes (26.6044ms)
+✔ a missing installer or an equally sized corrupted installer blocks a release (36.2514ms)
+✔ a manifest cannot omit a platform or reference a different version or external file (44.367ms)
+✔ new and legacy default motion strength is 50 (0.9195ms)
+✔ explicit motion changes stay intact including a newly chosen 57 (0.1875ms)
+✔ own public images suppress saving even when an original is unavailable (1.478ms)
+✔ web publication IDs resolve to the existing original before its frozen asset (0.2633ms)
+✔ mobile posts resolve through owned gallery IDs without using another author's project (0.1757ms)
+✔ matching titles, sources and foreign ownership do not grant access to private originals (0.1846ms)
+✔ device targets exclude offline, disconnected and unsupported displays (1.0872ms)
+✔ Android home and lock remain distinct targets on the same physical display (0.2289ms)
+✔ mobile posts remain visible when the new wallpaper feed is empty (1.0466ms)
+✔ shared gallery access does not grant ownership of the author's project (0.1949ms)
+✔ private mobile posts are excluded even if supplied by an API response (0.8157ms)
+✔ legacy and new resources with the same UUID are distinct entries (0.4606ms)
+✔ all of a mobile post's genres participate in filtering (0.3132ms)
+✔ older single-tag posts keep their genre instead of becoming landscapes (0.187ms)
+✔ repeated posts are deduplicated without removing other authors' posts (0.1894ms)
+✔ image information prefers actual API or data encoding over the file extension (1.1151ms)
+✔ legacy image URLs use only the source path, excluding signed query strings (0.4858ms)
+✔ resolution shows real pixel dimensions and rejects invalid or missing metadata (30.3015ms)
+✔ both mobile publications and saved wallpaper versions lock editing (1.0172ms)
+✔ a project follows every shared version, while unrelated and private images stay editable (0.9302ms)
+✔ turning sharing off targets all existing resources once and preserves the mobile deep link (0.2608ms)
+✔ the selector includes every selectable tag accepted by the API (8.4658ms)
+✔ all tags can be selected; display is capped at five without dropping data (0.2896ms)
+✔ five tags are displayed without an ellipsis (0.1248ms)
+✔ no selection automatically filters unclassified images (0.2267ms)
+✔ select all includes unclassified images and partial selection uses any matching tag (0.1595ms)
+✔ unknown tags are never invented and explicit empty tags remain unclassified (0.1412ms)
+✔ rapid crop changes persist only the latest selection (1.9445ms)
+✔ a slow old write is followed by the latest crop and never overwrites it afterward (0.328ms)
+✔ switching images retains the pending crop for both images (0.3225ms)
+✔ a failed save is reported, does not claim persistence, and a later edit can save (0.5347ms)
+✔ layer label names are in Korean, with an unknown label preserved (0.8406ms)
+✔ server order vs original AI order are independent (11.0043ms)
+✔ manual stack starts empty and appends new selections at the top (0.3231ms)
+✔ full stack is required to save (0.1719ms)
+✔ moving a layer and removing it do not mutate caller order (0.2577ms)
+✔ remembering a username preserves the submitted spelling across login visits (1.1635ms)
+✔ email login replaces a previously remembered username with the entered email (0.1902ms)
+✔ turning off ID saving removes the old ID without signing out the account (0.1584ms)
+✔ blocked optional browser storage does not prevent login (0.3147ms)
+✔ smoothing follows elapsed time equally at 60 and 120fps (1.5817ms)
+✔ orientation calibrates neutral, remaps landscape and bounds motion (1.0225ms)
+✔ simultaneous mouse and gyro inputs combine without exceeding their shared motion range (0.224ms)
+✔ reset requires a six-digit code and matching new password confirmation (2.6354ms)
+✔ reset applies the mobile API's length, uppercase, digit and special-character policy (1.0203ms)
+✔ PhotoCraft coverage has a solid core, smooth falloff and antialiased hard rim (1.0742ms)
+✔ sparse brush tiles clip safely at canvas boundaries and do not allocate a full large canvas (3.0655ms)
+✔ collinear pointer event density and repeated dabs do not darken one soft stroke (45.2811ms)
+✔ incremental drawing and source-pixel replay produce the same opaque mask without overlapping erase buildup (9.0993ms)
+✔ invalid sizes, coordinates and oversized work are rejected before drawing (0.4217ms)
+✔ remote queue and character inference are explained as stages (0.98ms)
+✔ a broad brush including background seeds the interior of the known subject (1.7856ms)
+✔ rough lasso background corners are negative hints, not selected foreground (0.6662ms)
+✔ erase keeps a positive seed in the remaining subject and a negative seed in the unwanted region (1.2742ms)
+✔ recognition never paints back explicit eraser coverage even when SAM keeps most of that region (2.3479ms)
+✔ candidate selection rejects a background mask and keeps the object rather than the painted rectangle (0.7731ms)
+✔ empty hints and invalid dimensions fail, and erasing only background leaves the subject unchanged (0.67ms)
+✔ unrelated islands in a textured background are removed while the prompted object remains (0.7648ms)
+✔ painted background is excluded and AI foreground outside the brush is never added (0.2437ms)
+✔ a local brush never labels the neighboring part of the same object as background (0.3665ms)
+✔ all applied features coexist and a disabled animation remains separated (1.876ms)
+✔ background mouse and gyro selections do not identify the separate Live 2D feature (0.2273ms)
+✔ image validation accepts broad extensions and exactly 50MB, with strict limits (0.7835ms)
+✔ brush positions stay in source pixels through zoom, scrolling and touch (1.4688ms)
+✔ automatic preview uses a private draft and cleans it after downloading the foreground (24.5901ms)
+✔ failed preview cleans its terminal draft and returns the failure (0.7166ms)
+✔ interruption preserves a running draft for the existing server cleanup policy (0.468ms)
+✔ a terminal preview without a foreground fails and cleans its draft (0.3755ms)
+✔ a cancelled preview never creates a project (0.2263ms)
+✔ FHD inputs produce the selected QHD and 4K pixel dimensions (1.4837ms)
+✔ resolution presets preserve portrait, square and non-widescreen aspect ratios (0.1907ms)
+✔ unknown image dimensions and unsupported presets do not invent a target size (0.1644ms)
+ℹ tests 113
+ℹ suites 0
+ℹ pass 99
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 14
+ℹ todo 0
+ℹ duration_ms 1039.7983
+
+[cleanup-web-build.log]
+$ node scripts/build-cloud.mjs
+vite v7.3.7 building client environment for production...
+transforming...
+✓ 1653 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.72 kB │ gzip:   0.47 kB
+dist/assets/index-SMZd7aKJ.css   97.60 kB │ gzip:  19.30 kB
+dist/assets/index-ChdNpfcQ.js   430.26 kB │ gzip: 134.52 kB
+✓ built in 7.50s
+
+[cleanup-windows-tests.log]
+  UpscaleLab.Companion.Windows -> <repo>\companion\windows\bin\Debug\net8.0-windows\UpscaleLab.Connect.dll
+  UpscaleLab.Companion.Tests -> <repo>\companion\tests\bin\Debug\net8.0-windows\UpscaleLab.Companion.Tests.dll
+<repo>\companion\tests\bin\Debug\net8.0-windows\UpscaleLab.Companion.Tests.dll(.NETCoreApp,Version=v8.0)에 대한 테스트 실행
+VSTest 버전 17.11.1 (x64)
+
+테스트 실행을 시작하는 중입니다. 잠시 기다려 주세요...
+지정된 패턴과 일치한 총 테스트 파일 수는 1개입니다.
+
+통과!  - 실패:     0, 통과:    15, 건너뜀:     0, 전체:    15, 기간: 2 s - UpscaleLab.Companion.Tests.dll (net8.0)
+
+[cleanup-mobile-analyze.log]
+Analyzing mobile...
+No issues found! (ran in 41.6s)
+
+[cleanup-mobile-tests.log]
+00:00 +0: loading <repo>/mobile/test/companion_test.dart
+00:00 +0: entry point connects the account and controls native wallpaper sync
+00:01 +1: native failures stay visible and allow retry
+00:01 +2: All tests passed!
+
+[cleanup-android-tests.log]
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build
+
+> Configure project :gradle
+WARNING: Unsupported Kotlin plugin version.
+The `embedded-kotlin` and `kotlin-dsl` plugins rely on features of Kotlin `2.0.21` that might work differently than in the requested version `2.2.20`.
+
+> Task :gradle:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :gradle:compileKotlin UP-TO-DATE
+> Task :gradle:compileJava NO-SOURCE
+> Task :gradle:compileGroovy NO-SOURCE
+> Task :gradle:pluginDescriptors UP-TO-DATE
+> Task :gradle:processResources UP-TO-DATE
+> Task :gradle:classes UP-TO-DATE
+> Task :gradle:jar UP-TO-DATE
+
+> Configure project :app
+WARNING: The option setting 'android.overridePathCheck=true' is experimental.
+The current default is 'false'.
+Warning: Flutter support for your project's Gradle version (8.14.0) will soon be dropped. Please upgrade your Gradle version to a version of at least 9.1.0 soon.
+Alternatively, use the flag "--android-skip-build-dependency-validation" to bypass this check.
+
+Potential fix: Your project's gradle version is typically defined in the gradle wrapper file. By default, this can be found at <repo>\mobile\android/gradle/wrapper/gradle-wrapper.properties.
+For more information, see https://docs.gradle.org/current/userguide/gradle_wrapper.html.
+
+Warning: Flutter support for your project's Android Gradle Plugin version (Android Gradle Plugin version 8.11.1) will soon be dropped. Please upgrade your Android Gradle Plugin version to a version of at least Android Gradle Plugin version 9.0.1 soon.
+Alternatively, use the flag "--android-skip-build-dependency-validation" to bypass this check.
+
+Potential fix: Your project's AGP version is typically defined in the plugins block of the `settings.gradle` file (<repo>\mobile\android/settings.gradle), by a plugin with the id of com.android.application.
+If you don't see a plugins block, your project was likely created with an older template version. In this case it is most likely defined in the top-level build.gradle file (<repo>\mobile\android/build.gradle) by the following line in the dependencies block of the buildscript: "classpath 'com.android.tools.build:gradle:<version>'".
+
+Warning: Flutter support for your project's Kotlin version (2.2.20) will soon be dropped. Please upgrade your Kotlin version to a version of at least 2.3.20 soon.
+Alternatively, use the flag "--android-skip-build-dependency-validation" to bypass this check.
+
+Potential fix: Your project's KGP version is typically defined in the plugins block of the `settings.gradle` file (<repo>\mobile\android/settings.gradle), by a plugin with the id of org.jetbrains.kotlin.android.
+If you don't see a plugins block, your project was likely created with an older template version, in which case it is most likely defined in the top-level build.gradle file (<repo>\mobile\android/build.gradle) by the ext.kotlin_version property.
+
+w: <repo>/mobile/android/app/build.gradle.kts:59:21: 'jvmTarget: String' is deprecated. Please migrate to the compilerOptions DSL. More details are here: https://kotl.in/u1r8ln
+
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:validateCompileSdkVersion
+> Task :app:preBuild
+> Task :app:preDebugBuild
+> Task :app:cleanMergeDebugAssets
+> Task :app:checkDebugAarMetadata
+> Task :app:compileFlutterBuildDebug
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:copyFlutterAssetsDebug
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:parseDebugLocalResources
+> Task :app:mergeDebugResources
+> Task :app:processDebugMainManifest
+> Task :app:outputDebugAppLinkSettings
+> Task :app:processDebugManifest
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:preDebugUnitTestBuild
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:processDebugManifestForPackage
+> Task :app:processDebugResources
+
+> Task :app:compileDebugKotlin
+w: <repo>/mobile/android/app/src/main/kotlin/com/livelayer/app/CompanionInventory.kt:23:59 'fun getRealMetrics(p0: DisplayMetrics!): Unit' is deprecated. Deprecated in Java.
+w: <repo>/mobile/android/app/src/main/kotlin/com/livelayer/app/CompanionInventory.kt:24:47 'fun getRealSize(p0: Point!): Unit' is deprecated. Deprecated in Java.
+w: <repo>/mobile/android/app/src/main/kotlin/com/livelayer/app/CompanionRuntime.kt:42:64 'static field ACTION_WALLPAPER_CHANGED: String' is deprecated. Deprecated in Java.
+w: <repo>/mobile/android/app/src/main/kotlin/com/livelayer/app/CompanionSyncService.kt:23:119 'constructor(p0: Context!): Notification.Builder' is deprecated. Deprecated in Java.
+w: <repo>/mobile/android/app/src/main/kotlin/com/livelayer/app/LiveLayerWallpaperService.kt:87:70 'val defaultDisplay: Display!' is deprecated. Deprecated in Java.
+
+> Task :app:compileDebugJavaWithJavac
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :app:testDebugUnitTest
+
+[Incubating] Problems report is available at: <repo>/mobile/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 1m 4s
+34 actionable tasks: 23 executed, 11 up-to-date

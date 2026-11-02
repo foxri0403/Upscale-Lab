@@ -3,14 +3,17 @@ import { filterStyle, type Edit, type Picture } from "./model";
 import { cropRegion, moveCrop, resizeCrop, type CropRegion } from "./crop-geometry";
 import { previewStageStyle, PreviewPaletteButton, type PreviewPalette } from "./StudioPreview";
 import "./crop.css";
+import { usePreviewPan } from "./use-preview-pan";
 
 const handles = { nw: "왼쪽 위", n: "위쪽", ne: "오른쪽 위", e: "오른쪽", se: "오른쪽 아래", s: "아래쪽", sw: "왼쪽 아래", w: "왼쪽" };
-export function CropEditor({ picture, edit, change, disabled = false, zoom = "fit", rulers = false, palette, onDimensions }: {
+export function CropEditor({ picture, edit, change, disabled = false, zoom = "fit", rulers = false, palette, onDimensions, panImage = false }: {
   picture: Picture; edit: Edit; change: (edit: Edit) => void; disabled?: boolean; zoom?: string; rulers?: boolean;
   palette?: PreviewPalette;
   onDimensions?: (value: { src: string; width: number; height: number }) => void;
+  panImage?: boolean;
 }) {
-  const root = useRef<HTMLDivElement>(null), stage = useRef<HTMLDivElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const pan = usePreviewPan(zoom !== "fit", panImage || edit.crop === "original");
   const [pixels, setPixels] = useState({ src: "", width: 0, height: 0 });
   const drag = useRef<{ id: number; x: number; y: number; width: number; height: number; region: CropRegion; cancel: CropRegion; handle: string } | null>(null);
   const source = picture.background || picture.src;
@@ -45,7 +48,7 @@ export function CropEditor({ picture, edit, change, disabled = false, zoom = "fi
     const handle = (event.target as HTMLElement).dataset.cropHandle;
     emit(handle ? resizeCrop(region, handle, dx, dy, width, height) : moveCrop(region, dx, dy));
   }
-  return <div ref={root} className={`crop-editor ${rulers ? "crop-editor-rulers" : ""} ${fit ? "crop-preview-fit" : ""}`} aria-label="원본 이미지 자르기">
+  return <div ref={pan.root} {...pan.events} className={`crop-editor ${rulers ? "crop-editor-rulers" : ""} ${fit ? "crop-preview-fit" : ""} ${pan.canPan ? "preview-can-pan" : ""} ${pan.dragging ? "preview-panning" : ""}`} aria-label="원본 이미지 자르기">
     <div className="crop-editor-surface" style={{ width: fit ? "100%" : width * scale + 48, height: fit ? "100%" : height * scale + 48 }}>
       {palette && <PreviewPaletteButton {...palette} />}
       <div ref={stage} className={`crop-image-stage ${editable ? "crop-editable" : ""}`} style={previewStageStyle(width, height, zoom, rulers ? 22 : 48)}

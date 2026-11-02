@@ -1,6 +1,7 @@
 import type { Picture } from "./model.ts";
 
-// Match mobile/lib/models/gallery_tags.dart; unclassified is a state, not an option.
+// Values match the API GalleryTagCatalog; UI order is independent.
+// Unclassified is a state, not an option.
 export const selectableTags = [
   "게임",
   "남자",

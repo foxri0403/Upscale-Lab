@@ -1,0 +1,16 @@
+{
+  "initialStatus": " M web/src/CropEditor.tsx\n M web/src/ImageInformation.tsx\n?? .cleanup-audit.mjs\n?? docs/editor-refinement-deployment-20261031.md\n?? docs/inline-subject-deployment-20261029.md\n?? docs/inline-subject-separation.md\n?? docs/main-recovery-deployment-20261030.md\n?? docs/partial-selection-deployment-20261031.md\n?? docs/production-audit-20261030.md\n?? docs/smart-brush-autosave-deployment-20261031.md\n?? docs/storytold-integration-analysis.md\n?? docs/storytold-ui-deployment-20261029.md\n?? docs/subject-mask-deployment-20261029.md\n?? docs/subject-selection-deployment-20261029.md\n?? output/\n",
+  "protectedWebHashes": {
+    "web/src/CropEditor.tsx": "1b44281338c5afd51c42275efd27639196392a8fc1923a1dbd54de0a6a7cd986",
+    "web/src/ImageInformation.tsx": "a3cd23aca593e8dd9a7a5a93f1e290f1080b07f506f6b70d6383f20bacdb27ae"
+  },
+  "trackedFilesSurveyed": 658,
+  "webRuntimeUnusedFiles": [
+    "web/src/vendor/photocraft-magnetic-lasso.ts"
+  ],
+  "legacyDartFilesRemoved": 32,
+  "markdownLinksChecked": 20,
+  "brokenLocalMarkdownLinks": [],
+  "brokenWebRelativeImports": [],
+  "preservedWorktreeMarkers": true
+}

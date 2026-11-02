@@ -23,7 +23,6 @@ using UpscaleLab.Application.Processing;
 using UpscaleLab.Application.Projects;
 using UpscaleLab.Application.Settings;
 using UpscaleLab.Application.Storage;
-using UpscaleLab.Application.Upscaling;
 using UpscaleLab.Application.Wallpapers;
 using UpscaleLab.Infrastructure.Auth;
 using UpscaleLab.Infrastructure.Database;
@@ -58,7 +57,6 @@ if (Encoding.UTF8.GetByteCount(jwtOptions.Secret) < 32)
 }
 
 var s3Options = builder.Configuration.GetSection("AWS").Get<S3StorageOptions>() ?? new S3StorageOptions();
-var replicateOptions = builder.Configuration.GetSection("Replicate").Get<ReplicateOptions>() ?? new ReplicateOptions();
 var runPodOptions = builder.Configuration
     .GetSection("RunPod")
     .Get<RunPodOptions>() ?? new RunPodOptions();
@@ -83,7 +81,6 @@ if (string.IsNullOrWhiteSpace(cognitoOptions.Region) || cognitoOptions.ResendCoo
 
 builder.Services.AddSingleton(jwtOptions);
 builder.Services.AddSingleton(s3Options);
-builder.Services.AddSingleton(replicateOptions);
 builder.Services.AddSingleton(runPodOptions);
 builder.Services.AddHttpClient<RunPodUpscaleService>(client =>
 {
@@ -102,11 +99,6 @@ builder.Services.AddSingleton<IAmazonS3>(_ =>
     new AmazonS3Client(RegionEndpoint.GetBySystemName(s3Options.Region)));
 builder.Services.AddScoped<IStorageService, S3StorageService>();
 builder.Services.AddScoped<IObjectCopyService, S3StorageService>();
-builder.Services.AddHttpClient<IUpscaleService, ReplicateUpscaleService>(client =>
-{
-    client.BaseAddress = new Uri(replicateOptions.ApiBaseUrl);
-    client.Timeout = TimeSpan.FromSeconds(30);
-});
 builder.Services.AddSingleton<IAmazonCognitoIdentityProvider>(_ =>
     new AmazonCognitoIdentityProviderClient(
         new AnonymousAWSCredentials(),

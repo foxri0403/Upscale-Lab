@@ -61,6 +61,8 @@ __pycache__/
 # Local APK and backup files
 *.apk
 *.bak
+*.bak-*
+*.before-*
 
 # Android signing secrets
 key.properties
@@ -72,10 +74,13 @@ gpu-worker/input/
 gpu-worker/output/
 gpu-worker/models/
 gpu-worker-runpod/layers/models/
-gpu-worker/main_backup.py
 
 # Web frontend dependencies and build output
 web/node_modules/
 web/dist/
 web/*.tsbuildinfo
 web/public/downloads/
+
+# Generated conversation exports and local cleanup working files
+output/
+.cleanup-*

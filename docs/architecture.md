@@ -50,7 +50,7 @@ erDiagram
 3. 클라이언트는 짧은 수명의 pre-signed download URL을 API로 발급받습니다.
 4. 웹의 처리/배포 경로는 `/api/projects`와 `ProcessingJob`을 사용하고, `/api/wallpapers`에서 독립 결과물로 고정합니다. 기존 `OptimizedImage` 테이블은 레거시 호환을 위해 유지합니다.
 
-새 웹 경로에서는 `ProcessingJob`이 Layers/Upscale/UpscaleAndLayers 종류와 배율, 결과 S3 object key/크기를 기록합니다. 검증·저장·다운로드는 `ProjectProcessingService`, 공급자 연결은 팀원의 `IProjectImageProcessor` 구현이 담당합니다. 기본 구현은 기존 Layers만 지원하며 클라우드 업스케일은 미연결 상태입니다. 선택적인 Replicate 클라이언트가 자동으로 이 작업 흐름에 연결되지는 않습니다. [클라우드 계약](cloud-processing.md)을 참고하세요.
+`ProcessingJob`은 처리 종류·목표 해상도·결과 S3 key와 크기를 기록합니다. 검증·저장·다운로드는 `ProjectProcessingService`, 공급자 연결은 `IProjectImageProcessor`의 `RunPodProjectImageProcessor` 구현이 담당합니다. 업스케일은 Real-ESRGAN, 배경 분리는 BiRefNet + LaMa, 캐릭터 파츠는 별도 See-through RunPod endpoint를 사용합니다. 설정이 없는 기능은 unavailable로 노출하며 로컬 GPU 대체 경로는 없습니다. [클라우드 계약](cloud-processing.md)을 참고하세요.
 
 ## API
 
@@ -81,7 +81,7 @@ erDiagram
 | SignalR | `/hubs/notifications` | 활성 세션 | 기기 상태 변경 알림 |
 | GET/POST | `/api/projects` | 필요 | 내 LiveLayer 목록/원본 업로드 |
 | GET/DELETE | `/api/projects/{id}` | 필요 | 프로젝트 상세/삭제 |
-| POST | `/api/projects/{id}/process` | 필요 | 비동기 See-through 처리 시작 |
+| POST | `/api/projects/{id}/process` | 필요 | 비동기 클라우드 이미지 처리 시작 |
 | GET | `/api/projects/{id}/processing-status` | 필요 | 최신 처리 상태 조회 |
 | GET | `/api/projects/{id}/layers` | 필요 | 렌더링 레이어 조회 |
 | PATCH | `/api/projects/{id}/layers/{layerId}` | 필요 | depth/transform/movement 수정 |
@@ -90,17 +90,17 @@ erDiagram
 
 - API와 영속성은 기존 ASP.NET Core/EF Core 구조를 유지합니다.
 - `ProcessingJob`이 queue 상태를 DB에 보존하고 단일 background worker가 처리합니다. 프로세스 재시작 시 `Queued`/`Processing` 작업을 다시 queue에 넣습니다.
-- Python 어댑터는 See-through 저장소를 vendoring하지 않고 공식 `inference/scripts/inference_psd.py`를 실행합니다.
+- API 서버에서 Python 추론을 실행하지 않고 RunPod 작업을 제출·조회하며 원격 작업 ID·입력 hash와 완료 결과를 검증합니다.
 - 성공 결과만 기존 레이어와 원자적으로 교체하며, 실패 시 기존 완료 레이어는 보존합니다.
 - Project, Layer, 비공개 GalleryPost 조회는 항상 인증 UserId 또는 공개 여부를 확인합니다.
 
 ## 보안 경계
 
-- JWT secret, DB connection string, S3 bucket, Replicate token은 설정 공급자에서만 읽습니다.
+- JWT secret, DB connection string, S3 bucket, RunPod·결제 자격은 설정 공급자에서만 읽습니다.
 - 비밀번호는 10~128자이며 대문자, 숫자, 특수문자를 각각 포함해야 합니다.
 - 비밀번호 원문은 DB 또는 응답에 저장하지 않고 BCrypt(work factor 12) 단방향 해시만 저장합니다.
 - 이메일 인증 코드 생성·전송·검증은 Cognito가 담당하며 애플리케이션 DB에는 코드를 저장하지 않습니다.
-- Cognito 인증 코드는 24시간 유효하며 API는 재전송 60초 제한과 인증 전 로그인 차단을 적용합니다.
+- Cognito 자체 코드 수명과 별개로 API가 가입 후 15분 제한·재전송 60초 제한·인증 전 로그인 차단을 적용합니다. 세션과 만료 계정 정리는 [인증 API](auth-api.md)를 따릅니다.
 - Cognito app client secret은 설정 공급자에서만 읽습니다.
 - AWS SDK는 기본 credential chain을 사용하며 EC2 IAM Role을 우선합니다.
 - S3 bucket은 public access block을 유지하고 pre-signed URL 방식으로 다운로드합니다.

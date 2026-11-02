@@ -1,0 +1,72 @@
+{
+  "files": 30651,
+  "bytes": 22542289354.0,
+  "categories": [
+    {
+      "category": "conversation-export",
+      "files": 2,
+      "bytes": 355245.0
+    },
+    {
+      "category": "documentation",
+      "files": 64,
+      "bytes": 301712.0
+    },
+    {
+      "category": "legacy-android",
+      "files": 12,
+      "bytes": 60268.0
+    },
+    {
+      "category": "legacy-android-test",
+      "files": 7,
+      "bytes": 34664.0
+    },
+    {
+      "category": "legacy-mobile",
+      "files": 32,
+      "bytes": 263522.0
+    },
+    {
+      "category": "legacy-mobile-test",
+      "files": 17,
+      "bytes": 175776.0
+    },
+    {
+      "category": "local-generated",
+      "files": 30488,
+      "bytes": 22540977123.0
+    },
+    {
+      "category": "one-off-tool",
+      "files": 1,
+      "bytes": 1054.0
+    },
+    {
+      "category": "source-backup",
+      "files": 20,
+      "bytes": 94344.0
+    },
+    {
+      "category": "unused-backend",
+      "files": 6,
+      "bytes": 15744.0
+    },
+    {
+      "category": "unused-web",
+      "files": 2,
+      "bytes": 9902.0
+    }
+  ],
+  "preserved": [
+    "artifacts/live2d-merge-20261101",
+    "artifacts/selection-billing-20261030",
+    "artifacts/windows",
+    "artifacts/Upscale_Lab-1.2.2-.apk",
+    "tmp/tools",
+    "tmp/uv-cache",
+    "artifacts/separation-lab-20261030-115437-1fc46a9a",
+    "artifacts/separation-lab-20261030-115645-10f60cad"
+  ],
+  "failures": []
+}

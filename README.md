@@ -1,128 +1,64 @@
 # Upscale Lab
 
-Upscale Lab은 기존 C# ASP.NET Core 8 백엔드, PostgreSQL, 인증, S3와 Flutter/Kotlin 코드를 재사용하며 웹 중심의 이미지 제작·기기 배경화면 관리 서비스로 전환하고 있습니다. 웹 화면은 TypeScript·HTML·CSS로 개발하고, EXE/APK는 계정 로그인과 기기 자격을 함께 검증해 배경화면을 적용하는 구조입니다. 이미지 바이너리는 S3에, 사용자·프로젝트·레이어·화면·명령 메타데이터는 PostgreSQL(RDS)에 저장합니다.
+Upscale Lab은 React·TypeScript 웹, ASP.NET Core 8 API, PostgreSQL, S3로 구성된 이미지 제작·공유·기기 배경화면 관리 서비스다. 업로드·편집·업스케일·배경 분리·Live 2D는 웹에서 사용하고 Windows/Android 연결 앱은 같은 계정으로 로그인해 기기 정보를 보고하고 OS 배경화면을 적용한다.
 
-현재 저장소에는 **백엔드·DB·PC 웹 UI와 Windows/Android 연결 앱**이 포함되어 있습니다. [웹 실행·클라우드 배포·검증 범위](web/README.md), [연결 앱 설치·빌드·수집 범위](docs/companion-apps.md), [전환 계획](docs/web-transition.md), [기기·웹 API](docs/agent-api.md), [클라우드 AI 담당자 계약](docs/cloud-processing.md)을 참고하세요. 웹의 앱 다운로드에서 EXE/APK를 제공하며 iOS는 준비 중으로 표시합니다. 클라우드 업스케일 공급자 연결은 담당 팀원의 `IProjectImageProcessor` 구현을 사용하며, 연결되지 않은 API 인스턴스는 업스케일 요청을 503으로 거부합니다.
+## 저장소
 
-Android의 **Live 2D** 버튼은 일반 사진을 기기에서 **고정 배경 + 투명 인물·사물** 두 장으로 분리합니다. 미리보기에서 결과를 확인한 뒤 보관함에 저장하거나 Android 라이브 배경화면 설정으로 적용할 수 있습니다. 자이로 기울기에 따라 전경만 움직이며, 적용한 레이어는 앱 종료·기기 재시작 후에도 유지됩니다. 분리에는 Google Play 서비스 모델의 최초 다운로드가 필요합니다. 상세 동작과 검증 방법은 [Live 2D 가이드](docs/live-2d.md)를 참고하세요.
-
-기존 .NET 계층형 API를 유지합니다. 서버의 See-through Python CLI 어댑터는 기존 레이어 분리를 위한 선택적인 호환 경로로 남겼으며, 현재 Android의 ML Kit 분리와도 별개입니다. 기존 모바일 클라이언트의 편집/적용 흐름은 후속 에이전트 전환 전까지 유지합니다.
-
-## 저장소 구조
-
-```text
-backend/
-  UpscaleLab.sln
-  src/
-    UpscaleLab.Api/             # HTTP API, 인증, Swagger, 예외 처리
-    UpscaleLab.Application/     # DTO 및 서비스 계약
-    UpscaleLab.Domain/          # Entity와 Enum
-    UpscaleLab.Infrastructure/  # EF Core, JWT, BCrypt, S3, Replicate
-  tests/
-    UpscaleLab.Tests/
-  compose.yaml                  # 선택 사항: 로컬 PostgreSQL
-  .env.example                  # 변수 이름만 포함하는 예시
-  ai-worker/                    # 공식 See-through CLI/PSD 변환 어댑터
-mobile/                         # Flutter 클라이언트 + Android WallpaperService
-web/                            # React + TypeScript PC 웹, 실제 API 연결/로컬 UI 데모
-docs/
-  architecture.md
-  deployment.md
-deploy/
-  upscale-lab.service.example
-```
-
-## 사전 준비
-
-- .NET 8 SDK
-- Git
-- PostgreSQL 14 이상 또는 Docker Desktop
-- Visual Studio 2022 / VS Code / Rider 중 하나
-
-현재 개발 PC에는 검증용 .NET 8 SDK가 저장소의 `.dotnet` 폴더에 격리 설치되어 있습니다(이 폴더는 Git에서 제외됨). 시스템 PATH에 .NET이 없다면 저장소 루트 PowerShell에서 현재 세션에만 다음처럼 추가할 수 있습니다.
-
-```powershell
-$env:PATH = "$PWD\.dotnet;$env:PATH"
-dotnet --info
-```
+| 경로 | 역할 |
+|---|---|
+| backend/src | API·애플리케이션 계약·도메인·EF Core/AWS/RunPod·결제 |
+| backend/tests | xUnit 서비스·HTTP·인증·처리 계약 테스트 |
+| backend/tools | DB 유지보수 도구와 격리된 개발용 SeparationLab |
+| web | React·TypeScript 웹과 회귀 테스트 |
+| companion/windows | .NET Windows 연결 앱 |
+| companion/tests | Windows 연결 앱 회귀 테스트 |
+| mobile | Flutter 연결 화면과 Kotlin 배경화면·센서 서비스 |
+| gpu-worker-runpod | 업스케일 및 별도 배경 분리 클라우드 워커 |
+| deploy | 수동 배포 스크립트·nginx/systemd 예시 |
+| docs | 현행 아키텍처·API·운영·기능 문서 |
+| third_party | 재사용 코드 출처·라이선스 |
 
 ## 로컬 실행
 
+.NET 8 SDK, PostgreSQL 14 이상(또는 Docker), Node.js/pnpm이 필요하다. SDK가 PATH에 없으면 저장소 루트 PowerShell에서 `$env:PATH = "$PWD\.dotnet;$env:PATH"`로 로컬 SDK를 추가한다.
+
 ```powershell
-git clone https://github.com/foxri0403/Upscale-Lab.git
-cd Upscale-Lab\backend
+cd backend
 dotnet restore
 dotnet tool restore
 dotnet user-secrets set --project src/UpscaleLab.Api "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=upscale_lab;Username=upscale_lab;Password=YOUR_LOCAL_PASSWORD"
 dotnet user-secrets set --project src/UpscaleLab.Api "Jwt:Secret" "YOUR_RANDOM_SECRET_AT_LEAST_32_CHARACTERS"
+dotnet user-secrets set --project src/UpscaleLab.Api "AWS:S3BucketName" "YOUR_S3_BUCKET"
 dotnet user-secrets set --project src/UpscaleLab.Api "Cognito:ClientId" "YOUR_COGNITO_APP_CLIENT_ID"
 dotnet user-secrets set --project src/UpscaleLab.Api "Cognito:UserPoolId" "YOUR_COGNITO_USER_POOL_ID"
-# App client에 secret을 생성한 경우에만 설정합니다.
-dotnet user-secrets set --project src/UpscaleLab.Api "Cognito:ClientSecret" "YOUR_COGNITO_APP_CLIENT_SECRET"
 dotnet ef database update --project src/UpscaleLab.Infrastructure --startup-project src/UpscaleLab.Api
 dotnet run --project src/UpscaleLab.Api
 ```
 
-Development 환경의 Swagger UI는 기본 실행 프로필 기준 `http://localhost:5080/swagger`에서 확인할 수 있습니다. 상태 확인은 `GET /health`입니다.
+이 migration 예시는 비어 있는 로컬 DB용이다. 운영·공유 DB는 스키마·이력·백업과 SQL을 먼저 검토한다. 선택적 Cognito ClientSecret과 AWS/RunPod 설정은 [backend/.env.example](backend/.env.example), [인증 API](docs/auth-api.md), [클라우드 처리](docs/cloud-processing.md)를 따른다. .env 파일을 쓸 때는 셸이나 설정 공급자가 환경변수로 로드해야 한다. 로컬 PostgreSQL은 backend/.env를 설정한 뒤 backend에서 docker compose up -d postgres로 실행할 수 있다.
 
-로컬 PostgreSQL을 Docker로 실행하려면 `backend/.env.example`을 `backend/.env`로 복사하고 실제 로컬 비밀번호를 입력한 뒤 다음을 실행합니다. `.env`는 Git에서 제외됩니다.
+Development Swagger는 기본 실행 프로필의 http://localhost:5080/swagger, 상태 확인은 GET /health다. 웹의 개발/실제 API 설정과 다운로드 파일 검증은 [웹 가이드](web/README.md)를 따른다.
 
-```powershell
-docker compose up -d postgres
-```
-
-## 테스트
+## 검증
 
 ```powershell
 cd backend
 dotnet build UpscaleLab.sln
 dotnet test UpscaleLab.sln
+cd ../web
+pnpm test
+pnpm build:cloud
 ```
 
-모바일 실행 방법은 [mobile/README.md](mobile/README.md), AI 환경 구성은 [backend/ai-worker/README.md](backend/ai-worker/README.md)를 참고하세요.
+Android 검증은 [mobile/README.md](mobile/README.md), Windows 연결 앱과 설치 파일 빌드는 [연결 앱 가이드](docs/companion-apps.md)를 따른다. APK를 새로 생성할 때만 AGENTS.md의 버전·공유 서명·apksigner 검증 규칙을 적용한다.
 
-## LiveLayer 처리 흐름
+## 구조와 운영
 
-1. `POST /api/projects`가 원본을 `users/{userId}/projects/{projectId}/original/`에 저장합니다.
-2. `POST /api/projects/{id}/process`가 DB에 `ProcessingJob`을 만들고 인메모리 queue에 등록합니다.
-3. 백그라운드 worker가 재시작 시 대기 작업을 복구하고 See-through 어댑터를 실행합니다.
-4. 어댑터는 공식 `inference_psd.py --save_to_psd` 결과를 PNG 레이어와 manifest로 변환합니다.
-5. 레이어는 `users/{userId}/projects/{projectId}/layers/`에 업로드되고 메타데이터는 PostgreSQL에 저장됩니다.
-6. Flutter 미리보기는 레이어별 depth/movement와 필터링한 가속도 값을 결합해 parallax를 렌더링합니다.
+이미지 바이너리는 S3에 저장하고 PostgreSQL에는 메타데이터와 object key만 보관한다. 프로젝트 처리는 DB 작업 상태와 백그라운드 큐를 사용한다. 업스케일과 배경/캐릭터 분리는 RunPod endpoint를 사용하며 로컬 GPU 대체 실행은 없다. 공급자가 설정되지 않은 기능은 처리 가능으로 노출하지 않는다.
 
-See-through가 비활성화되었거나 GPU 환경이 준비되지 않은 경우 job은 `failed`로 기록되고 사용자에게 설정 오류를 노출합니다. HTTP 요청은 추론 완료를 기다리지 않습니다.
+계정 소유권과 세션을 API에서 확인하고 기기 API에는 계정 JWT와 해당 기기 자격이 모두 필요하다. 비밀값·keystore·운영 설정은 Git 밖 보안 공급자에 둔다. 현재 수동 배포를 유지하며 이 저장소 정리에서 운영 서버와 DB를 변경하지 않았다.
 
-## EF Core Migration
-
-새 스키마 변경은 다음 명령으로 생성합니다.
-
-```powershell
-dotnet ef migrations add ChangeName --project src/UpscaleLab.Infrastructure --startup-project src/UpscaleLab.Api --output-dir Database/Migrations
-dotnet ef database update --project src/UpscaleLab.Infrastructure --startup-project src/UpscaleLab.Api
-```
-
-운영 RDS에는 현재 스키마와 백업을 확인하기 전 `database update`를 실행하지 마세요. 이 저장소의 초기 migration은 신규 데이터베이스용입니다.
-
-## 설정과 Secret
-
-코드는 AWS SDK 기본 자격 증명 체인을 사용합니다. EC2에서는 Access Key 파일보다 인스턴스 IAM Role을 우선합니다. 다음 값은 코드나 Git에 커밋하지 않습니다.
-
-- `ConnectionStrings__DefaultConnection`
-- `Jwt__Secret`
-- `Cognito__ClientId`
-- `Cognito__UserPoolId` (만료된 미인증 계정 정리에 필요)
-- `Cognito__ClientSecret` (app client에 secret이 없는 경우 생략)
-- `Cognito__Region` (기본 `ap-northeast-2`)
-- `AWS__S3BucketName`
-- `Replicate__ApiToken`
-- `SeeThrough__Enabled`
-- `SeeThrough__RepositoryPath`
-- `SeeThrough__PythonExecutable`
-- `SeeThrough__AdapterScriptPath`
-- `SeeThrough__TimeoutMinutes`
-
-전체 변수와 예시는 [backend/.env.example](backend/.env.example)에 있습니다. 운영 배포와 AWS 준비 사항은 [docs/deployment.md](docs/deployment.md)를 참고하세요.
-
-## 현재 배포 상태
-
-GitHub Actions 자동 배포는 아직 구성하지 않았습니다. 2026-09-28 점검 시 EC2의 기존 저장소에는 실행 서비스나 자동 배포 설정이 없었으므로, 검증되지 않은 자동 배포를 새로 활성화하지 않고 수동 `dotnet publish` + systemd 절차만 문서화했습니다.
+- [아키텍처](docs/architecture.md) · [웹 전환 경계](docs/web-transition.md)
+- [현재 서비스 동작](docs/service-behavior.md) · [피사체 선택](docs/subject-selection.md) · [Live 2D/레이어](docs/live-2d.md)
+- [인증 API·세션](docs/auth-api.md) · [기기 API](docs/agent-api.md)
+- [배포 가이드](docs/deployment.md) · [로컬 정리 결과와 삭제 목록](docs/repository-cleanup.md)

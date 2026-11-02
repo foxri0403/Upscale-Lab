@@ -2,14 +2,14 @@
 
 ## Project overview
 
-This repository contains the backend for Upscale Lab: a .NET 8 ASP.NET Core API transitioning to a web-first product. Reuse C# and existing Flutter/Kotlin code; build the future web UI with TypeScript, HTML and CSS. Windows/Android companion agents apply wallpapers and report device state. See [docs/web-transition.md](docs/web-transition.md), [docs/agent-api.md](docs/agent-api.md), and [docs/cloud-processing.md](docs/cloud-processing.md).
+This repository contains Upscale Lab's React/TypeScript web service and .NET 8 ASP.NET Core API. Windows/Android companion agents apply wallpapers and report device state; the previous standalone mobile editor has been removed. See [docs/web-transition.md](docs/web-transition.md), [docs/agent-api.md](docs/agent-api.md), and [docs/cloud-processing.md](docs/cloud-processing.md).
 
 ## Repository layout
 
 - [backend/src/UpscaleLab.Api](backend/src/UpscaleLab.Api) — HTTP layer, controllers, authentication, Swagger, middleware, SignalR hub
 - [backend/src/UpscaleLab.Application](backend/src/UpscaleLab.Application) — DTOs, service contracts, and application logic
 - [backend/src/UpscaleLab.Domain](backend/src/UpscaleLab.Domain) — entities, enums, core domain types
-- [backend/src/UpscaleLab.Infrastructure](backend/src/UpscaleLab.Infrastructure) — EF Core, JWT, BCrypt, S3, Replicate integrations
+- [backend/src/UpscaleLab.Infrastructure](backend/src/UpscaleLab.Infrastructure) — EF Core, BCrypt, S3, RunPod, payments
 - [backend/tests/UpscaleLab.Tests](backend/tests/UpscaleLab.Tests) — xUnit tests
 
 ## Key conventions
@@ -46,7 +46,7 @@ The app requires configuration values from a secure provider, not hardcoded valu
 - `Jwt:Secret`
 - `AWS:S3BucketName`
 
-Cloud provider credentials are optional until the teammate-owned `IProjectImageProcessor` integration is enabled; the legacy Replicate adapter uses `Replicate:ApiToken`. Never add a local GPU runner as a fallback. Agent APIs must require both device credentials and a valid matching account session.
+Cloud processing uses the configured RunPod implementations behind `IProjectImageProcessor`; unconfigured operations must remain unavailable. Never add a local GPU runner as a fallback. Agent APIs must require both device credentials and a valid matching account session.
 
 These are expected to come from local user secrets, environment variables, or a local `.env` file. The repository includes a sample configuration in [backend/.env.example](backend/.env.example) and the setup in [README.md](README.md).
 

@@ -10,18 +10,19 @@ import {
   unspecifiedTag,
 } from "../src/image-tags.ts";
 
-test("the selector includes every selectable tag from the mobile client", async () => {
-  const dart = await readFile(
-    new URL("../../mobile/lib/models/gallery_tags.dart", import.meta.url),
+test("the selector includes every selectable tag accepted by the API", async () => {
+  const catalog = await readFile(
+    new URL("../../backend/src/UpscaleLab.Application/Gallery/GalleryTagCatalog.cs", import.meta.url),
     "utf8",
   );
   const values = Array.from(
-    dart
-      .match(/const selectableGalleryTags = <String>\[([\s\S]*?)\];/)[1]
-      .matchAll(/'([^']+)'/g),
+    catalog
+      .match(/IReadOnlyList<string> All[\s\S]*?\[([\s\S]*?)\];/)[1]
+      .matchAll(/"([^"]+)"/g),
     (x) => x[1],
   );
-  assert.deepEqual([...selectableTags], values);
+  assert.deepEqual(new Set(selectableTags), new Set(values));
+  assert.equal(catalog.match(/const string Unspecified = "([^"]+)"/)[1], unspecifiedTag);
   assert.equal(selectableTags.includes(unspecifiedTag), false);
 });
 test("all tags can be selected; display is capped at five without dropping data", () => {

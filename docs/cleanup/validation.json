@@ -1,0 +1,31 @@
+{
+  "dateKst": "2026-11-02",
+  "deletedFiles": 30651,
+  "allManifestPathsAbsent": true,
+  "protectedWebChangesUnchanged": true,
+  "backend": {
+    "passed": 249,
+    "failed": 0
+  },
+  "web": {
+    "passed": 99,
+    "failed": 0,
+    "skipped": 14
+  },
+  "windows": {
+    "passed": 15,
+    "failed": 0
+  },
+  "androidNative": {
+    "passed": 24,
+    "failed": 0
+  },
+  "flutter": {
+    "passed": 2,
+    "failed": 0,
+    "analyzeIssues": 0
+  },
+  "cloudBuild": true,
+  "downloadManifestVerified": true,
+  "gitDiffCheck": true
+}

@@ -48,7 +48,7 @@ S3 `cloud-jobs/layers/{jobId}/remote.json`에 RunPod 작업 ID를 보존해 API 
 
 ## 검증
 
-수동 피사체 수정 요청은 선택적으로 `mask_url`, `mask_sha256`를 보낸다. 불투명 흑백 PNG의 밝기를 전경 알파로 사용하고 BiRefNet 추론을 건너뛴 뒤, 해당 영역으로 LaMa 배경 채우기를 실행한다. 완료 JSON에 `maskSha256`를 포함한다. 기존 자동 분리 요청은 변경 없이 지원한다. 웹/API 계약과 수동 배포 순서는 [피사체 수정 문서](../../docs/subject-mask-refinement.md)를 따른다.
+수동 피사체 수정 요청은 선택적으로 `mask_url`, `mask_sha256`를 보낸다. 불투명 흑백 PNG의 밝기를 전경 알파로 사용하고 BiRefNet 추론을 건너뛴 뒤, 해당 영역으로 LaMa 배경 채우기를 실행한다. 완료 JSON에 `maskSha256`를 포함한다. 기존 자동 분리 요청은 변경 없이 지원한다. 웹/API 계약과 수동 배포 순서는 [피사체 수정 문서](../../docs/subject-selection.md)를 따른다.
 
 ```powershell
 python -m unittest discover -s . -p 'test_*.py' -v
@@ -62,4 +62,4 @@ python -m unittest discover -s . -p 'test_*.py' -v
 
 추가 범위의 bounding box에 최소 32px 또는 크기 10%의 문맥을 더하고 같은 BiRefNet_HR-matting으로 추론한다. 그 결과를 추가 범위에만 제한해 기존 알파와 최댓값으로 합치며 제거 범위를 마지막에 적용한다. 기존 알파 전체를 다시 추론하지 않는다. 제거만 있으면 매팅을 건너뛴다. LaMa는 최종 알파 뒤의 배경을 채운다. 완료 JSON은 `maskMode=selection`을 포함한다.
 
-기존 흑백 마스크 직접 적용은 `mask_mode`가 없는 호환 요청이다. 새 웹의 범위 표시는 반드시 selection 모드로 보내야 한다. 자세한 API·픽셀 계약은 [현재 보완 흐름](../../docs/subject-selection-additive.md)을 따른다.
+기존 흑백 마스크 직접 적용은 `mask_mode`가 없는 호환 요청이다. 새 웹의 범위 표시는 반드시 selection 모드로 보내야 한다. 자세한 API·픽셀 계약은 [현재 보완 흐름](../../docs/subject-selection.md)을 따른다.

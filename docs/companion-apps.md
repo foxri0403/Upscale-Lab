@@ -26,7 +26,7 @@ Windows 창을 닫으면 트레이에서 계속 실행합니다. 트레이의 �
 
 - `companion/windows`: .NET 8 WinForms, 단일 EXE에 .NET 런타임 포함. 정적 배경은 IDesktopWallpaper, Live 2D는 Explorer WorkerW 아래 별도 렌더 창과 마우스 시차를 사용합니다. Explorer 구성에 따라 Live 2D 호스트를 찾지 못하면 지원하지 않는 것으로 보고합니다. Windows 잠금 화면은 지원하지 않습니다.
 - `mobile/lib/companion.dart`: Flutter 연결 전용 화면. Kotlin foreground service가 네트워크·기기 자격·WallpaperManager를 처리하므로 Flutter 화면을 닫아도 동기화합니다. 기존 Kotlin Live 2D 엔진과 자이로 센서를 재사용하며 계정 인증의 유효 시간이 지나면 움직임을 중지합니다.
-- 이전 모바일 편집 화면과 C#/Flutter/Kotlin 자산은 재사용을 위해 유지하며 기본 앱 진입점은 연결 화면으로 변경했습니다. 이미지 업스케일링은 기존 팀원 소유 클라우드 처리 규격을 그대로 사용합니다.
+- 기본 앱 진입점은 연결 화면입니다. 실행되지 않던 옛 모바일 편집/보관함 화면과 전용 네이티브 채널은 정리했으며 현재 배경화면 엔진·센서·companion 캐시는 유지합니다. 이미지 처리는 웹/API의 클라우드 규격을 사용합니다.
 - Windows EXE는 현재 Authenticode 코드 서명 인증서가 없어 서명되지 않았습니다. Android APK는 팀 공유 릴리스 키로 서명합니다. 다른 인증서로 배포한 예전 APK와의 덮어쓰기 설치는 별도 인증서 확인이 필요합니다.
 - Windows 실제 화면 정보 수집은 확인했습니다. 실제 기기의 계정 로그인 → 웹 적용 → OS 배경화면 변경과 Android 제조사별 홈/잠금 동작은 설치 후 통합 검증이 필요합니다. 현재 개발 환경에는 연결된 Android 기기/에뮬레이터가 없습니다.
 
@@ -34,9 +34,7 @@ Windows 창을 닫으면 트레이에서 계속 실행합니다. 트레이의 �
 
 APK 버전/빌드 번호는 `AGENTS.md`, `mobile/pubspec.yaml`, `mobile/README.md`를 함께 갱신합니다. 공유 서명 설정은 Git 밖 파일을 지정하고 `apksigner verify --print-certs`로 반드시 검증합니다. 최신 APK는 **1.2.2+36**, Windows 앱은 **1.2.2**입니다. 1.2.2는 제조사·모델·CPU 구조 수집을 제거하며 기기 이름·OS·화면 해상도·주사율은 유지합니다. 신규 Android 기기는 OS에 설정된 이름으로 등록하며 이름을 읽을 수 없을 때만 일반 이름을 사용합니다.
 
-1.2.1은 Windows 11의 raised desktop에서 동적 창을 정적 WorkerW 내부 대신 아이콘 아래·시스템 배경 위의 불투명 layered child로 연결합니다. 테마 변경 후 순서를 재확인하며 마우스의 가로 움직임은 웹과 같은 방향으로 적용합니다. 트레이에서 이전 앱을 종료하고 새 EXE를 실행한 뒤 다시 적용합니다. Android는 gyroEnabled 설정에 따라 센서를 구독하며, 회전 벡터가 없는 기기는 원시 자이로를 사용합니다. 캐시된 레이어도 최신 입력 설정을 반영하고 실행 엔진에 갱신을 알립니다. Android APK 인증서는 이전 정식 릴리스와 동일합니다. 실기기별 OS·센서 확인은 설치 후 필요합니다.
-
-1.2.0은 웹의 **배경화면 삭제** 명령을 지원합니다. Windows는 선택 모니터의 OS 배경화면을 해제하고 경로가 비워진 것을 확인한 뒤 해당 Live 창을 종료합니다. Android는 선택 Home/Lock의 WallpaperManager 초기화 API를 호출하고 완료 영수증을 저장합니다. 다른 화면과 내 이미지 라이브러리는 유지합니다. 서버는 기기의 Applied 보고 후에만 삭제 완료를 표시합니다. 기존 앱은 업데이트하고 연결 상태를 새로 보고해야 삭제 버튼이 활성화됩니다. Android APK 인증서는 1.1.0과 동일함을 확인했습니다. 실제 기기에서 OS별 삭제 동작은 설치 후 확인해야 합니다.
+Windows Live 2D는 아이콘 아래·시스템 배경 위의 layered child 창을 사용하며 테마 변경 후 순서를 재확인한다. Android는 gyroEnabled와 센서 지원에 따라 회전 벡터 또는 원시 자이로를 사용한다. 배경화면 삭제는 선택 화면의 OS 초기화를 확인한 뒤 보고하며 다른 화면과 개인 보관함은 보존한다. 실기기별 동작은 별도 확인한다.
 
 ```powershell
 $env:UPSCALE_SIGNING_PROPERTIES_FILE = 'C:\UpscaleLab-Secrets\key.properties'
@@ -59,4 +57,4 @@ $env:UPSCALE_SIGNING_PROPERTIES_FILE = 'C:\UpscaleLab-Secrets\key.properties'
 
 관련 규격: [agent API](agent-api.md). 플랫폼 문서: [Windows IDesktopWallpaper](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-idesktopwallpaper), [Android Display.Mode](https://developer.android.com/reference/android/view/Display.Mode), [Android specialUse foreground service](https://developer.android.com/develop/background-work/services/fgs/service-types#special-use).
 
-현재 검증: 백엔드 190건, Windows 15건, Android 앱 자체 66건(`:app:testReleaseUnitTest`), 웹 및 운영 HTTPS 점검 54건을 통과했습니다. 삭제 요청·대기·완료 보고와 다른 화면 유지도 가상 기기로 확인했습니다. Android 전체 하위 프로젝트의 외부 image_picker 테스트 10건은 기존 리소스 누락으로 실패하며 앱 자체 범위는 통과했습니다. 실제 기기의 OS 배경화면 삭제는 새 앱 설치 후 통합 확인이 필요합니다. 배포 경로, 파일 해시와 검증 범위는 [기기 관리 배포 기록](device-management-deployment-20261028.md)에 정리했습니다.
+최신 로컬 정리 검증은 [정리 보고서](repository-cleanup.md)를 참고합니다. 실제 기기의 OS 배경화면 적용·삭제와 제조사별 동작은 설치 후 통합 확인이 필요합니다. 이번 소스 정리에서 기존 배포 APK/EXE를 교체하지 않았습니다.
