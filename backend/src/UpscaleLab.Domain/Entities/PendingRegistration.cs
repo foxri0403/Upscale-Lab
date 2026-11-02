@@ -11,6 +11,7 @@ public sealed class PendingRegistration : BaseEntity
     public DateTime VerificationExpiresAt { get; set; }
     public DateTime? EmailVerifiedAt { get; set; }
     public string? ConsentTokenHash { get; set; }
+    public string? CancellationTokenHash { get; set; }
     public DateTime? ConsentTokenExpiresAt { get; set; }
     public DateTime ExpiresAt { get; set; }
 }

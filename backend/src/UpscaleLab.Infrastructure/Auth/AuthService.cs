@@ -31,8 +31,8 @@ public sealed class AuthService(
     {
         var email = NormalizeEmail(request.Email);
         var username = request.Username.Trim();
-        if (!System.Text.RegularExpressions.Regex.IsMatch(username, "^[A-Za-z]{2,50}$"))
-            throw new ValidationException("아이디는 영문으로만 이용 가능합니다.");
+        if (!System.Text.RegularExpressions.Regex.IsMatch(username, "^[A-Za-z0-9]{2,50}$"))
+            throw new ValidationException("아이디는 영문과 숫자만 이용 가능합니다.");
         if (!PasswordPolicy.IsSatisfiedBy(request.Password))
             throw new ValidationException(PasswordPolicy.ErrorMessage);
 
@@ -54,16 +54,18 @@ public sealed class AuthService(
                 if (pending.ExpiresAt <= Now || pending.Username != username ||
                     !passwordHasher.Verify(request.Password, pending.PasswordHash))
                     throw new ConflictException("가입 대기 중인 이메일입니다. 입력 정보를 확인하거나 잠시 후 다시 시도해 주세요.");
+                var resetCredential = NewCancellationToken(pending);
                 // Resume only with the original credentials, without creating a member or session.
                 if (pending.EmailVerifiedAt is not null)
                 {
                     var challenge = NewChallenge(pending);
                     await dbContext.SaveChangesAsync(cancellationToken);
-                    return RegistrationResponse(pending, challenge);
+                    return RegistrationResponse(pending, resetCredential, challenge);
                 }
                 if (pending.VerificationSentAt.AddSeconds(cognitoOptions.ResendCooldownSeconds) <= Now)
                     await SendAgainAsync(pending, cancellationToken);
-                return RegistrationResponse(pending);
+                else await dbContext.SaveChangesAsync(cancellationToken);
+                return RegistrationResponse(pending, resetCredential);
             }
             if (await dbContext.PendingRegistrations.AnyAsync(x => x.Username == username, cancellationToken))
                 throw new ConflictException("이미 사용 중이거나 가입 대기 중인 아이디입니다.");
@@ -77,9 +79,10 @@ public sealed class AuthService(
                 VerificationSentAt = sent, VerificationExpiresAt = sent.Add(VerificationLifetime),
                 ExpiresAt = sent.Add(VerificationLifetime)
             };
+            var resetToken = NewCancellationToken(pending);
             dbContext.PendingRegistrations.Add(pending);
             await dbContext.SaveChangesAsync(cancellationToken);
-            return RegistrationResponse(pending);
+            return RegistrationResponse(pending, resetToken);
         }, cancellationToken);
     }
 
@@ -155,6 +158,31 @@ public sealed class AuthService(
         }, cancellationToken);
     }
 
+    public async Task CancelRegistrationAsync(CancelRegistrationRequest request, CancellationToken cancellationToken)
+    {
+        var email = NormalizeEmail(request.Email);
+        await AuthUserTransaction.RunAsync(dbContext, email, async () =>
+        {
+            var pending = await dbContext.PendingRegistrations.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+            if (pending is null) return true; // Repeated cancellation is harmless.
+            if (await dbContext.Users.AnyAsync(x => x.Email == email, cancellationToken))
+                throw new ConflictException("이미 가입이 완료된 계정은 가입 대기 취소로 삭제할 수 없습니다.");
+            var tokenMatches = pending.CancellationTokenHash is not null && !string.IsNullOrEmpty(request.Token) &&
+                CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(pending.CancellationTokenHash), Encoding.UTF8.GetBytes(Hash(request.Token)));
+            // Original credentials also let pre-update browsers recover safely.
+            if (!tokenMatches && (string.IsNullOrEmpty(request.Password) || !passwordHasher.Verify(request.Password, pending.PasswordHash)))
+                throw new UnauthorizedException("가입 정보 초기화를 위해 가입 시 입력한 비밀번호를 확인해 주세요.");
+            if (accountCleaner is null) throw new ConfigurationException("가입 대기 취소 서비스를 사용할 수 없습니다.");
+            // The caller proved control of this registration and the member
+            // absence was checked under the same email lock as verification.
+            if (!await accountCleaner.DeletePendingRegistrationAsync(email, true, cancellationToken))
+                throw new ServiceUnavailableException("가입 대기를 취소하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+            dbContext.PendingRegistrations.Remove(pending);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }, cancellationToken);
+    }
+
     private async Task SendAgainAsync(PendingRegistration pending, CancellationToken cancellationToken)
     {
         await emailVerificationProvider.ResendConfirmationCodeAsync(pending.Email, cancellationToken);
@@ -173,9 +201,16 @@ public sealed class AuthService(
             pending.ConsentTokenExpiresAt.Value, CopyrightTerms.Version);
     }
 
-    private RegisterResponse RegistrationResponse(PendingRegistration pending, RegistrationChallenge? challenge = null) =>
+    private static string NewCancellationToken(PendingRegistration pending)
+    {
+        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        pending.CancellationTokenHash = Hash(token);
+        return token;
+    }
+
+    private RegisterResponse RegistrationResponse(PendingRegistration pending, string cancellationToken, RegistrationChallenge? challenge = null) =>
         new(pending.Email, pending.Username, pending.EmailVerifiedAt is null, pending.VerificationSentAt,
-            pending.VerificationExpiresAt, pending.VerificationSentAt.AddSeconds(cognitoOptions.ResendCooldownSeconds), Now, challenge);
+            pending.VerificationExpiresAt, pending.VerificationSentAt.AddSeconds(cognitoOptions.ResendCooldownSeconds), Now, cancellationToken, challenge);
     public async Task<FindIdResponse> FindIdAsync(
         FindIdRequest request,
         CancellationToken cancellationToken)

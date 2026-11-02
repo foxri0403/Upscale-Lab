@@ -3,7 +3,7 @@ import type { Edit } from "./model";
 import type { VerificationTiming } from "./signup-validation";
 import type { ConsentValues } from "./CopyrightConsent";
 export type RegistrationChallenge = { email: string; username: string; token: string; expiresAt: string; termsVersion: string };
-export type RegistrationResponse = VerificationTiming & { email: string; username: string; requiresEmailVerification: boolean; registration?: RegistrationChallenge };
+export type RegistrationResponse = VerificationTiming & { email: string; username: string; requiresEmailVerification: boolean; cancellationToken: string; registration?: RegistrationChallenge };
 export type SavedEdit = Edit & { savedAt: string; tags?: string[] };
 declare global {
   interface Window {

@@ -2,6 +2,6 @@
 <html lang="ko"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>회원가입 로컬 검증</title>
 <style>#test-panel { padding:16px 24px; background:#f2f4ff; color:#465578; font:14px/1.7 sans-serif; position:relative; z-index:50; } #test-panel a { color:#536dfe; } #auth-result { white-space:pre-wrap; }</style></head><body>
 <section id="test-panel"><strong>개발용 회원가입 검증 · 실제 이메일 발송·회원 생성·법적 동의가 없는 모의 환경입니다.</strong>
-<p>테스트 코드: 123456 · 실제 운영 UI를 사용합니다. <a href="/tests/signup-flow.html?scenario=normal">정상 흐름</a> · <a href="/tests/signup-flow.html?scenario=expired">인증 만료</a></p>
+<p>테스트 코드: 123456 · 실제 운영 UI를 사용합니다. <a href="/tests/signup-flow.html?scenario=normal">정상 흐름</a> · <a href="/tests/signup-flow.html?scenario=expired">인증 만료</a> · <a href="/tests/signup-flow.html?scenario=legacy">이전 가입 정보</a> · <a href="/tests/signup-flow.html?scenario=cancel-failure">취소 실패</a></p>
 <p id="test-counts">메일 요청 0 · 회원 0 · 로그인 0</p><p id="auth-result" role="status">가입 신청 → 이메일 아래 코드 확인 → 약관 거부/동의 순서로 검사하세요.</p></section>
 <div id="root"></div><script type="module" src="./signup-flow-browser.tsx"></script></body></html>

@@ -42,6 +42,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         pending.Property(x => x.Username).HasMaxLength(50).IsRequired();
         pending.Property(x => x.PasswordHash).HasMaxLength(200).IsRequired();
         pending.Property(x => x.ConsentTokenHash).HasMaxLength(64);
+        pending.Property(x => x.CancellationTokenHash).HasMaxLength(64);
         pending.HasIndex(x => x.Email).IsUnique();
         pending.HasIndex(x => x.Username).IsUnique();
         pending.HasIndex(x => x.ExpiresAt);

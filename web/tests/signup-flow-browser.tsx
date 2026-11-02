@@ -9,9 +9,10 @@ window.__UPSCALE_CONFIG__ = { mode: "cloud", apiBaseUrl: "/__signup-fixture" };
 const scenario = new URL(location.href).searchParams.get("scenario") || "normal";
 const nativeFetch = window.fetch.bind(window);
 let requests = 0, members = 0, sessions = 0, verified = false;
+let cancellations = 0, registrationPassword = "Preview-password1!";
 const saved = sessionStorage.getItem("signup-fixture-pending");
 let pending = saved ? JSON.parse(saved) : null;
-function counts() { document.getElementById("test-counts")!.textContent = `메일 요청 ${requests} · 회원 ${members} · 로그인 ${sessions}`; }
+function counts() { document.getElementById("test-counts")!.textContent = `메일 요청 ${requests} · 회원 ${members} · 로그인 ${sessions} · 가입 대기 취소 ${cancellations}`; }
 function timing() {
   const sent = Date.now() - 10000;
   return { verificationCodeSentAt: new Date(sent).toISOString(), verificationCodeExpiresAt: new Date(scenario === "expired" ? Date.now() - 1000 : sent + 900000).toISOString(),
@@ -24,9 +25,17 @@ window.fetch = async (input, init) => {
   if (!url.includes("/__signup-fixture/")) return nativeFetch(input, init);
   const body = JSON.parse(String(init?.body || "{}"));
   if (url.endsWith("/register")) {
-    pending = body; requests++; verified = false;
+    pending = body; registrationPassword = body.password; requests++; verified = false;
     sessionStorage.setItem("signup-fixture-pending", JSON.stringify({ email: body.email, username: body.username }));
-    counts(); return json({ ...timing(), email: body.email, username: body.username, requiresEmailVerification: true }, 201);
+    counts(); return json({ ...timing(), email: body.email, username: body.username, requiresEmailVerification: true,
+      cancellationToken: scenario === "legacy" ? undefined : "A".repeat(64) }, 201);
+  }
+  if (url.endsWith("/cancel-registration")) {
+    if (scenario === "cancel-failure") return json({ message: "가입 대기 취소에 실패했습니다. 다시 시도해 주세요." }, 503);
+    if (pending && body.token !== "A".repeat(64) && body.password !== registrationPassword)
+      return json({ message: "가입 시 입력한 비밀번호를 확인해 주세요." }, 401);
+    pending = null; verified = false; cancellations++; sessionStorage.removeItem("signup-fixture-pending"); counts();
+    return new Response(null, { status: 204 });
   }
   if (url.endsWith("/resend-verification")) { requests++; counts(); return json(timing(), 202); }
   if (url.endsWith("/verify-email")) {

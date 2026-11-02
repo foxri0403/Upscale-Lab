@@ -470,10 +470,12 @@ public sealed partial class AuthServiceTests
         public Exception? PasswordResetConfirmationException { get; set; }
         public List<string> Deletions { get; } = [];
         public bool DeleteFailure { get; set; }
+        public bool RefusePendingDelete { get; set; }
         public bool RemoteConfirmed { get; set; }
 
         public Task<bool> DeletePendingRegistrationAsync(string email, bool emailVerified, CancellationToken cancellationToken)
         {
+            if (RefusePendingDelete) return Task.FromResult(false);
             if (emailVerified)
             {
                 if (DeleteFailure) throw new InvalidOperationException("Cognito temporarily unavailable");

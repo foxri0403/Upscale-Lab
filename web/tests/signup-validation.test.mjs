@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { usernameMessage, validateSignup, verificationClock, remainingSeconds, formatCountdown } from '../src/signup-validation.ts';
 
-test('signup username custom validity clears for English and rejects Hangul, digits and symbols', () => {
-  for (const value of ['한글', 'abc한글', 'abc1', 'abc_']) assert.equal(usernameMessage(value), '아이디는 영문으로만 이용 가능합니다.');
-  for (const value of ['', 'alice', 'Alice']) assert.equal(usernameMessage(value), '');
-  assert.doesNotThrow(() => validateSignup('a@example.com', 'Alice', 'Valid-password1!', 'Valid-password1!'));
+test('signup username allows letters and digits and rejects Hangul and symbols', () => {
+  for (const value of ['한글', 'abc한글', 'abc_', 'abc-', 'abc ']) assert.equal(usernameMessage(value), '아이디는 영문과 숫자만 이용 가능합니다.');
+  for (const value of ['', 'alice', 'Alice', 'abc1', '12345']) assert.equal(usernameMessage(value), '');
+  assert.doesNotThrow(() => validateSignup('a@example.com', 'Alice123', 'Valid-password1!', 'Valid-password1!'));
+  assert.doesNotThrow(() => validateSignup('a@example.com', '12345', 'Valid-password1!', 'Valid-password1!'));
   assert.throws(() => validateSignup('a@example.com', '이름', 'Valid-password1!', 'Valid-password1!'));
 });
 test('countdown follows server send/expiry time even when the client clock is wrong or the tab was backgrounded', () => {

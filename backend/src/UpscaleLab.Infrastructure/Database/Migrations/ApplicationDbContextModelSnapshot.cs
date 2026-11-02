@@ -816,6 +816,10 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("CancellationTokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<DateTime?>("ConsentTokenExpiresAt")
                         .HasColumnType("timestamp with time zone");
 

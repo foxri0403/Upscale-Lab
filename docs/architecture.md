@@ -60,6 +60,7 @@ erDiagram
 | POST | `/api/auth/register` | 없음 | 가입 대기 정보, BCrypt hash, Cognito 인증 코드 발송 |
 | POST | `/api/auth/verify-email` | 없음 | 6자리 이메일 인증 후 약관 동의 자격 발급 |
 | POST | `/api/auth/accept-registration-terms` | 가입 동의 자격 | 약관·서명 확인 후 회원 생성 및 JWT 발급 |
+| POST | `/api/auth/cancel-registration` | 가입 취소 자격/원래 비밀번호 | 외부 인증 대기와 임시 기록을 취소하고 정보 재입력 |
 | POST | `/api/auth/resend-verification` | 없음 | 이메일 인증 코드 재전송 |
 | POST | `/api/auth/login` | 없음 | 로그인 및 JWT 발급 |
 | POST | `/api/auth/refresh` | 갱신 자격 | 만료된 액세스 토큰 갱신 |

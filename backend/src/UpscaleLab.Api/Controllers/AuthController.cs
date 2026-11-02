@@ -50,6 +50,14 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         Ok(await authService.AcceptRegistrationTermsAsync(request, cancellationToken));
 
     [AllowAnonymous]
+    [HttpPost("cancel-registration")]
+    public async Task<IActionResult> CancelRegistration(CancelRegistrationRequest request, CancellationToken cancellationToken)
+    {
+        await authService.CancelRegistrationAsync(request, cancellationToken);
+        return NoContent();
+    }
+
+    [AllowAnonymous]
     [HttpPost("resend-verification")]
     [ProducesResponseType<VerificationEmailResponse>(StatusCodes.Status202Accepted)]
     public async Task<ActionResult<VerificationEmailResponse>> ResendVerificationEmail(

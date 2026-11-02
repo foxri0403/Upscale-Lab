@@ -106,13 +106,87 @@ public sealed partial class AuthServiceTests
 
     [Theory]
     [InlineData("한글")]
-    [InlineData("user123")]
     [InlineData("user_name")]
-    public async Task Register_RejectsNonEnglishIdsBeforeSendingEmail(string username)
+    [InlineData("user-name")]
+    public async Task Register_RejectsIdsOutsideLettersAndDigitsBeforeSendingEmail(string username)
     {
         await using var db = CreateDbContext();
         var (service, provider) = CreateService(db);
         await Assert.ThrowsAsync<ValidationException>(() => service.RegisterAsync(new("person@example.com", username, ValidPassword), default));
         Assert.Empty(db.Users); Assert.Empty(db.PendingRegistrations); Assert.Empty(provider.SignUps);
+    }
+
+    [Theory]
+    [InlineData("user123")]
+    [InlineData("12345")]
+    public async Task Register_AllowsLettersAndDigits(string username)
+    {
+        await using var db = CreateDbContext();
+        var (service, _) = CreateService(db);
+        var result = await service.RegisterAsync(new("person@example.com", username, ValidPassword), default);
+        Assert.Equal(username, result.Username);
+        Assert.Equal(64, result.CancellationToken.Length);
+        Assert.NotEqual(result.CancellationToken, (await db.PendingRegistrations.SingleAsync()).CancellationTokenHash);
+        Assert.Empty(db.Users);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancelRegistration_RemovesPendingAndExternalIdentityAndAllowsFreshDetails(bool verified)
+    {
+        await using var db = CreateDbContext();
+        var (service, provider) = CreateService(db);
+        var initial = await service.RegisterAsync(new("person@example.com", "person123", ValidPassword), default);
+        if (verified) await service.VerifyEmailAsync(new(initial.Email, "000001"), default);
+        await service.CancelRegistrationAsync(new(initial.Email, initial.CancellationToken), default);
+        Assert.Empty(db.PendingRegistrations); Assert.Empty(db.Users); Assert.Empty(db.AuthSessions);
+        Assert.Equal(initial.Email, Assert.Single(provider.Deletions));
+        await service.CancelRegistrationAsync(new(initial.Email, initial.CancellationToken), default);
+        var replacement = await service.RegisterAsync(new(initial.Email, "newName456", "Changed-horse2!"), default);
+        Assert.Equal("newName456", replacement.Username);
+        Assert.NotEqual(initial.CancellationToken, replacement.CancellationToken);
+        await Assert.ThrowsAsync<UnauthorizedException>(() => service.CancelRegistrationAsync(new(initial.Email, initial.CancellationToken), default));
+        Assert.Single(db.PendingRegistrations);
+    }
+
+    [Fact]
+    public async Task CancelRegistration_RequiresRegistrationControlAndRetainsPendingIfProviderFails()
+    {
+        await using var db = CreateDbContext();
+        var (service, provider) = CreateService(db);
+        var registration = await service.RegisterAsync(new("person@example.com", "person", ValidPassword), default);
+        await Assert.ThrowsAsync<UnauthorizedException>(() => service.CancelRegistrationAsync(new(registration.Email), default));
+        await Assert.ThrowsAsync<UnauthorizedException>(() => service.CancelRegistrationAsync(new(registration.Email, new string('0',64), "wrong"), default));
+        Assert.Single(db.PendingRegistrations); Assert.Empty(provider.Deletions);
+        provider.RefusePendingDelete = true;
+        await Assert.ThrowsAsync<ServiceUnavailableException>(() => service.CancelRegistrationAsync(new(registration.Email, registration.CancellationToken), default));
+        Assert.Single(db.PendingRegistrations);
+        provider.RefusePendingDelete = false;
+        provider.DeleteFailure = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CancelRegistrationAsync(new(registration.Email, registration.CancellationToken), default));
+        Assert.Single(db.PendingRegistrations);
+        provider.DeleteFailure = false;
+        // Browsers opened before the cancellation credential was introduced can
+        // prove ownership with the original password instead.
+        (await db.PendingRegistrations.SingleAsync()).CancellationTokenHash = null;
+        await db.SaveChangesAsync();
+        await service.CancelRegistrationAsync(new(registration.Email, Password: ValidPassword), default);
+        Assert.Empty(db.PendingRegistrations);
+    }
+
+    [Fact]
+    public async Task CancelRegistration_NeverDeletesCompletedMemberOrItsExternalIdentity()
+    {
+        await using var db = CreateDbContext();
+        var (service, provider) = CreateService(db);
+        var registration = await service.RegisterAsync(new("person@example.com", "person", ValidPassword), default);
+        await VerifyAndAcceptAsync(service, new(registration.Email,"000001"), default);
+        await service.CancelRegistrationAsync(new(registration.Email, registration.CancellationToken), default);
+        Assert.Single(db.Users); Assert.Single(db.AuthSessions); Assert.Empty(provider.Deletions);
+        db.PendingRegistrations.Add(new PendingRegistration { Email=registration.Email, Username="shadow", PasswordHash="unused" });
+        await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<ConflictException>(() => service.CancelRegistrationAsync(new(registration.Email, registration.CancellationToken), default));
+        Assert.Single(db.Users); Assert.Single(db.PendingRegistrations); Assert.Empty(provider.Deletions);
     }
 }

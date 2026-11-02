@@ -4,7 +4,7 @@ namespace UpscaleLab.Application.Auth;
 
 public sealed record RegisterRequest(
     [param: Required, EmailAddress, MaxLength(320)] string Email,
-    [param: Required, MinLength(2), MaxLength(50), RegularExpression("^[A-Za-z]+$", ErrorMessage = "아이디는 영문으로만 이용 가능합니다.")] string Username,
+    [param: Required, MinLength(2), MaxLength(50), RegularExpression("^[A-Za-z0-9]+$", ErrorMessage = "아이디는 영문과 숫자만 이용 가능합니다.")] string Username,
     [param: Required, PasswordPolicy] string Password);
 
 public sealed record LoginRequest(
@@ -18,6 +18,11 @@ public sealed record VerifyEmailRequest(
 
 public sealed record ResendVerificationEmailRequest(
     [param: Required, EmailAddress, MaxLength(320)] string Email);
+
+public sealed record CancelRegistrationRequest(
+    [param: Required, EmailAddress, MaxLength(320)] string Email,
+    [param: StringLength(64, MinimumLength = 64)] string? Token = null,
+    [param: MaxLength(128)] string? Password = null);
 
 public sealed record FindIdRequest(
     [param: Required, EmailAddress, MaxLength(320)] string Email);
@@ -47,6 +52,7 @@ public sealed record RegisterResponse(
     DateTime VerificationCodeExpiresAt,
     DateTime ResendAvailableAt,
     DateTime ServerTime,
+    string CancellationToken,
     RegistrationChallenge? Registration = null);
 
 public sealed record RegistrationChallenge(string Email, string Username, string Token,

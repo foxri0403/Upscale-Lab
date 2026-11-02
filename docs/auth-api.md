@@ -20,7 +20,7 @@ Cognito에는 이메일 확인을 위한 외부 인증 레코드가 먼저 생�
 { "email": "user@example.com", "username": "tester", "password": "Correct-horse1!" }
 ```
 
-이메일 최대 320자, 아이디는 영문 대·소문자 2~50자(웹 2~24자), 비밀번호는 10~128자이며 대문자·숫자·공백이 아닌 특수문자를 각각 포함해야 합니다. 비밀번호는 BCrypt 해시만 임시 저장하며 코드 생성·전송·검증은 Cognito가 담당합니다.
+이메일 최대 320자, 아이디는 영문 대·소문자와 숫자 2~50자(웹 2~24자), 비밀번호는 10~128자이며 대문자·숫자·공백이 아닌 특수문자를 각각 포함해야 합니다. 비밀번호는 BCrypt 해시만 임시 저장하며 코드 생성·전송·검증은 Cognito가 담당합니다.
 
 성공 시 `201 Created`:
 
@@ -33,6 +33,7 @@ Cognito에는 이메일 확인을 위한 외부 인증 레코드가 먼저 생�
   "verificationCodeExpiresAt": "2026-11-02T11:15:00Z",
   "resendAvailableAt": "2026-11-02T11:01:00Z",
   "serverTime": "2026-11-02T11:00:01Z",
+  "cancellationToken": "64자리 임의의 16진수",
   "registration": null
 }
 ```
@@ -87,6 +88,20 @@ Cognito에는 이메일 확인을 위한 외부 인증 레코드가 먼저 생�
 ```
 
 항상 일반적인 메시지와 `202 Accepted`를 사용합니다. 유효한 인증 대기에 대해서만 `verificationCodeSentAt`, `verificationCodeExpiresAt`, `resendAvailableAt`, `serverTime`을 반환합니다. 존재하지 않거나 이미 이메일 인증을 끝낸 이메일은 시간 필드가 null입니다. 60초 재전송 대기 중에는 실제 메일을 보내거나 기존 만료 시각을 연장하지 않습니다. 실제 재전송 성공 시에만 새 발송 시각부터 15분을 계산합니다. 이미 만료된 대기는 가입 신청을 다시 해야 합니다.
+## 가입 대기 취소 및 정보 다시 입력
+
+`POST /api/auth/cancel-registration`
+
+```json
+{ "email": "user@example.com", "token": "가입 신청 응답의 cancellationToken" }
+```
+
+가입 신청 응답은 취소 전용 256비트 난수 `cancellationToken`을 반환하며 DB에는 SHA-256 해시만 저장합니다. 웹은 이메일 인증 전 진행 정보를 sessionStorage에 저장할 때 이 취소 자격도 함께 보관합니다. 로그인이나 약관 서명 자격으로는 사용할 수 없습니다. 이전 버전에서 열어 둔 화면처럼 취소 자격이 없으면 `{ "email": "…", "password": "가입 시 입력한 비밀번호" }`로 본인의 대기임을 확인할 수 있습니다. 이메일만으로 대기를 삭제할 수 없습니다.
+
+이메일 잠금 아래 회원이 없는지와 취소 자격 또는 원래 비밀번호를 검증하고, Cognito의 가입 대기 레코드를 제거한 뒤 임시 DB 기록을 삭제합니다. 인증 전/후 모두 취소할 수 있으며 완료된 회원과 그 외부 인증은 삭제하지 않습니다. 이미 대기가 없으면 멱등적으로 `204 No Content`입니다. 외부 삭제 실패 시 임시 기록과 브라우저 입력 상태를 유지합니다.
+
+웹의 ‘가입 정보 다시 입력하기’는 이 API 성공 후에만 코드를 비우고 입력란을 다시 엽니다. 따라서 같은 이메일로 아이디나 비밀번호를 바꾸어 다시 신청할 수 있습니다. 배포 전 `AddRegistrationCancellationCredential` 마이그레이션을 적용해야 하며 기존 대기는 nullable 취소 확인값과 비밀번호 확인 경로로 호환합니다.
+
 ## 로그인
 
 `POST /api/auth/login`

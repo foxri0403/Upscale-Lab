@@ -1,9 +1,9 @@
-export const usernameMessage = (value: string) => /[^A-Za-z]/.test(value)
-  ? "아이디는 영문으로만 이용 가능합니다." : "";
+export const usernameMessage = (value: string) => /[^A-Za-z0-9]/.test(value)
+  ? "아이디는 영문과 숫자만 이용 가능합니다." : "";
 
 export function validateSignup(email: string, username: string, password: string, confirmation: string) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("올바른 이메일을 입력해 주세요.");
-  if (!/^[A-Za-z]{2,24}$/.test(username)) throw new Error(usernameMessage(username) || "아이디는 2~24자로 입력해 주세요.");
+  if (!/^[A-Za-z0-9]{2,24}$/.test(username)) throw new Error(usernameMessage(username) || "아이디는 2~24자로 입력해 주세요.");
   if (password.length < 10 || !/[A-Z]/.test(password) || !/[0-9]/.test(password) || !/[^\sa-zA-Z0-9]/.test(password))
     throw new Error("비밀번호는 10자 이상, 대문자·숫자·특수문자를 포함해야 합니다.");
   if (password !== confirmation) throw new Error("비밀번호가 일치하지 않습니다.");

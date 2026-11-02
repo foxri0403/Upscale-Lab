@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowRight, Eye, EyeOff } from "lucide-react";
 import { register, signIn, type Session } from "./auth";
-import { apiBase, cloud, cloudAcceptRegistration, cloudVerify, request, type RegistrationChallenge, type RegistrationResponse } from "./api";
+import { ApiError, apiBase, cloud, cloudAcceptRegistration, cloudVerify, request, type RegistrationChallenge, type RegistrationResponse } from "./api";
 import { CopyrightConsent, copyrightTerms, type ConsentValues } from "./CopyrightConsent";
-import { Busy, Notice, navigate } from "./ui";
+import { Busy, Modal, Notice, navigate } from "./ui";
 import { formatCountdown, remainingSeconds, usernameMessage, validateSignup, verificationClock, type VerificationClock, type VerificationTiming } from "./signup-validation";
 import "./signup.css";
 
 const pendingKey = `upscale.signup-verification.${cloud ? "cloud" : "demo"}.${apiBase || location.origin}.v1`;
-type SavedVerification = { email: string; username: string; clock: VerificationClock };
+type SavedVerification = { email: string; username: string; clock: VerificationClock; cancellationToken?: string };
 function savedVerification(): SavedVerification | null {
   if (!cloud) return null;
   try {
@@ -29,6 +29,8 @@ export function SignupForm({ onLogin }: { onLogin: (session: Session) => void })
   const [code, setCode] = useState(""), [clock, setClock] = useState<VerificationClock | null>(saved?.clock || null);
   const [step, setStep] = useState<"details" | "verification" | "terms">(saved ? "verification" : "details");
   const [challenge, setChallenge] = useState<RegistrationChallenge | null>(null), [showTerms, setShowTerms] = useState(false);
+  const [cancellationToken, setCancellationToken] = useState(saved?.cancellationToken || "");
+  const [resetPasswordOpen, setResetPasswordOpen] = useState(false), [resetPassword, setResetPassword] = useState("");
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), [message, setMessage] = useState("");
   const [now, setNow] = useState(Date.now);
   const codeInput = useRef<HTMLInputElement>(null);
@@ -45,14 +47,25 @@ export function SignupForm({ onLogin }: { onLogin: (session: Session) => void })
   const cooldown = clock ? remainingSeconds(clock.resendAt, clock, now) : 0;
   const locked = step !== "details";
 
-  function setTiming(timing: VerificationTiming, nextEmail = email, nextUsername = username) {
+  function setTiming(timing: VerificationTiming, nextEmail = email, nextUsername = username, resetToken = cancellationToken) {
     const next = verificationClock(timing);
     setClock(next); setNow(Date.now());
-    saveVerification({ email: nextEmail, username: nextUsername, clock: next });
+    saveVerification({ email: nextEmail, username: nextUsername, clock: next, cancellationToken: resetToken });
   }
-  function reset() {
-    setStep("details"); setClock(null); setChallenge(null); setShowTerms(false); setCode("");
-    setPassword(""); setConfirmation(""); setError(""); setMessage(""); saveVerification(null);
+  async function reset(originalPassword = "") {
+    if (busy) return;
+    if (cloud && !cancellationToken && !originalPassword && !password) { setResetPasswordOpen(true); setError(""); return; }
+    setBusy(true); setError("");
+    try {
+      if (cloud) await request("/api/auth/cancel-registration", { method: "POST", body: JSON.stringify({ email,
+        token: cancellationToken || undefined, password: originalPassword || (!cancellationToken ? password : undefined) }) }, false);
+      setStep("details"); setClock(null); setChallenge(null); setShowTerms(false); setCode("");
+      setPassword(""); setConfirmation(""); setCancellationToken(""); setResetPassword(""); setResetPasswordOpen(false);
+      setMessage("이전 가입 대기를 취소했습니다. 새 정보를 입력해 주세요."); saveVerification(null);
+    } catch (error) {
+      setError((error as Error).message);
+      if (error instanceof ApiError && error.status === 401) setResetPasswordOpen(true);
+    } finally { setBusy(false); }
   }
   function openTerms(value: RegistrationChallenge) {
     if (!value.token || !value.termsVersion) throw new Error("가입 확인 응답을 받지 못했습니다. 서버 업데이트 상태를 확인해 주세요.");
@@ -73,8 +86,9 @@ export function SignupForm({ onLogin }: { onLogin: (session: Session) => void })
           const result = await request<RegistrationResponse>("/api/auth/register", {
             method: "POST", body: JSON.stringify({ email: normalizedEmail, username: name, password }),
           }, false);
+          setCancellationToken(result.cancellationToken || "");
           if (!result.requiresEmailVerification && result.registration) { openTerms(result.registration); return; }
-          setTiming(result, normalizedEmail, name);
+          setTiming(result, normalizedEmail, name, result.cancellationToken || "");
         } else {
           const sent = Date.now();
           setTiming({ verificationCodeSentAt: new Date(sent).toISOString(), verificationCodeExpiresAt: new Date(sent + 900000).toISOString(),
@@ -126,10 +140,11 @@ export function SignupForm({ onLogin }: { onLogin: (session: Session) => void })
         <div className="signup-code-actions"><span role="timer" aria-label="이메일 인증 남은 시간" aria-live="off">남은 시간 <strong>{formatCountdown(seconds)}</strong></span><button type="button" className="text-button" disabled={busy || !!cooldown || !seconds} onClick={resend}>{cooldown ? `다시 받기 (${formatCountdown(cooldown)})` : "인증 코드 다시 받기"}</button></div>
         {!seconds && <p className="form-error" role="alert">인증 시간이 만료되었습니다. 가입 정보를 다시 입력해 주세요.</p>}
       </div>}
-      <label>사용자 이름 (아이디)<input required autoComplete="username" autoCapitalize="none" spellCheck={false} minLength={2} maxLength={24} pattern="[A-Za-z]+" value={username} readOnly={locked} disabled={busy}
+      <label>사용자 이름 (아이디)<input required autoComplete="username" autoCapitalize="none" spellCheck={false} minLength={2} maxLength={24} pattern="[A-Za-z0-9]+" value={username} readOnly={locked} disabled={busy} aria-describedby="signup-username-help"
         onChange={event => { setUsername(event.target.value); event.currentTarget.setCustomValidity(usernameMessage(event.target.value)); }}
         onInvalid={event => event.currentTarget.setCustomValidity(usernameMessage(event.currentTarget.value))}
-        placeholder="영문 아이디를 입력해 주세요" /></label>
+        placeholder="어떻게 불러드릴까요?" /></label>
+      <p id="signup-username-help" className="field-help">영문과 숫자만 사용 가능합니다.</p>
       {step !== "terms" && <>
         <label>비밀번호<div className="password-field"><input required={!locked} autoComplete="new-password" type={show ? "text" : "password"} value={password} disabled={busy || locked} minLength={10} maxLength={128} onChange={event => setPassword(event.target.value)} placeholder={locked ? "가입 신청 시 입력한 비밀번호" : "10자 이상으로 입력해 주세요"} /><button type="button" aria-label={show ? "비밀번호 숨기기" : "비밀번호 보기"} disabled={locked} onClick={() => setShow(!show)}>{show ? <EyeOff size={19} /> : <Eye size={19} />}</button></div></label>
         {!locked && <p className="field-help">대문자·숫자·특수문자를 포함해 10자 이상</p>}
@@ -139,8 +154,16 @@ export function SignupForm({ onLogin }: { onLogin: (session: Session) => void })
       {step === "terms" && <Notice>이메일 인증은 완료되었으며, 약관 동의와 서명 전에는 회원 계정이 생성되지 않습니다.</Notice>}
       {error && <p role="alert" className="form-error">{error}</p>}
       <button type="submit" className="button primary full" disabled={busy || (step === "verification" && !seconds)}>{busy ? <Busy /> : step === "details" ? "회원가입" : step === "verification" ? "이메일 인증하기" : "약관 다시 확인하기"}{!busy && <ArrowRight size={17} />}</button>
-      {locked && <button className="text-button signup-reset" type="button" disabled={busy} onClick={reset}>{step === "verification" && !seconds ? "가입 정보 다시 입력하기" : "가입 정보 변경하기"}</button>}
+      {locked && <button className="text-button signup-reset" type="button" disabled={busy} onClick={() => void reset()}>가입 정보 다시 입력하기</button>}
     </form>
     {showTerms && challenge && <CopyrightConsent username={challenge.username} version={challenge.termsVersion} submit={accept} decline={() => { setShowTerms(false); setMessage("약관에 동의하지 않아 회원가입이 완료되지 않았습니다. 내용을 다시 확인한 뒤 결정할 수 있습니다."); }} />}
+    {resetPasswordOpen && <Modal title="가입 대기 취소 확인" close={() => { if (!busy) { setResetPasswordOpen(false); setResetPassword(""); } }}>
+      <p className="recovery-description">가입 정보를 안전하게 초기화하려면 처음 입력한 비밀번호를 확인해 주세요.</p>
+      <form onSubmit={event => { event.preventDefault(); void reset(resetPassword); }}>
+        <label>가입 시 입력한 비밀번호<input type="password" autoComplete="off" required maxLength={128} value={resetPassword} disabled={busy} onChange={event => setResetPassword(event.target.value)} /></label>
+        {error && <p role="alert" className="form-error">{error}</p>}
+        <button className="button primary full" type="submit" disabled={busy}>{busy ? <Busy /> : "확인하고 다시 입력"}</button>
+      </form>
+    </Modal>}
   </>;
 }
