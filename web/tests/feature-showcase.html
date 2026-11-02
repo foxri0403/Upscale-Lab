@@ -14,6 +14,8 @@
     <section id="test-panel">
       <button id="run-tests" type="button">브라우저 회귀 검사 실행</button>
       <p>실제 See-through 파츠와 소개 화면 컴포넌트를 검사합니다. 이 페이지에서만 센서와 권한 응답을 모의합니다.</p>
+      <nav><a href="?input=mouse">PC 마우스</a> · <a href="?input=gyro">모바일 자동 센서</a> · <a href="?input=gesture">첫 터치 권한</a> · <a href="?input=denied">권한 거부</a></nav>
+      <p>모의 센서 권한 요청: <span id="permission-count">0</span>회</p>
       <pre id="test-results" role="status">준비됨</pre>
     </section>
     <div id="root"></div>

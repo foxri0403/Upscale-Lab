@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clampMotion, combinedMotion, motionStep, orientationMotion } from "./parallax-motion";
+import { requestOrientationPermission } from "./demo-input";
 
 type OrientationConstructor = typeof DeviceOrientationEvent & { requestPermission?: () => Promise<string> };
 type SensorPolicy = { allowsFeature: (name: string) => boolean };
@@ -7,7 +8,7 @@ function gyroSupported() {
   return window.isSecureContext && typeof DeviceOrientationEvent !== "undefined";
 }
 
-export function useParallax(enabled: boolean, strength: number, mouseEnabled: boolean, gyroEnabled: boolean, sourceKey?: string, manualMotion?: { x: number; y: number }) {
+export function useParallax(enabled: boolean, strength: number, mouseEnabled: boolean, gyroEnabled: boolean, sourceKey?: string, manualMotion?: { x: number; y: number }, globalPointer = false) {
   const stage = useRef<HTMLDivElement>(null);
   const layers = useRef<HTMLDivElement>(null);
   const gain = useRef(strength);
@@ -26,10 +27,9 @@ export function useParallax(enabled: boolean, strength: number, mouseEnabled: bo
       throw new Error("브라우저에서 기울기 센서 사용을 허용해 주세요.");
     setGyroPending(true);
     try {
-      // Invoke directly from the button gesture, before any asynchronous work.
+      // Invoke directly from the user gesture, before any asynchronous work.
       const request = (DeviceOrientationEvent as OrientationConstructor).requestPermission;
-      if (request && await request.call(DeviceOrientationEvent) !== "granted")
-        throw new Error("기울기 센서 권한을 허용해 주세요.");
+      await requestOrientationPermission(request ? () => request.call(DeviceOrientationEvent) : undefined);
       setGyroReady(true);
     } catch (error) {
       setGyroReady(false);
@@ -58,11 +58,12 @@ export function useParallax(enabled: boolean, strength: number, mouseEnabled: bo
     };
     const pointer = (event: PointerEvent) => {
       if (event.pointerType !== "mouse") return;
-      const bounds = element.getBoundingClientRect();
+      const bounds = globalPointer ? { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight } : element.getBoundingClientRect();
       mouse = { x: clampMotion((event.clientX - bounds.left) / bounds.width * 2 - 1),
         y: clampMotion((event.clientY - bounds.top) / bounds.height * 2 - 1) };
     };
     const resetMouse = () => { mouse = { x: 0, y: 0 }; };
+    const leaveWindow = (event: PointerEvent) => { if (!event.relatedTarget) resetMouse(); };
     const calibrate = () => { origin = null; gyro = { x: 0, y: 0 }; };
     const orientation = (event: DeviceOrientationEvent) => {
       if (event.gamma === null || event.beta === null || !Number.isFinite(event.gamma) || !Number.isFinite(event.beta)) return;
@@ -73,6 +74,8 @@ export function useParallax(enabled: boolean, strength: number, mouseEnabled: bo
     const stop = () => {
       cancelAnimationFrame(frame); frame = 0; previous = 0;
       element.removeEventListener("pointermove", pointer); element.removeEventListener("pointerleave", resetMouse);
+      window.removeEventListener("pointermove", pointer); window.removeEventListener("pointerout", leaveWindow);
+      window.removeEventListener("blur", resetMouse);
       window.removeEventListener("deviceorientation", orientation);
       window.removeEventListener("orientationchange", calibrate); screen.orientation?.removeEventListener("change", calibrate);
       resetMouse(); calibrate(); x = 0; y = 0; paint();
@@ -81,8 +84,14 @@ export function useParallax(enabled: boolean, strength: number, mouseEnabled: bo
       stop();
       if (!active || document.hidden) return;
       if (mouseEnabled) {
-        element.addEventListener("pointermove", pointer, { passive: true });
-        element.addEventListener("pointerleave", resetMouse, { passive: true });
+        if (globalPointer) {
+          window.addEventListener("pointermove", pointer, { passive: true });
+          window.addEventListener("pointerout", leaveWindow, { passive: true });
+          window.addEventListener("blur", resetMouse);
+        } else {
+          element.addEventListener("pointermove", pointer, { passive: true });
+          element.addEventListener("pointerleave", resetMouse, { passive: true });
+        }
       }
       if (gyroEnabled && gyroReady) {
         window.addEventListener("deviceorientation", orientation, { passive: true });
@@ -92,7 +101,7 @@ export function useParallax(enabled: boolean, strength: number, mouseEnabled: bo
     };
     reconcile(); document.addEventListener("visibilitychange", reconcile);
     return () => { stop(); document.removeEventListener("visibilitychange", reconcile); };
-  }, [active, mouseEnabled, gyroEnabled, gyroReady, sourceKey]);
+  }, [active, mouseEnabled, gyroEnabled, gyroReady, sourceKey, globalPointer]);
   return { stage, layers, position, active, gyroReady, gyroPending, requestGyro };
 }
 

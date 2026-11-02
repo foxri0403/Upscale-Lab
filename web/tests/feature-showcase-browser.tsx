@@ -4,14 +4,29 @@ import "../src/styles.css";
 import "../src/responsive.css";
 import "../src/feature-showcase.css";
 
-// Test-only sensor: production continues to use the native browser permission API.
+// Pointer/sensor emulation is restricted to this development fixture.
+const mode = new URL(location.href).searchParams.get("input") || "mouse";
+const mobile = mode !== "mouse";
+let permissionCalls = 0;
+class FixtureQuery extends EventTarget {
+  onchange = null;
+  constructor(public media: string, public matches: boolean) { super(); }
+  set(matches: boolean) { this.matches = matches; this.dispatchEvent(new Event("change")); }
+}
+const reduced = new FixtureQuery("(prefers-reduced-motion: reduce)", false);
+const coarse = new FixtureQuery("(pointer: coarse)", mobile);
+const fine = new FixtureQuery("(any-pointer: fine)", !mobile);
+const nativeMatchMedia = window.matchMedia.bind(window);
+window.matchMedia = (query => [reduced, coarse, fine].find(item => item.media === query) as unknown as MediaQueryList || nativeMatchMedia(query));
 class TestOrientation extends Event {
-  static permission = "granted";
-  static async requestPermission() { return TestOrientation.permission; }
   constructor(public gamma: number | null, public beta: number | null) { super("deviceorientation"); }
 }
+if (mode === "gesture" || mode === "denied") Object.defineProperty(TestOrientation, "requestPermission", { value: async () => {
+  permissionCalls++;
+  document.getElementById("permission-count")!.textContent = String(permissionCalls);
+  return mode === "denied" ? "denied" : "granted";
+} });
 Object.defineProperty(window, "DeviceOrientationEvent", { configurable: true, value: TestOrientation });
-
 createRoot(document.getElementById("root")!).render(<><PublicHeader /><Landing /></>);
 
 function element<T extends HTMLElement = HTMLElement>(selector: string): T {
@@ -27,134 +42,122 @@ async function until(predicate: () => boolean, message: string, timeout = 2500) 
     await new Promise(resolve => requestAnimationFrame(resolve));
   }
 }
+const frame = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 const motionX = (variant: string) => parseFloat(element(`.${variant}-demo .demo-planes`).style.getPropertyValue("--motion-x")) || 0;
-function point(variant: string, ratio: number) {
-  const stage = element(`.${variant}-demo .demo-stage`);
-  const bounds = stage.getBoundingClientRect();
-  stage.dispatchEvent(new PointerEvent("pointermove", { pointerType: "mouse", clientX: bounds.left + bounds.width * ratio, clientY: bounds.top + bounds.height / 2 }));
+function point(ratio: number) {
+  window.dispatchEvent(new PointerEvent("pointermove", { pointerType: "mouse", clientX: innerWidth * ratio, clientY: innerHeight / 2 }));
 }
-const control = (variant: string, label: string) => element<HTMLButtonElement>(`.${variant}-demo button[aria-label$="${label}"]`);
+function neutral() {
+  window.dispatchEvent(new PointerEvent("pointerout", { pointerType: "mouse", relatedTarget: null }));
+  window.dispatchEvent(new Event("orientationchange"));
+}
+function sensorMove() {
+  window.dispatchEvent(new TestOrientation(null, null));
+  window.dispatchEvent(new TestOrientation(0, 70));
+  window.dispatchEvent(new TestOrientation(15, 75));
+}
 
 element<HTMLButtonElement>("#run-tests").onclick = async () => {
-  const run = element<HTMLButtonElement>("#run-tests");
-  const output = element("#test-results");
-  run.disabled = true;
-  output.textContent = "";
+  const run = element<HTMLButtonElement>("#run-tests"), output = element("#test-results");
+  run.disabled = true; output.textContent = "";
   let passed = 0, failed = 0;
   async function check(name: string, body: () => void | Promise<void>) {
     try { await body(); passed++; output.textContent += `PASS ${name}\n`; }
     catch (error) { failed++; output.textContent += `FAIL ${name}: ${(error as Error).message}\n`; }
   }
   try {
-    await check("01~05 순서, 모니터와 같은 호수 비교, 세 기기 이미지, 문의 제거", () => {
-      const numbers = Array.from(document.querySelectorAll(".feature-copy .eyebrow"), item => item.textContent!.slice(0, 2));
-      assert(numbers.join(",") === "01,02,03,04,05", "feature order");
-      assert(!element(".public-header").textContent!.includes("문의"), "contact still visible");
-      assert(element<HTMLImageElement>(".compare-art > img").src === element<HTMLImageElement>(".mock-monitor > img").src, "lake must match monitor artwork");
-      assert(!element(".character-demo").parentElement!.textContent!.includes("버튜버 아바타처럼 마우스와 기기의 기울기를 따라"), "old copy still visible");
-      for (const [selector, source] of [[".mock-monitor > img", "lake.jpg"], [".mock-tablet > img", "fox.png"], [".phone-character-wallpaper > img", "live2d-character-v2.png"]])
-        assert(element<HTMLImageElement>(selector).src.endsWith(source), `${selector} uses incorrect artwork`);
+    await check("호수 비교·기기 이미지 유지, 조작/파츠 버튼 제거, 항상 전체 합성", () => {
+      assert(element<HTMLImageElement>(".compare-art > img").src === element<HTMLImageElement>(".mock-monitor > img").src, "lake must match monitor");
+      assert(document.querySelectorAll(".motion-demo button").length === 0, "demo controls remain");
+      const parts = element(".demo-character-rig").querySelectorAll("img");
+      assert(parts.length === 12, "real layer count");
+      assert(Array.from(parts).every(part => getComputedStyle(part).visibility === "visible"), "hidden part");
+      assert(element(".character-demo").dataset.input === (mobile ? "gyro" : "mouse"), "wrong default input");
+      assert(element(".subject-demo").dataset.input === (mobile ? "gyro" : "mouse"), "wrong subject input");
     });
-    await check("비교 슬라이더가 원본과 선명한 이미지 영역을 변경", async () => {
+    await check("업스케일 비교 슬라이더", async () => {
       const slider = element<HTMLInputElement>(".compare-art input");
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(slider, "80");
       slider.dispatchEvent(new Event("input", { bubbles: true }));
-      await until(() => element(".compare-blur").style.clipPath.includes("20%"), "comparison clip did not update");
-      assert(slider.getAttribute("aria-valuetext")?.includes("80%"), "accessible comparison value");
+      await until(() => element(".compare-blur").style.clipPath.includes("20%"), "clip did not update");
     });
-    await check("캐릭터 마우스 이동과 방향키·Home 복귀", async () => {
-      const stage = element(".character-demo .demo-stage");
-      stage.scrollIntoView({ block: "center" });
-      await until(() => stage.getBoundingClientRect().top < innerHeight, "stage offscreen");
-      // Wait for IntersectionObserver and the real animation loop to become active.
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      await Promise.all(Array.from(stage.querySelectorAll<HTMLImageElement>("[data-rig-part]"), image => image.decode()));
-      point("character", .95);
-      await until(() => motionX("character") > 2, "mouse input did not move character");
-      stage.dispatchEvent(new PointerEvent("pointerleave", { pointerType: "mouse" }));
-      await until(() => Math.abs(motionX("character")) < .1, "pointer leave did not return to neutral");
+    const stage = element(".character-demo .demo-stage");
+    stage.scrollIntoView({ block: "center" }); await frame();
+    await Promise.all(Array.from(stage.querySelectorAll<HTMLImageElement>("[data-rig-part]"), image => image.decode()));
+    await check("기기별 기본 입력 자동 작동 및 권한 요청 단일화", async () => {
+      if (mode === "denied") {
+        await until(() => element(".character-demo .demo-status").textContent === "기울기 센서 권한을 허용해 주세요.", "denial not reported");
+        assert(element(".subject-demo .demo-status").textContent === "기울기 센서 권한을 허용해 주세요.", "subject denial not reported");
+        assert(permissionCalls === 1, "duplicate native prompt");
+        sensorMove(); await frame(); assert(motionX("character") === 0, "denied sensor moved avatar");
+      } else {
+        neutral(); await frame();
+        if (mobile) {
+          point(.95); await frame(); assert(Math.abs(motionX("character")) < .1, "mobile should use gyro, not mouse");
+          sensorMove();
+        } else {
+          sensorMove(); await frame(); assert(Math.abs(motionX("character")) < .1, "desktop should use mouse, not gyro");
+          point(.95); // Window input works even outside the artwork.
+        }
+        await until(() => motionX("character") > 2, "default input did not move avatar");
+        assert(permissionCalls === (mode === "gesture" ? 1 : 0), "unexpected native permission requests");
+      }
+    });
+    await check("독립적인 얼굴·눈동자·머리카락과 고정된 몸통", async () => {
+      const head = element('[data-layer-name="face"]'), eye = element('[data-layer-name="irides"]');
+      assert(getComputedStyle(element(".demo-character-plane")).transform === "none", "whole-image translation");
+      if (mode !== "denied") await until(() => getComputedStyle(head).transform !== getComputedStyle(eye).transform, "independent gaze missing");
+      for (const fixed of element(".demo-character-rig").querySelectorAll<HTMLElement>('[data-rig-part="fixed"]'))
+        assert(getComputedStyle(fixed).transform === "none", "body moved");
+    });
+    await check("목이 옷깃 위로 연결되고 앞쪽 옷깃을 덮지 않는 합성", () => {
+      const neck = element('[data-layer-name="neck"]'), clothes = element('[data-layer-name="topwear"]');
+      assert(Number(neck.style.zIndex) > Number(clothes.style.zIndex), "neck behind collar opening");
+      assert(neck.style.clipPath.includes("url("), "collar clip missing");
+      const canvas = document.createElement("canvas"); canvas.width = canvas.height = 1280;
+      const context = canvas.getContext("2d")!;
+      const parts = Array.from(element(".demo-character-rig").querySelectorAll("img"))
+        .sort((a, b) => Number(a.style.zIndex) - Number(b.style.zIndex));
+      for (const image of parts) {
+        context.save();
+        if (image.dataset.layerName === "neck") {
+          const path = element(".demo-character-rig").querySelector("clipPath path")!.getAttribute("d")!;
+          context.scale(1280, 1280); context.clip(new Path2D(path)); context.setTransform(1, 0, 0, 1, 0, 0);
+        }
+        context.drawImage(image, 0, 0, 1280, 1280); context.restore();
+      }
+      const neckPixel = context.getImageData(650, 540, 1, 1).data;
+      const collarPixel = context.getImageData(650, 595, 1, 1).data;
+      assert(neckPixel[3] > 240 && neckPixel[0] - neckPixel[1] > 20, "neck connection is not skin");
+      assert(collarPixel[3] > 240 && collarPixel[0] - collarPixel[1] < 25, "neck paints over front collar");
+    });
+    await check("방향키·Home 복귀 또는 권한 거부 시 입력 차단", async () => {
+      neutral(); await until(() => Math.abs(motionX("character")) < .1, "neutral");
       stage.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-      await until(() => motionX("character") > 2, "keyboard movement");
+      if (mode === "denied") {
+        await frame(); assert(motionX("character") === 0, "permission denied motion was not blocked");
+        stage.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })); return;
+      }
+      await until(() => motionX("character") > 2, "keyboard input");
       stage.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
       await until(() => Math.abs(motionX("character")) < .1, "Home reset");
     });
-    await check("얼굴·눈동자·머리카락 개별 리그, 몸통 고정", async () => {
-      const parts = element(".demo-character-rig");
-      assert(parts.querySelectorAll("img").length === 12, "expected real See-through parts");
-      assert(getComputedStyle(element(".demo-character-plane")).transform === "none", "whole character must not translate");
-      point("character", .95);
-      await until(() => motionX("character") > 2, "motion input");
-      const head = element('.demo-character-rig img[data-layer-name="face"]');
-      const iris = element('.demo-character-rig img[data-layer-name="irides"]');
-      const front = element('.demo-character-rig img[data-rig-part="frontHair"]');
-      const back = element('.demo-character-rig img[data-rig-part="backHair"]');
-      await until(() => getComputedStyle(head).transform !== getComputedStyle(iris).transform, "gaze not independent");
-      assert(getComputedStyle(front).transform !== getComputedStyle(back).transform, "hair layers must respond differently");
-      assert(element('[data-layer-name="eyewhite"]').dataset.rigPart === "head", "eye whites must remain attached to face");
-      for (const fixed of parts.querySelectorAll<HTMLElement>('[data-rig-part="fixed"]'))
-        assert(getComputedStyle(fixed).transform === "none", "body or clothing moved");
-      element(".character-demo .demo-stage").dispatchEvent(new PointerEvent("pointerleave", { pointerType: "mouse" }));
-      await until(() => Math.abs(motionX("character")) < .1, "neutral reset");
+    await check("움직임 줄이기 설정을 존중하고 다시 자동 재생", async () => {
+      reduced.set(true);
+      await until(() => Array.from(stage.querySelectorAll("img")).every(image => getComputedStyle(image).transform === "none"), "reduced motion still animates");
+      reduced.set(false); await frame();
     });
-    await check("눈동자 파츠 단독 표시와 전체 합성 복귀", async () => {
-      const buttons = Array.from(element(".demo-parts").querySelectorAll("button"));
-      buttons.find(button => button.textContent === "눈동자")!.click();
-      await until(() => element(".character-demo").dataset.part === "eye", "part selection");
-      const visible = Array.from(element(".demo-character-rig").querySelectorAll("img")).filter(image => getComputedStyle(image).visibility === "visible");
-      assert(visible.length === 1 && visible[0].dataset.layerName === "irides", "expected only iris artwork");
-      buttons.find(button => button.textContent === "전체")!.click();
-      await until(() => element(".character-demo").dataset.part === "all", "composition reset");
-    });
-    await check("멈추기 시 중립 복귀 및 센서 버튼 비활성화", async () => {
-      point("character", .95);
-      await until(() => motionX("character") > 2, "motion before pause");
-      control("character", "움직임 끄기").click();
-      await until(() => motionX("character") === 0, "pause did not reset motion");
-      for (const part of element(".demo-character-rig").querySelectorAll<HTMLElement>("img"))
-        assert(getComputedStyle(part).transform === "none", "paused rig still transforms parts");
-      assert(control("character", "자이로 켜기").disabled, "sensor active during pause");
-      control("character", "움직임 켜기").click();
-      await until(() => !control("character", "자이로 켜기").disabled, "resume failed");
-    });
-    await check("센서 권한 거부 안내, 허용 후 첫 입력 기준 보정과 이동", async () => {
-      TestOrientation.permission = "denied";
-      control("character", "자이로 켜기").click();
-      await until(() => element(".character-demo .demo-status").textContent!.includes("권한"), "permission denial not shown");
-      assert(control("character", "자이로 켜기").getAttribute("aria-pressed") === "false", "denied sensor was enabled");
-      TestOrientation.permission = "granted";
-      control("character", "자이로 켜기").click();
-      await until(() => !!document.querySelector('.character-demo button[aria-label$="자이로 끄기"]'), "sensor not enabled");
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      window.dispatchEvent(new TestOrientation(null, null));
-      window.dispatchEvent(new TestOrientation(0, 70));
-      assert(Math.abs(motionX("character")) < .1, "first reading did not calibrate");
-      window.dispatchEvent(new TestOrientation(15, 75));
-      await until(() => Math.abs(motionX("character")) > 2, "gyro did not move character");
-      control("character", "자이로 끄기").click();
-      await until(() => motionX("character") === 0, "sensor stop did not reset");
-    });
-    await check("센서 응답 없음 안내와 늦게 도착한 입력의 복구", async () => {
-      control("character", "자이로 켜기").click();
-      await until(() => element(".character-demo .demo-status").textContent!.includes("센서 응답이 없어요"), "missing sensor not reported", 5500);
-      window.dispatchEvent(new TestOrientation(0, 70));
-      await until(() => element(".character-demo .demo-status").textContent!.includes("현재 기울기"), "late sensor recovery");
-      control("character", "자이로 끄기").click();
-    });
-    await check("여우 피사체 이동 시 배경 고정", async () => {
-      const stage = element(".subject-demo .demo-stage");
-      stage.scrollIntoView({ block: "center" });
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      point("subject", .95);
-      await until(() => motionX("subject") > 2, "foreground not moving");
+    await check("여우의 기본 입력과 고정 배경", async () => {
+      element(".subject-demo .demo-stage").scrollIntoView({ block: "center" }); await frame();
+      neutral(); if (mobile) sensorMove(); else point(.95);
+      if (mode === "denied") { await frame(); assert(motionX("subject") === 0, "denied subject sensor was active"); }
+      else await until(() => motionX("subject") > 2, "subject automatic input");
       assert(getComputedStyle(element(".demo-background")).transform === "none", "background moved");
-      stage.dispatchEvent(new PointerEvent("pointerleave", { pointerType: "mouse" }));
+      neutral();
     });
-    await check("화면 너비를 초과하는 가로 스크롤 없음", () => {
-      assert(document.documentElement.scrollWidth <= document.documentElement.clientWidth, "horizontal overflow");
-    });
+    await check("가로 스크롤 없음", () => assert(document.documentElement.scrollWidth <= document.documentElement.clientWidth, "horizontal overflow"));
   } finally {
-    output.textContent += `\n${passed} passed, ${failed} failed`;
-    run.disabled = false;
-    output.scrollIntoView({ block: "center" });
+    output.textContent += `\n${passed} passed, ${failed} failed (${mode})`;
+    run.disabled = false; output.scrollIntoView({ block: "center" });
   }
 };

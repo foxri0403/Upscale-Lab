@@ -1,10 +1,16 @@
 import { useEffect, useId, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { Check, ChevronsLeftRight, MousePointer2, Pause, Play, Smartphone } from "lucide-react";
+import { Check, ChevronsLeftRight, MousePointer2, Smartphone } from "lucide-react";
 import { useParallax } from "./use-parallax";
 import { useCharacterRig } from "./use-character-rig";
 import { showcaseCharacter, showcaseRig } from "./showcase-character";
+import { defaultDemoInput } from "./demo-input";
 
 const characterImage = "/images/live2d-character-v2.png";
+
+function currentDemoInput() {
+  return defaultDemoInput(window.matchMedia("(pointer: coarse)").matches,
+    window.matchMedia("(any-pointer: fine)").matches, navigator.maxTouchPoints);
+}
 
 export function UpscaleDemo() {
   const [split, setSplit] = useState(45);
@@ -33,20 +39,18 @@ export function UpscaleDemo() {
 
 /** The same calibrated mouse/gyro input as the editor, applied to prepared demo artwork. */
 export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
-  const [enabled, setEnabled] = useState(true);
-  const [gyro, setGyro] = useState(false);
-  const [sensorReceived, setSensorReceived] = useState(false);
+  const [input, setInput] = useState(currentDemoInput);
   const [sensorMissing, setSensorMissing] = useState(false);
   const [error, setError] = useState("");
   const [inView, setInView] = useState(false);
   const [reduced, setReduced] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const [keyboard, setKeyboard] = useState({ x: 0, y: 0 });
-  const [part, setPart] = useState("all");
   const [artworkError, setArtworkError] = useState(false);
   const instruction = useId();
+  const neckOpening = `${useId()}-neck-opening`;
   const title = variant === "character" ? "Live 2D 캐릭터" : "배경·피사체 분리";
-  const moving = enabled && !reduced;
-  const motion = useParallax(moving && inView, 85, true, gyro, variant, keyboard);
+  const moving = !reduced;
+  const motion = useParallax(moving && inView, 85, input === "mouse", input === "gyro", variant, keyboard, true);
   const rig = useCharacterRig(variant === "character" && moving && inView && !artworkError, showcaseRig, variant, motion.position);
 
   useEffect(() => {
@@ -57,6 +61,41 @@ export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
   }, []);
 
   useEffect(() => {
+    const queries = [window.matchMedia("(pointer: coarse)"), window.matchMedia("(any-pointer: fine)")];
+    const change = () => { setInput(currentDemoInput()); setKeyboard({ x: 0, y: 0 }); };
+    queries.forEach(query => query.addEventListener("change", change));
+    return () => queries.forEach(query => query.removeEventListener("change", change));
+  }, []);
+
+  useEffect(() => {
+    setError("");
+    if (input !== "gyro" || !moving) return;
+    let disposed = false;
+    let attempted = false;
+    const remove = () => {
+      window.removeEventListener("pointerup", activate, true);
+      window.removeEventListener("click", activate, true);
+      window.removeEventListener("keydown", activate, true);
+    };
+    function activate() {
+      if (attempted) return;
+      attempted = true;
+      remove();
+      // Invoked directly from the first page gesture on permission-gated browsers.
+      void motion.requestGyro().catch(failure => { if (!disposed) setError((failure as Error).message); });
+    }
+    const orientation = typeof DeviceOrientationEvent !== "undefined"
+      ? DeviceOrientationEvent as typeof DeviceOrientationEvent & { requestPermission?: () => Promise<string> } : undefined;
+    if (orientation?.requestPermission) {
+      if (motion.gyroReady) return;
+      window.addEventListener("pointerup", activate, { capture: true, passive: true });
+      window.addEventListener("click", activate, { capture: true, passive: true });
+      window.addEventListener("keydown", activate, true);
+    } else activate();
+    return () => { disposed = true; remove(); };
+  }, [input, moving, motion.gyroReady, motion.requestGyro]);
+
+  useEffect(() => {
     const stage = motion.stage.current;
     if (!stage) return;
     const observer = new IntersectionObserver(entries => setInView(entries[0].isIntersecting));
@@ -65,12 +104,10 @@ export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
   }, [motion.stage]);
 
   useEffect(() => {
-    if (!gyro || !moving || !inView) return;
-    setSensorReceived(false);
+    if (input !== "gyro" || !motion.gyroReady || !moving || !inView) return;
     setSensorMissing(false);
     const receive = (event: DeviceOrientationEvent) => {
       if (event.gamma === null || event.beta === null || !Number.isFinite(event.gamma) || !Number.isFinite(event.beta)) return;
-      setSensorReceived(true);
       setSensorMissing(false);
       window.removeEventListener("deviceorientation", receive);
       window.clearTimeout(timeout);
@@ -81,18 +118,7 @@ export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
       window.clearTimeout(timeout);
       window.removeEventListener("deviceorientation", receive);
     };
-  }, [gyro, moving, inView]);
-
-  async function toggleGyro() {
-    setError("");
-    if (gyro) { setGyro(false); return; }
-    try {
-      await motion.requestGyro();
-      setGyro(true);
-    } catch (failure) {
-      setError((failure as Error).message);
-    }
-  }
+  }, [input, motion.gyroReady, moving, inView]);
 
   function moveWithKeys(event: KeyboardEvent<HTMLDivElement>) {
     if (!moving || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home"].includes(event.key)) return;
@@ -104,14 +130,11 @@ export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
   }
 
   const status = reduced ? "기기의 움직임 줄이기 설정에 따라 정지 화면을 표시합니다."
-    : !enabled ? "움직임을 멈췄어요. 다시 켜서 체험해 보세요."
-    : error || (gyro ? sensorMissing ? "센서 응답이 없어요. 센서를 지원하는 기기에서 이용하거나 마우스로 체험해 보세요."
-      : sensorReceived ? "현재 기울기를 기준으로 기기를 천천히 움직여 보세요."
-      : "기울기 센서를 기다리고 있어요. 기기를 천천히 움직여 보세요."
-      : "휴대폰에서는 자이로 켜기를 누르고 기기를 기울여 보세요.");
+    : input === "gyro" ? error || (!motion.gyroReady ? "화면을 한 번 터치하고 기울기 센서 권한을 허용해 주세요."
+      : sensorMissing ? "기울기 센서의 응답이 없어요. 브라우저의 동작·방향 접근 설정을 확인해 주세요." : "") : "";
 
   return (
-    <div className={`motion-demo ${variant}-demo`} data-part={part}>
+    <div className={`motion-demo ${variant}-demo`} data-input={input}>
       <div className="demo-stage" ref={element => { motion.stage.current = element; rig.stage.current = element; }} tabIndex={0} role="group"
         aria-label={`${title} 움직임 미리보기`} aria-describedby={instruction}
         onKeyDown={moveWithKeys} onBlur={() => setKeyboard({ x: 0, y: 0 })}>
@@ -126,10 +149,15 @@ export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
             <div className="demo-character-plane">
               <div className="demo-character-rig" ref={rig.layers} role="img" aria-label="얼굴·눈동자·머리카락 파츠가 독립적으로 움직이는 여성 캐릭터"
                 style={{ aspectRatio: `${showcaseCharacter.width} / ${showcaseCharacter.height}` } as CSSProperties}>
+                <svg className="character-clip-defs" width="0" height="0" aria-hidden="true" focusable="false">
+                  <defs><clipPath id={neckOpening} clipPathUnits="objectBoundingBox">
+                    <path d="M0 0H1V.42H.572C.568 .435 .548 .442 .514 .442C.485 .442 .464 .436 .458 .42H0Z" />
+                  </clipPath></defs>
+                </svg>
                 {showcaseCharacter.layers.map(layer => <img key={layer.file} src={layer.src} alt="" aria-hidden="true"
                   width={showcaseCharacter.width} height={showcaseCharacter.height} loading="lazy"
                   data-rig-part={layer.part} data-layer-name={layer.name}
-                  style={{ visibility: part === "all" || part === layer.part ? "visible" : "hidden" }}
+                  style={{ zIndex: layer.renderOrder, clipPath: layer.name === "neck" ? `url("#${neckOpening}")` : undefined }}
                   onError={() => setArtworkError(true)} />)}
               </div>
             </div>
@@ -137,26 +165,12 @@ export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
         </div>
         <span className="demo-stage-tag" aria-hidden="true">{variant === "character" ? "LIVE 2D" : "BACKGROUND / SUBJECT"}</span>
       </div>
-      {variant === "character" && <div className="demo-parts" role="group" aria-label="캐릭터 파츠 미리보기">
-        {([["all", "전체"], ["head", "얼굴"], ["eye", "눈동자"], ["frontHair", "앞머리"], ["backHair", "뒷머리"], ["fixed", "몸 · 의상"]] as const)
-          .filter(([value]) => value === "all" || showcaseCharacter.layers.some(layer => layer.part === value))
-          .map(([value, label]) => <button key={value} type="button" aria-pressed={part === value} onClick={() => setPart(value)}>{label}</button>)}
-      </div>}
       {variant === "character" && artworkError && <p className="form-error" role="alert">캐릭터 파츠를 불러오지 못했어요. 페이지를 새로고침해 주세요.</p>}
       <div className="demo-toolbar">
-        <p id={instruction}><MousePointer2 size={15} /> 마우스 또는 방향키로 움직여 보세요</p>
-        <div className="demo-actions">
-          <button type="button" aria-label={`${title} 움직임 ${enabled ? "끄기" : "켜기"}`}
-            aria-pressed={enabled} disabled={reduced} onClick={() => { setEnabled(!enabled); setKeyboard({ x: 0, y: 0 }); }}>
-            {enabled ? <Pause size={14} /> : <Play size={14} />}{enabled ? "멈추기" : "움직이기"}
-          </button>
-          <button type="button" aria-label={`${title} 자이로 ${gyro ? "끄기" : "켜기"}`}
-            aria-pressed={gyro} disabled={!moving || motion.gyroPending} onClick={() => void toggleGyro()}>
-            <Smartphone size={14} />{motion.gyroPending ? "권한 확인 중…" : gyro ? "자이로 끄기" : "자이로 켜기"}
-          </button>
-        </div>
+        <p id={instruction}>{input === "gyro" ? <><Smartphone size={15} /> 기기를 천천히 기울여 보세요</>
+          : <><MousePointer2 size={15} /> 마우스를 움직여 보세요</>}</p>
       </div>
-      <p className="demo-status" role="status">{status}</p>
+      {status && <p className="demo-status" role="status">{status}</p>}
     </div>
   );
 }

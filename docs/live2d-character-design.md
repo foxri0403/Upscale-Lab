@@ -10,11 +10,13 @@ The revised original adult female VTuber uses simplified anime facial features, 
 
 ## See-through showcase parts
 
-The public character demonstration renders 12 real RGBA parts produced by the existing `upscalelab-see-through` RunPod endpoint. The source PNG was composited onto white as inference input without altering the original asset. The completed output has a common 1280 × 1280 canvas and preserves the model's layer order. Original model output PNGs are stored under `web/public/images/live2d-character-parts/`; file hashes and semantic source names are recorded in `web/src/showcase-character-data.json`.
+The public character demonstration renders 12 real RGBA parts produced by the existing `upscalelab-see-through` RunPod endpoint. The source PNG was composited onto white as inference input without altering the original asset. The completed output has a common 1280 × 1280 canvas. Original model output PNGs and their original layer order are preserved under `web/public/images/live2d-character-parts/` and `web/src/showcase-character-data.json` with file hashes and semantic source names.
 
 RunPod job `bce5cf67-5758-4102-84e8-e4036400474e-u2` completed with 12 layers and execution time 333581 ms. Output ZIP SHA-256: `a8da7286fe61ab485492253c6c1a31b4ee2cc98ce71b2beca00006e18498d360`. The endpoint image/settings and production application were not modified.
 
-The existing web character rig rotates the face and facial features, moves the irides independently, and gives front/back hair different delayed motion. Eye whites and eyelashes remain attached to the head. The body, neck and clothing stay fixed. Mouse, calibrated gyroscope and keyboard share normalized input. Part buttons display individual semantic groups. This is the same PNG-part approach as the editor, rather than a single foreground translation or a Cubism mesh. Opening the demo needs no GPU request or account. The phone mockup retains the original static PNG.
+The existing web character rig rotates the face and facial features, moves the irides independently, and gives front/back hair different delayed motion. Eye whites and eyelashes remain attached to the head. The body, neck and clothing stay fixed. The full composition is always visible, with no pause, gyro or part-selection controls. Desktop mouse input follows the page; touch-first devices default to calibrated gyroscope input. Browsers requiring sensor permission request it from the first page gesture, shared by both previews. Keyboard input is also available. This is the same PNG-part approach as the editor, rather than a single foreground translation or a Cubism mesh. Opening the demo needs no GPU request or account. The phone mockup retains the original static PNG.
+
+The model's topwear contains an opaque inner-collar oval that previously covered the neck. The presentation now draws the existing neck part above that oval, clipped to the curved collar opening so the front collar remains intact. This is a responsive SVG composition correction in the public demonstration, without repainting the model PNGs or changing user projects' layer order.
 
 ### Generation prompt (v2)
 
