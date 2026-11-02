@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from "react";
 import {
   ArrowRight,
-  ArrowDown,
   ChevronDown,
   Eye,
   EyeOff,
@@ -9,11 +8,9 @@ import {
   Smartphone,
   Layers3,
   MoveUpRight,
-  Mail,
   Check,
-  MousePointer2,
 } from "lucide-react";
-import { Brand, Link, Modal, Busy, Notice, navigate } from "./ui";
+import { Brand, Link, Busy, Notice, navigate } from "./ui";
 import {
   demoEmail,
   demoPassword,
@@ -21,7 +18,7 @@ import {
   signIn,
   type Session,
 } from "./auth";
-import { imageSrc, write, read } from "./model";
+import { DeviceShowcase, MotionDemo, UpscaleDemo } from "./FeatureDemos";
 import { cloud, cloudLogin, cloudVerify, request } from "./api";
 import { AccountRecovery, type RecoveryMode } from "./AccountRecovery";
 import {
@@ -29,7 +26,7 @@ import {
   savedLoginIdentifier,
 } from "./login-preferences";
 
-export function PublicHeader({ contact }: { contact: () => void }) {
+export function PublicHeader() {
   return (
     <header className="public-header">
       <Brand />
@@ -47,9 +44,6 @@ export function PublicHeader({ contact }: { contact: () => void }) {
         >
           기능 소개
         </a>
-        <button className="text-button" onClick={contact}>
-          문의
-        </button>
       </nav>
       <div className="auth-links">
         <Link to="/login" className="text-button">
@@ -63,7 +57,6 @@ export function PublicHeader({ contact }: { contact: () => void }) {
   );
 }
 export function Landing() {
-  const [split, setSplit] = useState(45);
   return (
     <div className="landing">
       <section className="hero">
@@ -130,28 +123,7 @@ export function Landing() {
               <span>섬세한 디테일</span>
             </div>
           </div>
-          <div className="compare-art">
-            <img src="/images/fox.png" alt="선명한 여우 이미지" />
-            <div
-              className="compare-blur"
-              style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }}
-            >
-              <img src="/images/fox.png" alt="비교용 저화질 미리보기" />
-            </div>
-            <div className="compare-line" style={{ left: `${split}%` }}>
-              <span>↔</span>
-            </div>
-            <span className="compare-label before">원본</span>
-            <span className="compare-label after">업스케일 미리보기</span>
-            <input
-              type="range"
-              min="5"
-              max="95"
-              value={split}
-              onChange={(e) => setSplit(Number(e.target.value))}
-              aria-label="업스케일 전후 비교"
-            />
-          </div>
+          <UpscaleDemo />
         </section>
         <section className="feature-section reverse">
           <div className="feature-copy">
@@ -186,33 +158,55 @@ export function Landing() {
         </section>
         <section className="feature-section">
           <div className="feature-copy">
-            <span className="eyebrow">03 — LIVE 2D</span>
+            <span className="eyebrow">03 — 배경 · 피사체 분리</span>
             <h2>
               평면의 사진에,
               <br />
               움직임을 더하다.
             </h2>
             <p>
-              고정된 배경 위에서 피사체가 자연스럽게 움직입니다.
+              분리한 배경과 피사체에 깊이감을 더해 보세요.
               <br />
-              나만의 깊이 있는 배경화면을 완성하세요.
+              마우스나 기기의 자이로 센서에 따라 피사체가 움직입니다.
             </p>
             <div className="feature-points">
-              <span>입체적인 깊이감</span>
-              <span>자연스러운 움직임</span>
+              <span>마우스 반응</span>
+              <span>자이로 센서 반응</span>
             </div>
           </div>
-          <ParallaxArt />
+          <MotionDemo variant="subject" />
         </section>
         <section className="feature-section reverse">
           <div className="feature-copy">
-            <span className="eyebrow">04 — 기기 배경화면 관리</span>
+            <span className="eyebrow">04 — LIVE 2D</span>
+            <h2>
+              나의 캐릭터에,
+              <br />
+              작은 움직임을.
+            </h2>
+            <p>
+              좋아하는 2D 캐릭터를 더 생생하게 만나 보세요.
+              <br />
+              버튜버 아바타처럼 마우스와 기기의 기울기를 따라
+              <br />
+              캐릭터가 부드럽게 움직입니다.
+            </p>
+            <div className="feature-points">
+              <span>캐릭터 중심 모션</span>
+              <span>마우스 · 자이로</span>
+            </div>
+          </div>
+          <MotionDemo variant="character" />
+        </section>
+        <section className="feature-section">
+          <div className="feature-copy">
+            <span className="eyebrow">05 — 기기 배경화면 관리</span>
             <h2>
               만든 이미지를,
               <br />내 모든 화면으로.
             </h2>
             <p>
-              PC부터 휴대폰까지, 배경화면을 한곳에서 관리하세요.
+              PC, 태블릿, 휴대폰의 배경화면을 한곳에서 관리하세요.
               <br />
               완성한 이미지를 공유하고 다운로드할 수도 있어요.
             </p>
@@ -226,52 +220,9 @@ export function Landing() {
             </div>
             <small>Windows·Android 연결 앱으로 적용합니다.</small>
           </div>
-          <div className="devices-art">
-            <div className="mock-monitor">
-              <img
-                src={imageSrc("lake")}
-                alt="푸른 호수 배경화면이 적용된 PC"
-              />
-              <div className="monitor-foot" />
-            </div>
-            <div className="mock-phone">
-              <div className="phone-notch" />
-              <img src="/images/fox.png" alt="여우 배경화면이 적용된 휴대폰" />
-              <span>09:41</span>
-            </div>
-            <span className="floating-label">
-              <Check size={16} /> 나의 화면, 하나의 공간에서
-            </span>
-          </div>
+          <DeviceShowcase />
         </section>
       </div>
-    </div>
-  );
-}
-function ParallaxArt() {
-  const [xy, setXy] = useState({ x: 0, y: 0 });
-  return (
-    <div
-      className="parallax-art"
-      onMouseMove={(e) => {
-        const r = e.currentTarget.getBoundingClientRect();
-        setXy({
-          x: (e.clientX - r.left - r.width / 2) / 20,
-          y: (e.clientY - r.top - r.height / 2) / 20,
-        });
-      }}
-      onMouseLeave={() => setXy({ x: 0, y: 0 })}
-    >
-      <img src="/images/fox-background.png" alt="고정된 숲 배경" />
-      <img
-        className="parallax-foreground"
-        src="/images/fox-foreground.png"
-        alt="움직이는 여우 피사체"
-        style={{ transform: `translate(${xy.x}px, ${xy.y}px)` }}
-      />
-      <span className="floating-label">
-        <MousePointer2 size={16} /> 마우스를 움직여 보세요
-      </span>
     </div>
   );
 }
@@ -611,81 +562,5 @@ export function AuthPage({
         />
       )}
     </main>
-  );
-}
-export function Contact({ close }: { close: () => void }) {
-  const [sent, setSent] = useState(false);
-  const [error, setError] = useState("");
-  return (
-    <Modal title="문의하기" close={close}>
-      {sent ? (
-        <div className="contact-success">
-          <div className="success-mark">
-            <Check size={28} />
-          </div>
-          <h3>문의 내용을 임시 저장했어요</h3>
-          <p>로컬 테스트이므로 실제 이메일은 발송되지 않습니다.</p>
-          <button className="button primary full" onClick={close}>
-            확인
-          </button>
-        </div>
-      ) : (
-        <>
-          <p className="muted">
-            서비스에 대한 궁금한 점이나 의견을 남겨 주세요.
-          </p>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const f = new FormData(e.currentTarget);
-              try {
-                write("upscale.demo.inquiries", [
-                  ...read<unknown[]>("upscale.demo.inquiries", []),
-                  {
-                    email: f.get("email"),
-                    message: f.get("message"),
-                    created: new Date().toISOString(),
-                  },
-                ]);
-                setSent(true);
-              } catch (e) {
-                setError((e as Error).message);
-              }
-            }}
-          >
-            <label>
-              이메일
-              <input
-                name="email"
-                type="email"
-                required
-                placeholder="you@example.com"
-                maxLength={150}
-              />
-            </label>
-            <label>
-              문의 내용
-              <textarea
-                name="message"
-                required
-                minLength={5}
-                maxLength={2000}
-                rows={5}
-                placeholder="어떤 도움이 필요하신가요?"
-              />
-            </label>
-            {error && (
-              <p role="alert" className="form-error">
-                {error}
-              </p>
-            )}
-            <Notice>문의 내용을 이 브라우저에 임시 저장합니다.</Notice>
-            <button className="button primary full" type="submit">
-              <Mail size={17} /> 문의 내용 저장
-            </button>
-          </form>
-        </>
-      )}
-    </Modal>
   );
 }

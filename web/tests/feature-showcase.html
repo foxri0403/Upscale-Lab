@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>기능 소개 브라우저 검사</title>
+    <style>
+      #test-panel { position: relative; z-index: 100; padding: 16px; background: #f0f2ff; font: 14px/1.6 sans-serif; }
+      #test-panel button { padding: 8px 14px; background: #536dfe; color: white; border-radius: 6px; }
+      #test-results { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <section id="test-panel">
+      <button id="run-tests" type="button">브라우저 회귀 검사 실행</button>
+      <p>소개 화면의 실제 컴포넌트를 검사합니다. 이 페이지에서만 센서와 권한 응답을 모의합니다.</p>
+      <pre id="test-results" role="status">준비됨</pre>
+    </section>
+    <div id="root"></div>
+    <script type="module" src="./feature-showcase-browser.tsx"></script>
+  </body>
+</html>

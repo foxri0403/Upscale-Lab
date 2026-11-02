@@ -9,8 +9,11 @@
 - `public/images/fox.png`
 - `public/images/fox-background.png`
 - `public/images/fox-foreground.png` (알파 투명 배경)
+- `public/images/live2d-character-v2.png` (1024 × 1536, 알파 투명 배경)
 
-최종 프롬프트 세트:
+Live 2D 소개와 휴대폰 목업의 여성 버튜버 캐릭터는 별도의 참고 이미지 없이 생성한 최종 디자인이다. 선과 평면 셀 채색을 중심으로 광택을 줄였다. [캐릭터 생성 프롬프트](../docs/live2d-character-design.md)를 참고한다.
+
+여우 이미지의 최종 프롬프트 세트:
 
 1. `Use case: photorealistic-natural. Create one website wallpaper asset, a landscape 3:2 wildlife photograph, a beautiful red fox standing full body on mossy woodland ground, head turned gently toward camera, lush emerald ferns, tree trunks and warm sunlit golden bokeh behind. Natural orange fur and white chest, elegant rich detailed realistic photograph. Fox positioned near center slightly right, whole fox including paws and tail in view. This is an image asset for an existing Upscale Lab UI, NOT a UI mockup. No typography, no graphics, no frames, no watermark. Match the natural red fox in a green forest photo in the approved UI mood.`
 2. `Use case: background-extraction. Edit target: supplied red fox forest photograph. Extract ONLY the complete fox as a clean transparent-background foreground layer, retaining exactly the fox's original size, position, pose and detailed fur edges. Preserve the full 1536x1024 landscape canvas and alignment from original photo: no centering, no cropping or repositioning. Remove ALL forest and ground, with actual transparency. No shadow, no checkerboard printed pixels, no text. This foreground will overlay the original aligned background in a website parallax demo.`

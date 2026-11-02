@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { AuthPage, Contact, Landing, PublicHeader } from "./Public";
+import { AuthPage, Landing, PublicHeader } from "./Public";
 import { Workspace } from "./Workspace";
 import { getSession, signOut, type Session } from "./auth";
 import { navigate, useRoute, Empty, Link } from "./ui";
 import "./styles.css";
 import "./responsive.css";
+import "./feature-showcase.css";
 import { cloud, cloudMe, cloudLogout } from "./api";
 import { clearCloudCache } from "./cloud-store";
 import { SharedImage } from "./SharedImage";
@@ -21,7 +22,6 @@ function App() {
   const [session, setSession] = useState<Session | null>(() =>
     cloud ? null : getSession(),
   );
-  const [contact, setContact] = useState(false);
   const [ready, setReady] = useState(!cloud);
   useEffect(() => {
     if (!cloud) return;
@@ -88,7 +88,7 @@ function App() {
     return <Redirect to="/app/images" />;
   return (
     <>
-      <PublicHeader contact={() => setContact(true)} />
+      <PublicHeader />
       {path === "/" ? (
         <Landing />
       ) : path === "/login" || path === "/signup" ? (
@@ -102,7 +102,6 @@ function App() {
           </Empty>
         </main>
       )}
-      {contact && <Contact close={() => setContact(false)} />}
     </>
   );
 }
