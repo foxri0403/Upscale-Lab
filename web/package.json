@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host localhost --port 5173 --strictPort",
+    "dev:production-ui": "vite --mode production-ui --host localhost --port 5173 --strictPort",
     "build": "tsc -b && vite build",
+    "build:production-ui": "tsc -b && vite build --mode production-ui",
     "build:cloud": "node scripts/build-cloud.mjs",
     "preview": "vite preview --host localhost --port 5173 --strictPort",
+    "preview:production-ui": "vite preview --mode production-ui --host localhost --port 5173 --strictPort",
     "test": "node --experimental-strip-types --test tests/*.test.mjs"
   },
   "dependencies": {

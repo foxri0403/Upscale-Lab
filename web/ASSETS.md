@@ -13,6 +13,8 @@
 
 Live 2D 소개와 휴대폰 목업의 여성 버튜버 캐릭터는 별도의 참고 이미지 없이 생성한 최종 디자인이다. 선과 평면 셀 채색을 중심으로 광택을 줄였다. [캐릭터 생성 프롬프트](../docs/live2d-character-design.md)를 참고한다.
 
+`public/images/live2d-character-parts/000.png`~`011.png`는 해당 캐릭터를 기존 See-through 전용 RunPod worker에서 실제 분리한 12개 RGBA 파츠다. 모두 1280 × 1280 캔버스를 유지하며 재생성·수동 잘라내기로 대체하지 않았다. 합성 순서·의미 분류·원본/파츠 SHA-256은 `src/showcase-character-data.json`, 처리 작업과 원본 생성 프롬프트는 위 디자인 문서에 기록했다. 소개 화면은 이 정적 파츠만 읽고 GPU 요청을 만들지 않는다.
+
 여우 이미지의 최종 프롬프트 세트:
 
 1. `Use case: photorealistic-natural. Create one website wallpaper asset, a landscape 3:2 wildlife photograph, a beautiful red fox standing full body on mossy woodland ground, head turned gently toward camera, lush emerald ferns, tree trunks and warm sunlit golden bokeh behind. Natural orange fur and white chest, elegant rich detailed realistic photograph. Fox positioned near center slightly right, whole fox including paws and tail in view. This is an image asset for an existing Upscale Lab UI, NOT a UI mockup. No typography, no graphics, no frames, no watermark. Match the natural red fox in a green forest photo in the approved UI mood.`

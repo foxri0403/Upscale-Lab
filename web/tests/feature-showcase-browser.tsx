@@ -46,11 +46,12 @@ element<HTMLButtonElement>("#run-tests").onclick = async () => {
     catch (error) { failed++; output.textContent += `FAIL ${name}: ${(error as Error).message}\n`; }
   }
   try {
-    await check("01~05 순서, 바다 비교와 세 기기 이미지, 문의 제거", () => {
+    await check("01~05 순서, 모니터와 같은 호수 비교, 세 기기 이미지, 문의 제거", () => {
       const numbers = Array.from(document.querySelectorAll(".feature-copy .eyebrow"), item => item.textContent!.slice(0, 2));
       assert(numbers.join(",") === "01,02,03,04,05", "feature order");
       assert(!element(".public-header").textContent!.includes("문의"), "contact still visible");
-      assert(element<HTMLImageElement>(".compare-art > img").getAttribute("src") === "/images/ocean.jpg", "ocean missing");
+      assert(element<HTMLImageElement>(".compare-art > img").src === element<HTMLImageElement>(".mock-monitor > img").src, "lake must match monitor artwork");
+      assert(!element(".character-demo").parentElement!.textContent!.includes("버튜버 아바타처럼 마우스와 기기의 기울기를 따라"), "old copy still visible");
       for (const [selector, source] of [[".mock-monitor > img", "lake.jpg"], [".mock-tablet > img", "fox.png"], [".phone-character-wallpaper > img", "live2d-character-v2.png"]])
         assert(element<HTMLImageElement>(selector).src.endsWith(source), `${selector} uses incorrect artwork`);
     });
@@ -67,20 +68,50 @@ element<HTMLButtonElement>("#run-tests").onclick = async () => {
       await until(() => stage.getBoundingClientRect().top < innerHeight, "stage offscreen");
       // Wait for IntersectionObserver and the real animation loop to become active.
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await Promise.all(Array.from(stage.querySelectorAll<HTMLImageElement>("[data-rig-part]"), image => image.decode()));
       point("character", .95);
       await until(() => motionX("character") > 2, "mouse input did not move character");
       stage.dispatchEvent(new PointerEvent("pointerleave", { pointerType: "mouse" }));
       await until(() => Math.abs(motionX("character")) < .1, "pointer leave did not return to neutral");
       stage.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-      await until(() => element(".character-demo .demo-planes").style.getPropertyValue("--key-x") === "4px", "keyboard movement");
+      await until(() => motionX("character") > 2, "keyboard movement");
       stage.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
-      await until(() => element(".character-demo .demo-planes").style.getPropertyValue("--key-x") === "0px", "Home reset");
+      await until(() => Math.abs(motionX("character")) < .1, "Home reset");
+    });
+    await check("얼굴·눈동자·머리카락 개별 리그, 몸통 고정", async () => {
+      const parts = element(".demo-character-rig");
+      assert(parts.querySelectorAll("img").length === 12, "expected real See-through parts");
+      assert(getComputedStyle(element(".demo-character-plane")).transform === "none", "whole character must not translate");
+      point("character", .95);
+      await until(() => motionX("character") > 2, "motion input");
+      const head = element('.demo-character-rig img[data-layer-name="face"]');
+      const iris = element('.demo-character-rig img[data-layer-name="irides"]');
+      const front = element('.demo-character-rig img[data-rig-part="frontHair"]');
+      const back = element('.demo-character-rig img[data-rig-part="backHair"]');
+      await until(() => getComputedStyle(head).transform !== getComputedStyle(iris).transform, "gaze not independent");
+      assert(getComputedStyle(front).transform !== getComputedStyle(back).transform, "hair layers must respond differently");
+      assert(element('[data-layer-name="eyewhite"]').dataset.rigPart === "head", "eye whites must remain attached to face");
+      for (const fixed of parts.querySelectorAll<HTMLElement>('[data-rig-part="fixed"]'))
+        assert(getComputedStyle(fixed).transform === "none", "body or clothing moved");
+      element(".character-demo .demo-stage").dispatchEvent(new PointerEvent("pointerleave", { pointerType: "mouse" }));
+      await until(() => Math.abs(motionX("character")) < .1, "neutral reset");
+    });
+    await check("눈동자 파츠 단독 표시와 전체 합성 복귀", async () => {
+      const buttons = Array.from(element(".demo-parts").querySelectorAll("button"));
+      buttons.find(button => button.textContent === "눈동자")!.click();
+      await until(() => element(".character-demo").dataset.part === "eye", "part selection");
+      const visible = Array.from(element(".demo-character-rig").querySelectorAll("img")).filter(image => getComputedStyle(image).visibility === "visible");
+      assert(visible.length === 1 && visible[0].dataset.layerName === "irides", "expected only iris artwork");
+      buttons.find(button => button.textContent === "전체")!.click();
+      await until(() => element(".character-demo").dataset.part === "all", "composition reset");
     });
     await check("멈추기 시 중립 복귀 및 센서 버튼 비활성화", async () => {
       point("character", .95);
       await until(() => motionX("character") > 2, "motion before pause");
       control("character", "움직임 끄기").click();
       await until(() => motionX("character") === 0, "pause did not reset motion");
+      for (const part of element(".demo-character-rig").querySelectorAll<HTMLElement>("img"))
+        assert(getComputedStyle(part).transform === "none", "paused rig still transforms parts");
       assert(control("character", "자이로 켜기").disabled, "sensor active during pause");
       control("character", "움직임 켜기").click();
       await until(() => !control("character", "자이로 켜기").disabled, "resume failed");

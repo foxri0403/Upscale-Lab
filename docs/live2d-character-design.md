@@ -6,7 +6,15 @@ Regenerated on 2026-11-02 with the built-in ImageGen tool, without reference ima
 
 Asset: [live2d-character-v2.png](../web/public/images/live2d-character-v2.png)
 
-The revised original adult female VTuber uses simplified anime facial features, broad hair shapes, flat cel shading and restrained highlights. The front-facing waist-up framing, simple outfit and transparent background are used in the public Live 2D motion demonstration and the phone wallpaper mockup. The demonstration applies subtle translation to this single PNG using mouse, keyboard or calibrated gyroscope input. Image dimensions: 1024 × 1536 pixels. Alpha transparency verified.
+The revised original adult female VTuber uses simplified anime facial features, broad hair shapes, flat cel shading and restrained highlights. The front-facing waist-up framing and simple outfit are used in the public Live 2D motion demonstration and phone wallpaper mockup. Original image dimensions: 1024 × 1536 pixels. Alpha transparency verified.
+
+## See-through showcase parts
+
+The public character demonstration renders 12 real RGBA parts produced by the existing `upscalelab-see-through` RunPod endpoint. The source PNG was composited onto white as inference input without altering the original asset. The completed output has a common 1280 × 1280 canvas and preserves the model's layer order. Original model output PNGs are stored under `web/public/images/live2d-character-parts/`; file hashes and semantic source names are recorded in `web/src/showcase-character-data.json`.
+
+RunPod job `bce5cf67-5758-4102-84e8-e4036400474e-u2` completed with 12 layers and execution time 333581 ms. Output ZIP SHA-256: `a8da7286fe61ab485492253c6c1a31b4ee2cc98ce71b2beca00006e18498d360`. The endpoint image/settings and production application were not modified.
+
+The existing web character rig rotates the face and facial features, moves the irides independently, and gives front/back hair different delayed motion. Eye whites and eyelashes remain attached to the head. The body, neck and clothing stay fixed. Mouse, calibrated gyroscope and keyboard share normalized input. Part buttons display individual semantic groups. This is the same PNG-part approach as the editor, rather than a single foreground translation or a Cubism mesh. Opening the demo needs no GPU request or account. The phone mockup retains the original static PNG.
 
 ### Generation prompt (v2)
 

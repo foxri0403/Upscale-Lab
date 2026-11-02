@@ -7,11 +7,14 @@ function gyroSupported() {
   return window.isSecureContext && typeof DeviceOrientationEvent !== "undefined";
 }
 
-export function useParallax(enabled: boolean, strength: number, mouseEnabled: boolean, gyroEnabled: boolean, sourceKey?: string) {
+export function useParallax(enabled: boolean, strength: number, mouseEnabled: boolean, gyroEnabled: boolean, sourceKey?: string, manualMotion?: { x: number; y: number }) {
   const stage = useRef<HTMLDivElement>(null);
   const layers = useRef<HTMLDivElement>(null);
   const gain = useRef(strength);
   gain.current = strength;
+  const manual = useRef(manualMotion);
+  manual.current = manualMotion;
+  const position = useRef({ x: 0, y: 0 });
   const [gyroReady, setGyroReady] = useState(() => gyroSupported() && !(DeviceOrientationEvent as OrientationConstructor).requestPermission);
   const [gyroPending, setGyroPending] = useState(false);
   const active = enabled && (mouseEnabled || (gyroEnabled && gyroReady));
@@ -42,12 +45,13 @@ export function useParallax(enabled: boolean, strength: number, mouseEnabled: bo
     let mouse = { x: 0, y: 0 }, gyro = { x: 0, y: 0 };
     let origin: { gamma: number; beta: number; angle: number } | null = null;
     const paint = () => {
+      position.current = { x, y };
       const bounds = element.getBoundingClientRect();
       planes.style.setProperty("--motion-x", `${x * bounds.width * .035 * gain.current / 100}px`);
       planes.style.setProperty("--motion-y", `${y * bounds.height * .035 * gain.current / 100}px`);
     };
     const animate = (time: number) => {
-      const target = combinedMotion(mouse, gyro);
+      const target = combinedMotion(combinedMotion(mouse, gyro), manual.current ?? { x: 0, y: 0 });
       x = motionStep(x, target.x, previous ? time - previous : 1000 / 60);
       y = motionStep(y, target.y, previous ? time - previous : 1000 / 60);
       previous = time; paint(); frame = requestAnimationFrame(animate);
@@ -89,7 +93,7 @@ export function useParallax(enabled: boolean, strength: number, mouseEnabled: bo
     reconcile(); document.addEventListener("visibilitychange", reconcile);
     return () => { stop(); document.removeEventListener("visibilitychange", reconcile); };
   }, [active, mouseEnabled, gyroEnabled, gyroReady, sourceKey]);
-  return { stage, layers, active, gyroReady, gyroPending, requestGyro };
+  return { stage, layers, position, active, gyroReady, gyroPending, requestGyro };
 }
 
 export type ParallaxMotion = ReturnType<typeof useParallax>;

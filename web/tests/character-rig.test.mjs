@@ -27,6 +27,13 @@ test("no head turn, eyes or hair when intensity is zero", () => {
   assert.deepEqual(rigTargets(1, 1, 1, 1, 0, s), { head: 0, eye: 0, shiftY: 0, eyeY: 0, front: 0, back: 0 });
 });
 
+test("See-through iris gaze moves independently while whites and lashes follow the face", () => {
+  assert.equal(rigPart("Eye", "irides"), "eye");
+  assert.equal(rigPart("Eye", "eyewhite"), "head");
+  assert.equal(rigPart("Eye", "eyelash"), "head");
+  assert.equal(rigPart("Eye"), "eye", "existing project records without source names retain their behavior");
+});
+
 test("head turns and eyes move only within the bounded inputs", () => {
   const s = normalizeRig({ enabled: true, idle: false, headTilt: 100, eyeMove: 100, hairSway: 100 });
   assert.deepEqual(rigTargets(5, 3, -4, -2, 0, s), rigTargets(1, 1, -1, -1, 0, s));

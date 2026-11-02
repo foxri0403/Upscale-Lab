@@ -187,12 +187,12 @@ export function Landing() {
             <p>
               좋아하는 2D 캐릭터를 더 생생하게 만나 보세요.
               <br />
-              버튜버 아바타처럼 마우스와 기기의 기울기를 따라
+              얼굴과 눈동자, 머리카락을 각각 분리해
               <br />
-              캐릭터가 부드럽게 움직입니다.
+              고개와 시선이 자연스럽게 움직입니다.
             </p>
             <div className="feature-points">
-              <span>캐릭터 중심 모션</span>
+              <span>파츠별 움직임</span>
               <span>마우스 · 자이로</span>
             </div>
           </div>

@@ -1,6 +1,8 @@
 import { useEffect, useId, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { Check, ChevronsLeftRight, MousePointer2, Pause, Play, Smartphone } from "lucide-react";
 import { useParallax } from "./use-parallax";
+import { useCharacterRig } from "./use-character-rig";
+import { showcaseCharacter, showcaseRig } from "./showcase-character";
 
 const characterImage = "/images/live2d-character-v2.png";
 
@@ -10,9 +12,9 @@ export function UpscaleDemo() {
   return (
     <div className="upscale-demo">
       <div className="compare-art">
-        <img src="/images/ocean.jpg" alt="선명한 바다 풍경 미리보기" loading="lazy" />
+        <img src="/images/lake.jpg" alt="선명한 호수 풍경 미리보기" loading="lazy" />
         <div className="compare-blur" style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }} aria-hidden="true">
-          <img src="/images/ocean.jpg" alt="" loading="lazy" />
+          <img src="/images/lake.jpg" alt="" loading="lazy" />
         </div>
         <div className="compare-line" style={{ left: `${split}%` }} aria-hidden="true">
           <span><ChevronsLeftRight size={21} /></span>
@@ -39,10 +41,13 @@ export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
   const [inView, setInView] = useState(false);
   const [reduced, setReduced] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const [keyboard, setKeyboard] = useState({ x: 0, y: 0 });
+  const [part, setPart] = useState("all");
+  const [artworkError, setArtworkError] = useState(false);
   const instruction = useId();
   const title = variant === "character" ? "Live 2D 캐릭터" : "배경·피사체 분리";
   const moving = enabled && !reduced;
-  const motion = useParallax(moving && inView, variant === "character" ? 65 : 85, true, gyro, variant);
+  const motion = useParallax(moving && inView, 85, true, gyro, variant, keyboard);
+  const rig = useCharacterRig(variant === "character" && moving && inView && !artworkError, showcaseRig, variant, motion.position);
 
   useEffect(() => {
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -93,9 +98,9 @@ export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
     if (!moving || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home"].includes(event.key)) return;
     event.preventDefault();
     if (event.key === "Home") { setKeyboard({ x: 0, y: 0 }); return; }
-    const dx = event.key === "ArrowLeft" ? -4 : event.key === "ArrowRight" ? 4 : 0;
-    const dy = event.key === "ArrowUp" ? -4 : event.key === "ArrowDown" ? 4 : 0;
-    setKeyboard(current => ({ x: Math.max(-12, Math.min(12, current.x + dx)), y: Math.max(-12, Math.min(12, current.y + dy)) }));
+    const dx = event.key === "ArrowLeft" ? -.25 : event.key === "ArrowRight" ? .25 : 0;
+    const dy = event.key === "ArrowUp" ? -.25 : event.key === "ArrowDown" ? .25 : 0;
+    setKeyboard(current => ({ x: Math.max(-1, Math.min(1, current.x + dx)), y: Math.max(-1, Math.min(1, current.y + dy)) }));
   }
 
   const status = reduced ? "기기의 움직임 줄이기 설정에 따라 정지 화면을 표시합니다."
@@ -106,13 +111,11 @@ export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
       : "휴대폰에서는 자이로 켜기를 누르고 기기를 기울여 보세요.");
 
   return (
-    <div className={`motion-demo ${variant}-demo`}>
-      <div className="demo-stage" ref={motion.stage} tabIndex={0} role="group"
+    <div className={`motion-demo ${variant}-demo`} data-part={part}>
+      <div className="demo-stage" ref={element => { motion.stage.current = element; rig.stage.current = element; }} tabIndex={0} role="group"
         aria-label={`${title} 움직임 미리보기`} aria-describedby={instruction}
         onKeyDown={moveWithKeys} onBlur={() => setKeyboard({ x: 0, y: 0 })}>
-        <div className="demo-planes" ref={motion.layers} style={{
-          "--key-x": `${moving ? keyboard.x : 0}px`, "--key-y": `${moving ? keyboard.y : 0}px`,
-        } as CSSProperties}>
+        <div className="demo-planes" ref={motion.layers}>
           {variant === "subject" ? <>
             <img className="demo-background" src="/images/fox-background.png" alt="고정된 숲 배경" loading="lazy" />
             <div className="demo-subject-plane">
@@ -121,12 +124,25 @@ export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
           </> : <>
             <div className="character-backdrop" aria-hidden="true"><span /></div>
             <div className="demo-character-plane">
-              <img src={characterImage} alt="마우스와 기울기에 반응하는 여성 버튜버 캐릭터" width="1024" height="1536" loading="lazy" />
+              <div className="demo-character-rig" ref={rig.layers} role="img" aria-label="얼굴·눈동자·머리카락 파츠가 독립적으로 움직이는 여성 캐릭터"
+                style={{ aspectRatio: `${showcaseCharacter.width} / ${showcaseCharacter.height}` } as CSSProperties}>
+                {showcaseCharacter.layers.map(layer => <img key={layer.file} src={layer.src} alt="" aria-hidden="true"
+                  width={showcaseCharacter.width} height={showcaseCharacter.height} loading="lazy"
+                  data-rig-part={layer.part} data-layer-name={layer.name}
+                  style={{ visibility: part === "all" || part === layer.part ? "visible" : "hidden" }}
+                  onError={() => setArtworkError(true)} />)}
+              </div>
             </div>
           </>}
         </div>
         <span className="demo-stage-tag" aria-hidden="true">{variant === "character" ? "LIVE 2D" : "BACKGROUND / SUBJECT"}</span>
       </div>
+      {variant === "character" && <div className="demo-parts" role="group" aria-label="캐릭터 파츠 미리보기">
+        {([["all", "전체"], ["head", "얼굴"], ["eye", "눈동자"], ["frontHair", "앞머리"], ["backHair", "뒷머리"], ["fixed", "몸 · 의상"]] as const)
+          .filter(([value]) => value === "all" || showcaseCharacter.layers.some(layer => layer.part === value))
+          .map(([value, label]) => <button key={value} type="button" aria-pressed={part === value} onClick={() => setPart(value)}>{label}</button>)}
+      </div>}
+      {variant === "character" && artworkError && <p className="form-error" role="alert">캐릭터 파츠를 불러오지 못했어요. 페이지를 새로고침해 주세요.</p>}
       <div className="demo-toolbar">
         <p id={instruction}><MousePointer2 size={15} /> 마우스 또는 방향키로 움직여 보세요</p>
         <div className="demo-actions">

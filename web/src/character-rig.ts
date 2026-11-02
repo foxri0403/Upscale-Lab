@@ -2,7 +2,10 @@ import { defaultHeadRig, type HeadRig } from "./model";
 
 export type RigPart = "fixed" | "head" | "frontHair" | "backHair" | "eye";
 /** Semantic layer names from SeeThroughManifestReader; no pixel-content guessing. */
-export function rigPart(type: string): RigPart {
+export function rigPart(type: string, sourceName?: string): RigPart {
+  // See-through distinguishes irides from the whites/lashes in source metadata.
+  // Only irides change gaze; the other eye surfaces rotate together with the face.
+  if (type === "Eye" && /eye[ _-]?(white|lash)|sclera/i.test(sourceName ?? "")) return "head";
   switch (type) {
     case "Face": case "Eyebrow": case "Mouth": case "Nose": return "head";
     case "Eye": return "eye";

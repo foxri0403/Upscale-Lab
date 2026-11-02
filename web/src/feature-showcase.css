@@ -51,9 +51,8 @@
   user-select: none;
   pointer-events: none;
 }
-.demo-subject-plane,
-.demo-character-plane {
-  transform: translate(calc(var(--motion-x, 0px) + var(--key-x, 0px)), calc(var(--motion-y, 0px) + var(--key-y, 0px)));
+.demo-subject-plane {
+  transform: translate(var(--motion-x, 0px), var(--motion-y, 0px));
   will-change: transform;
 }
 .demo-stage-tag {
@@ -98,15 +97,54 @@
   top: 18%;
   background: #ffffff25;
 }
-.demo-character-plane > img {
+.demo-character-rig {
   position: absolute;
   bottom: -2%;
   left: 50%;
   height: 98%;
-  width: auto;
   max-width: none;
-  object-fit: contain;
   transform: translateX(-50%);
+}
+.demo-character-rig > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  will-change: transform;
+}
+.demo-character-rig > img[data-rig-part="fixed"] {
+  will-change: auto;
+}
+.demo-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+.demo-parts button {
+  border: 1px solid #e1e6f0;
+  border-radius: 7px;
+  padding: 7px 11px;
+  min-height: 36px;
+  background: #fff;
+  color: #707e98;
+  font-size: .65rem;
+}
+.demo-parts button[aria-pressed="true"] {
+  border-color: #bac4ff;
+  background: #edf0ff;
+  color: #536dfe;
+}
+.character-demo:not([data-part="all"]) .character-backdrop {
+  background-color: #fff;
+  background-image: conic-gradient(#eef0f5 25%, transparent 0 50%, #eef0f5 0 75%, transparent 0);
+  background-size: 20px 20px;
+}
+.character-demo:not([data-part="all"]) .character-backdrop::before,
+.character-demo:not([data-part="all"]) .character-backdrop::after,
+.character-demo:not([data-part="all"]) .character-backdrop > span {
+  display: none;
 }
 .demo-toolbar {
   display: flex;
@@ -253,7 +291,8 @@
   }
 }
 @media (max-width: 540px) {
-  .demo-actions button {
+  .demo-actions button,
+  .demo-parts button {
     min-height: 44px;
     font-size: .7rem;
   }
@@ -280,8 +319,8 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .demo-subject-plane,
-  .demo-character-plane {
-    transform: none;
+  .demo-character-rig > img {
+    transform: none !important;
     will-change: auto;
   }
 }

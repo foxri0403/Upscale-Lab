@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { normalizeRig, rigTargets, type RigPart } from "./character-rig";
 import type { HeadRig } from "./model";
 
@@ -6,7 +6,7 @@ import type { HeadRig } from "./model";
  * Only face, eye and hair layers move. Body, arms, clothes and accessories stay fixed.
  * Preview-only: does not imply native Android/Windows rig playback.
  */
-export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: string) {
+export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: string, externalMotion?: RefObject<{ x: number; y: number }>) {
   const stage = useRef<HTMLDivElement>(null);
   const layers = useRef<HTMLDivElement>(null);
   const [tilt, setTilt] = useState(0);
@@ -37,8 +37,11 @@ export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: s
       const dt = last ? Math.min(.05, Math.max(0, (time - last) / 1000)) : 1 / 60;
       last = time;
       phase += dt;
-      const target = rigTargets(mouse ? pointerTilt : tilt / 100, mouse ? pointerY : tiltY / 100,
-        mouse ? pointerLook : look / 100, mouse ? pointerY : lookY / 100, phase, settings);
+      const inputX = externalMotion?.current.x ?? (mouse ? pointerTilt : tilt / 100);
+      const inputY = externalMotion?.current.y ?? (mouse ? pointerY : tiltY / 100);
+      const target = rigTargets(inputX, inputY,
+        externalMotion?.current.x ?? (mouse ? pointerLook : look / 100),
+        externalMotion?.current.y ?? (mouse ? pointerY : lookY / 100), phase, settings);
       const smooth = (v: number, t: number, speed: number) => v + (t - v) * (1 - Math.exp(-speed * dt));
       head = smooth(head, target.head, 9);
       eye = smooth(eye, target.eye, 11);
@@ -55,7 +58,7 @@ export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: s
         // Pivot is relative to the full untrimmed PNG canvas.
         img.style.transformOrigin = `${settings.pivotX}% ${settings.pivotY}%`;
         if (part === "fixed") continue;
-        const shift = settings.headTilt / 100 * (mouse ? pointerTilt : tilt / 100) * width * .008;
+        const shift = settings.headTilt / 100 * inputX * width * .008;
         const gaze = part === "eye" ? eye * width : 0;
         const angle = head + (part === "frontHair" ? front : part === "backHair" ? back : 0);
         const vertical = (headY + (part === "eye" ? eyeY : 0)) * bounds.height;
@@ -63,17 +66,26 @@ export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: s
       }
       frame = requestAnimationFrame(step);
     };
-    box.addEventListener("pointermove", move, { passive: true });
-    box.addEventListener("pointerleave", leave, { passive: true });
-    frame = requestAnimationFrame(step);
-    return () => {
-      cancelAnimationFrame(frame);
-      box.removeEventListener("pointermove", move);
-      box.removeEventListener("pointerleave", leave);
+    const stop = () => {
+      cancelAnimationFrame(frame); frame = 0; last = 0;
+      head = eye = headY = eyeY = front = back = frontVelocity = backVelocity = 0;
       for (const img of images) { img.style.removeProperty("transform"); img.style.removeProperty("transform-origin"); }
     };
+    const reconcile = () => { stop(); if (!document.hidden) frame = requestAnimationFrame(step); };
+    if (!externalMotion) {
+      box.addEventListener("pointermove", move, { passive: true });
+      box.addEventListener("pointerleave", leave, { passive: true });
+    }
+    reconcile();
+    document.addEventListener("visibilitychange", reconcile);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", reconcile);
+      box.removeEventListener("pointermove", move);
+      box.removeEventListener("pointerleave", leave);
+    };
   }, [visible, sourceKey, settings.enabled, settings.headTilt, settings.eyeMove, settings.hairSway,
-    settings.pivotX, settings.pivotY, settings.idle, mouse, tilt, tiltY, look, lookY]);
+    settings.pivotX, settings.pivotY, settings.idle, mouse, tilt, tiltY, look, lookY, externalMotion]);
   return { stage, layers, active: visible && settings.enabled, tilt, setTilt, tiltY, setTiltY, look, setLook, lookY, setLookY, mouse, setMouse };
 }
 export type CharacterRigController = ReturnType<typeof useCharacterRig>;

@@ -1,0 +1,100 @@
+{
+  "width": 1280,
+  "height": 1280,
+  "provenance": {
+    "provider": "See-through / RunPod",
+    "endpoint": "upscalelab-see-through",
+    "jobId": "bce5cf67-5758-4102-84e8-e4036400474e-u2",
+    "source": "live2d-character-v2.png",
+    "sourceSha256": "1cb58946a137b4ee3838f80156f703227c2c94300f90ea2d2f358797d5e6ee99",
+    "modelInputSha256": "dc53a2349875e23ab98bf36610b31ce3333f3016e1678415229b4d06e4ddbefa",
+    "archiveSha256": "a8da7286fe61ab485492253c6c1a31b4ee2cc98ce71b2beca00006e18498d360",
+    "executionTimeMs": 333581
+  },
+  "layers": [
+    {
+      "file": "000.png",
+      "name": "back hair",
+      "semanticType": "BackHair",
+      "order": 0,
+      "sha256": "03b74417b610ca861fb2afd5f400514cbc20437eecbf8a4cd7b68aa6331a64ce"
+    },
+    {
+      "file": "001.png",
+      "name": "neck",
+      "semanticType": "Body",
+      "order": 1,
+      "sha256": "11c220c227b0399718f89b5f283d32509c4c2b1b0789c5d849f6301c67c1e9f4"
+    },
+    {
+      "file": "002.png",
+      "name": "topwear",
+      "semanticType": "Clothes",
+      "order": 2,
+      "sha256": "09354122c2b7268cfa6bf2f247208ff9d8310c8c81b63fc3c2f43a1406d5644a"
+    },
+    {
+      "file": "003.png",
+      "name": "ears",
+      "semanticType": "Face",
+      "order": 3,
+      "sha256": "3ea7704e200a34d62a78f36236b4a3cf6ba8cb5e6c0e76c6960894eb01fc5d1e"
+    },
+    {
+      "file": "004.png",
+      "name": "face",
+      "semanticType": "Face",
+      "order": 4,
+      "sha256": "80d7623fd6fcdeba75dae3eecaa8b73a5fae227522b8ed7f90928c013ce8899e"
+    },
+    {
+      "file": "005.png",
+      "name": "eyewhite",
+      "semanticType": "Eye",
+      "order": 5,
+      "sha256": "5b631c13ccd16363d04c626a10850fa1fb7ecd2e8d89298c52b1e064e68dcfe7"
+    },
+    {
+      "file": "006.png",
+      "name": "irides",
+      "semanticType": "Eye",
+      "order": 6,
+      "sha256": "de95fdd6374db372d13e4050346868c2e8e61672894a30d75fc7881f8e5a5c64"
+    },
+    {
+      "file": "007.png",
+      "name": "eyelash",
+      "semanticType": "Eye",
+      "order": 7,
+      "sha256": "4de3b02f8c00788d2aef91ec014f4981fdf6f476135e4c27429ded744efc9487"
+    },
+    {
+      "file": "008.png",
+      "name": "nose",
+      "semanticType": "Nose",
+      "order": 8,
+      "sha256": "196b170e2d70e707c4c79b69bfa8a8088ab26bf5509e559613d64afc24c237c5"
+    },
+    {
+      "file": "009.png",
+      "name": "mouth",
+      "semanticType": "Mouth",
+      "order": 9,
+      "sha256": "820644324be063757f52cb34e0a96332a7f3840c247f26f691526ea6c8d7e4fb"
+    },
+    {
+      "file": "010.png",
+      "name": "eyebrow",
+      "semanticType": "Eyebrow",
+      "order": 10,
+      "sha256": "6250f5573d47d991402ce8e2188351196e46f10db43dcd3a4058456b9e3cad2a"
+    },
+    {
+      "file": "011.png",
+      "name": "front hair",
+      "semanticType": "FrontHair",
+      "order": 11,
+      "sha256": "eef986205d35dc11d3efdb0a88f97ce5140e0d964e15e23ae808684eec48b932"
+    }
+  ]
+}
