@@ -37,7 +37,7 @@ class CompanionBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
         val state = CompanionStore(context).read()
-        if (!BuildConfig.COMPANION_LOCAL_TEST && CompanionPrivacy(context).accepted && state.optBoolean("remember") && state.optBoolean("enabled") && state.has("session"))
+        if (CompanionPrivacy(context).accepted && state.optBoolean("remember") && state.optBoolean("enabled") && state.has("session"))
             runCatching { ContextCompat.startForegroundService(context, Intent(context, CompanionSyncService::class.java)) }
     }
 }

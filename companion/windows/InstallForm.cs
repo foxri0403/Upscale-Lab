@@ -6,7 +6,7 @@ internal sealed class InstallForm : Form
 {
     internal InstallForm()
     {
-        Text = CompanionConfiguration.AppName + (CompanionConfiguration.LocalTest ? " 설치 · 테스트 앱" : " 설치"); Icon = AppBrand.Icon();
+        Text = CompanionConfiguration.AppName + " 설치"; Icon = AppBrand.Icon();
         AutoScaleMode = AutoScaleMode.Dpi; ClientSize = new Size(610, 760); MinimumSize = new Size(500, 640);
         StartPosition = FormStartPosition.CenterScreen; Font = new Font("맑은 고딕", 10);
         BackColor = AppBrand.Background; ForeColor = AppBrand.Ink;
@@ -21,7 +21,7 @@ internal sealed class InstallForm : Form
         var startMenu = new CheckBox { Text = "시작 메뉴에 등록", Checked = true, Dock = DockStyle.Fill };
         content.Controls.Add(desktop); content.Controls.Add(startMenu);
         content.Controls.Add(new Label { Text = PrivacyConsent.Title, Dock = DockStyle.Fill, Font = new(Font.FontFamily, 11, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft });
-        content.Controls.Add(new TextBox { Text = PrivacyConsent.Notice, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BackColor = Color.White });
+        content.Controls.Add(new TextBox { Text = PrivacyConsent.Details, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BackColor = Color.White });
         var agree = new CheckBox { Text = "[필수] 기기·화면 정보 수집·이용에 동의합니다.", Dock = DockStyle.Fill };
         content.Controls.Add(agree);
         var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };

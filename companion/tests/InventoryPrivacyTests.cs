@@ -20,7 +20,7 @@ public sealed class InventoryPrivacyTests
     public async Task MissingConsentBlocksLoginAndRestoreWithoutInventoryOrNetworkAccess() {
         var handler = new LoginHandler(true); var reads = 0;
         using var controller = new CompanionController(new(handler), () => false, () => { reads++; return []; },
-            () => throw new Exception("Stored credentials must not be opened before consent"), _ => { }, allowTestLogin: false);
+            () => throw new Exception("Stored credentials must not be opened before consent"), _ => { });
         controller.RefreshInventory(); await controller.Restore();
         await Assert.ThrowsAsync<InvalidOperationException>(() => controller.SignIn("test", "password", false));
         Assert.Equal(0, handler.Requests); Assert.Equal(0, reads); Assert.Empty(controller.Monitors);
@@ -36,7 +36,7 @@ public sealed class InventoryPrivacyTests
             // End registration before starting a background sync loop in this focused test.
             if (reads == 1) return [];
             return [monitor];
-        }, () => null, _ => { }, allowTestLogin: false);
+        }, () => null, _ => { });
         controller.RefreshInventory(); Assert.Equal(0, reads);
         await Assert.ThrowsAnyAsync<Exception>(() => controller.SignIn("test", "password", false));
         Assert.Equal(success, controller.LoggedIn); Assert.Equal(success ? 1 : 0, reads);

@@ -38,7 +38,7 @@ internal sealed class MainForm : Form
     internal MainForm(CompanionController? companion = null)
     {
         controller = companion ?? new();
-        Text = controller.TestApp ? "Upscale Lab Connect (테스트 앱)" : CompanionConfiguration.AppName; Icon = AppBrand.Icon();
+        Text = CompanionConfiguration.AppName; Icon = AppBrand.Icon();
         Font = new("맑은 고딕", 10); AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new(900, 840); MinimumSize = new(600, 600);
         ForeColor = AppBrand.Ink; BackColor = AppBrand.Background; StartPosition = FormStartPosition.CenterScreen;
@@ -49,21 +49,15 @@ internal sealed class MainForm : Form
         header.Controls.Add(new PictureBox { Image = AppBrand.Image(), SizeMode = PictureBoxSizeMode.Zoom, Size = new(72, 72) });
         var brand = Stack(); brand.Controls.Add(Copy("Upscale Lab Connect", true)); brand.Controls.Add(Copy("내 화면을 웹과 연결하세요")); header.Controls.Add(brand); header.Controls.Add(badge);
         content.Controls.Add(header);
-        if (controller.TestApp) {
-            var notice = Copy("테스트 앱 · 로그인 정보 자유 입력 · 서버 연동 없는 UI 미리보기");
-            notice.ForeColor = AppBrand.Primary; content.Controls.Add(notice);
-            badge.Text = "● 테스트 중"; sync.Text = "동기화 미리보기";
-            tray.Text = "Upscale Lab Connect · 테스트 앱";
-        }
         credentials.Controls.Add(Copy("이 기기를 연결하세요", true));
-        credentials.Controls.Add(Copy(controller.TestApp ? "아무 정보나 입력해도 시작할 수 있습니다. 빈칸도 가능합니다." : "웹과 같은 계정으로 로그인해 주세요."));
+        credentials.Controls.Add(Copy("웹과 같은 계정으로 로그인해 주세요."));
         var form = Stack(); form.BackColor = Color.White;
         form.Controls.Add(Copy("아이디 또는 이메일")); form.Controls.Add(Input(identifier));
         form.Controls.Add(Copy("비밀번호")); form.Controls.Add(Input(password)); form.Controls.Add(remember);
         login.Margin = new(0, 14, 0, 0); form.Controls.Add(login);
         var loginCard = new BrandPanel { Dock = DockStyle.Top, AutoSize = true }; loginCard.Controls.Add(form);
         credentials.Controls.Add(loginCard);
-        credentials.Controls.Add(Copy(controller.TestApp ? "입력 내용은 서버로 전송하거나 저장하지 않습니다." : "배경화면은 웹의 기기 관리에서 선택해 주세요."));
+        credentials.Controls.Add(Copy("배경화면은 웹의 기기 관리에서 선택해 주세요."));
         credentials.Dock = DockStyle.None; credentials.Anchor = AnchorStyles.Top;
         credentials.MinimumSize = new(500, 0); credentials.MaximumSize = new(500, 0);
         content.Controls.Add(credentials);
@@ -83,9 +77,9 @@ internal sealed class MainForm : Form
         actions.ColumnStyles.Add(new(SizeType.Percent, 50)); actions.ColumnStyles.Add(new(SizeType.Percent, 50));
         var web = new BrandButton { Text = "↗  웹 기기 관리 열기", Primary = true, Dock = DockStyle.Fill, Margin = new(0, 0, 10, 0) };
         actions.Controls.Add(web); actions.Controls.Add(reconnect); connected.Controls.Add(actions);
-        connected.Controls.Add(Copy(controller.TestApp ? "테스트 앱을 종료하면 로그인 상태가 초기화됩니다." : "창을 닫아도 트레이에서 동기화해요."));
+        connected.Controls.Add(Copy("창을 닫아도 트레이에서 동기화해요."));
         var privacy = new LinkLabel { Text = "수집 정보 안내", AutoSize = true, LinkColor = AppBrand.Muted };
-        privacy.LinkClicked += (_, _) => MessageBox.Show(this, PrivacyConsent.Notice, PrivacyConsent.Title); connected.Controls.Add(privacy);
+        privacy.LinkClicked += (_, _) => MessageBox.Show(this, PrivacyConsent.Details, PrivacyConsent.Title); connected.Controls.Add(privacy);
         content.Controls.Add(connected); content.Controls.Add(status); scroll.Controls.Add(content); Controls.Add(scroll);
         void FitContent() {
             var width = Math.Max(260, content.ClientSize.Width - content.Padding.Horizontal);
@@ -100,18 +94,18 @@ internal sealed class MainForm : Form
         login.Click += async (_, _) => await Operation(async () => { try { await controller.SignIn(identifier.Text, password.Text, remember.Checked); } finally { password.Clear(); } });
         sync.Click += async (_, _) => await Operation(async () => { if (controller.Enabled) await controller.Stop(); else await controller.Enable(); });
         reconnect.Click += async (_, _) => await Operation(controller.Reconnect);
-        logout.Click += async (_, _) => await Operation(async () => { await controller.Logout(); if (!controller.TestApp) Startup(false); startup.Checked = false; });
+        logout.Click += async (_, _) => await Operation(async () => { await controller.Logout(); Startup(false); startup.Checked = false; });
         web.Click += (_, _) => {
             try { Process.Start(new ProcessStartInfo(CompanionConfiguration.WebDevicesUrl) { UseShellExecute = true }); }
             catch (Exception error) { status.Text = error.Message; }
         };
         using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")) startup.Checked = key?.GetValue("UpscaleLabConnect-" + CompanionConfiguration.ServerId) != null;
-        startup.CheckedChanged += (_, _) => { if (!busy && !controller.TestApp) Startup(startup.Checked); };
+        startup.CheckedChanged += (_, _) => { if (!busy) Startup(startup.Checked); };
         controller.Changed += RefreshState;
         tray.DoubleClick += (_, _) => ShowMain();
         var menu = new ContextMenuStrip(); menu.Items.Add("열기", null, (_, _) => ShowMain());
         menu.Items.Add("종료", null, async (_, _) => { quitting = true; var enabled = controller.Enabled; await controller.Stop();
-            if (!controller.TestApp) { var saved = SecureStore.Read(); if (saved != null && saved.Remember) SecureStore.Write(saved with { Enabled = enabled }); } Close(); });
+            var saved = SecureStore.Read(); if (saved != null && saved.Remember) SecureStore.Write(saved with { Enabled = enabled }); Close(); });
         tray.ContextMenuStrip = menu;
         FormClosing += (_, e) => { if (!quitting && controller.LoggedIn) { e.Cancel = true; Hide(); } };
         FormClosed += (_, _) => { var icon = tray.Icon; tray.Dispose(); icon?.Dispose(); controller.Dispose(); };
@@ -130,10 +124,8 @@ internal sealed class MainForm : Form
         if (InvokeRequired) { BeginInvoke((Action)(() => RefreshState(replaceStatus))); return; }
         credentials.Visible = !controller.LoggedIn; connected.Visible = badge.Visible = controller.LoggedIn;
         AcceptButton = controller.LoggedIn ? null : login;
-        login.Enabled = identifier.Enabled = password.Enabled = !busy;
-        remember.Enabled = !busy && !controller.TestApp;
-        sync.Enabled = reconnect.Enabled = logout.Enabled = !busy;
-        startup.Enabled = !busy && !controller.TestApp;
+        login.Enabled = identifier.Enabled = password.Enabled = remember.Enabled = !busy;
+        sync.Enabled = reconnect.Enabled = logout.Enabled = startup.Enabled = !busy;
         sync.Checked = controller.Enabled;
         if (replaceStatus) status.Text = controller.Status;
         account.Text = "●  " + controller.Account;

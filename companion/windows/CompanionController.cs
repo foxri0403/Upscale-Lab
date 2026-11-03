@@ -22,33 +22,29 @@ internal sealed class CompanionController : IDisposable
     private SynchronizationContext? ui;
     private bool remember;
     private bool verified;
-    private string? testAccount;
-    private readonly bool allowTestLogin;
     private Dictionary<string, AppliedWallpaper> applied = new();
     internal CompanionController(HttpClient? requests = null, Func<bool>? privacyAccepted = null, Func<MonitorInfo[]>? readDisplays = null,
-        Func<Credentials?>? readCredentials = null, Action<Credentials>? writeCredentials = null, bool allowTestLogin = true)
+        Func<Credentials?>? readCredentials = null, Action<Credentials>? writeCredentials = null)
     {
         this.requests = requests ?? new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
         this.privacyAccepted = privacyAccepted ?? (() => PrivacyConsent.Current.Accepted);
         this.readDisplays = readDisplays ?? DisplayInventory.Read;
         this.readCredentials = readCredentials ?? SecureStore.Read;
         this.writeCredentials = writeCredentials ?? SecureStore.Write;
-        this.allowTestLogin = allowTestLogin;
     }
     private void RequireConsent() {
         if (!privacyAccepted()) throw new InvalidOperationException("기기·화면 정보 수집·이용 동의가 필요합니다.");
     }
     private MonitorInfo[] ReadDisplays() {
         RequireConsent();
-        if (!LoggedIn || (!TestApp && api?.Session is null)) throw new InvalidOperationException("로그인이 필요합니다.");
+        if (!verified || api?.Session is null) throw new InvalidOperationException("로그인이 필요합니다.");
         return readDisplays();
     }
     public event Action? Changed;
     public string Status { get; private set; } = "웹과 같은 계정으로 로그인해 주세요.";
-    public string Account => testAccount ?? api?.Session?.User.Email ?? "";
+    public string Account => api?.Session?.User.Email ?? "";
     public string Server => CompanionConfiguration.ApiBaseUrl;
-    public bool TestApp => allowTestLogin && CompanionConfiguration.LocalTest;
-    public bool LoggedIn => TestApp ? testAccount != null : verified;
+    public bool LoggedIn => verified;
     public bool Enabled { get; private set; }
     public string DeviceName => Environment.MachineName;
     public MonitorInfo[] Monitors { get; private set; } = [];
@@ -62,7 +58,6 @@ internal sealed class CompanionController : IDisposable
     }
     public async Task Restore()
     {
-        if (TestApp) { Notify("테스트 앱 · 아무 로그인 정보나 입력해 시작하세요."); return; }
         if (!privacyAccepted()) return;
         var saved = readCredentials(); if (saved is null || !CompanionConfiguration.CanRestore(saved, Server)) return;
         remember = true; SetApi(Server, saved.Session, saved.Device);
@@ -77,11 +72,6 @@ internal sealed class CompanionController : IDisposable
     {
         RequireConsent();
         await Stop(); verified = false; Monitors = [];
-        if (TestApp) {
-            // UI preview only: no account session, device token or API request.
-            testAccount = string.IsNullOrWhiteSpace(identifier) ? "테스트 사용자" : identifier.Trim();
-            await Enable(); return;
-        }
         var saved = readCredentials(); SetApi(Server, null, null);
         var login = await api!.Call<Login>("/api/auth/login", HttpMethod.Post, new { email = identifier.Trim(), password }, anonymous: true);
         if (string.IsNullOrWhiteSpace(login.RefreshToken)) throw new InvalidOperationException("계정 세션을 지원하는 서버가 필요합니다.");
@@ -91,7 +81,6 @@ internal sealed class CompanionController : IDisposable
     }
     public async Task Reconnect()
     {
-        if (TestApp) { RequireConsent(); if (LoggedIn) { RefreshInventory(); Notify("테스트 앱 · 화면 정보를 새로 확인했습니다."); } return; }
         await Stop(); if (!verified || api?.Session is null) return;
         await Bind(force: true); await Enable();
     }
@@ -119,7 +108,6 @@ internal sealed class CompanionController : IDisposable
     public async Task Enable()
     {
         RequireConsent();
-        if (TestApp) { if (LoggedIn) { RefreshInventory(); Enabled = true; Notify("테스트 앱 · 동기화 미리보기 켜짐. 서버 연결·배경화면 변경은 하지 않습니다."); } return; }
         if (Enabled || !verified || api?.Session is null) return;
         await Bind(); Enabled = true; Persist(); cancellation = new(); inventoryDirty = true; ui = SynchronizationContext.Current;
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplayChanged;
@@ -147,7 +135,7 @@ internal sealed class CompanionController : IDisposable
             catch (Exception) { Wake(); try { await Task.Delay(3000, ct); } catch (OperationCanceledException) { return; } }
         }
     }
-    public void RefreshInventory() { Monitors = LoggedIn && privacyAccepted() ? ReadDisplays() : []; Changed?.Invoke(); }
+    public void RefreshInventory() { Monitors = verified && privacyAccepted() ? ReadDisplays() : []; Changed?.Invoke(); }
     public async Task Stop()
     {
         Enabled = false; cancellation?.Cancel();
@@ -161,7 +149,6 @@ internal sealed class CompanionController : IDisposable
     }
     public async Task Logout()
     {
-        if (TestApp) { await Stop(); testAccount = null; Monitors = []; Notify("테스트 앱 · 로그아웃했습니다."); return; }
         await Stop(); var previous = api?.Session; if (api != null) api.Session = null; verified = false; Monitors = []; Persist();
         if (previous != null && api != null)
             try { await api.Call<object>("/api/auth/logout", HttpMethod.Post, new { refreshToken = previous.RefreshToken }, anonymous: true); }

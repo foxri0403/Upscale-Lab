@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:live_layer/main.dart' as entry;
-import 'package:live_layer/companion.dart' show testApp;
 
 Future<void> reveal(WidgetTester tester, Finder target) async {
   await tester.drag(find.byType(ListView), const Offset(0, 10000));
@@ -106,7 +105,6 @@ void main() {
     expect(find.byType(SwitchListTile), findsNothing);
     expect(find.text('수집 정보 안내'), findsNothing);
     expect(find.text('기기 다시 연결'), findsNothing);
-    expect(find.text('테스트 앱'), testApp ? findsOneWidget : findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -127,10 +125,9 @@ void main() {
     expect(login.arguments, {
       'identifier': 'web-user',
       'password': 'Password1!',
-      'remember': !testApp,
+      'remember': true,
     });
     expect(find.text('web-user'), findsOneWidget);
-    expect(find.text('테스트 앱'), testApp ? findsOneWidget : findsNothing);
     await reveal(tester, find.text('Live 2D 적용 확인'));
     await tester.tap(find.text('Live 2D 적용 확인'));
     await tester.pumpAndSettle();
