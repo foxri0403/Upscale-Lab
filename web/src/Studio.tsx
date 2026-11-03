@@ -360,7 +360,7 @@ export function Studio({ route }: { route: string }) {
       );
       subjectJob.current = null;
       setJob(value);
-      if (tool === "upscale") window.dispatchEvent(new Event("tokens-updated"));
+      window.dispatchEvent(new Event("tokens-updated"));
     } catch (e) {
       toast((e as Error).message);
     } finally {
@@ -375,6 +375,7 @@ export function Studio({ route }: { route: string }) {
       const value = await refineSubject(picture, await separation.exportSelection());
       subjectJob.current = value.jobId;
       setJob(value);
+      window.dispatchEvent(new Event("tokens-updated"));
     } catch (error) { toast((error as Error).message); }
     finally { setBusy(false); }
   }
@@ -408,14 +409,14 @@ export function Studio({ route }: { route: string }) {
               else { separation.reload(true); setSelectedLayer("all"); separation.setView("overlay"); }
             }
             setJob(status);
-            if (status.operation === "Upscale") window.dispatchEvent(new Event("tokens-updated"));
+            window.dispatchEvent(new Event("tokens-updated"));
             toast(status.operation === "Layers" ? refined ? "선택한 피사체와 배경 레이어를 갱신했습니다." : "분리 결과를 확인하고 중앙 이미지에서 바로 수정해 주세요." : "이미지 처리를 완료했습니다.");
           }
         } else {
           setJob(status);
           if (status.status === "Failed")
             toast(status.errorMessage || "이미지 처리에 실패했습니다.");
-          if (status.status === "Failed" && status.operation === "Upscale") window.dispatchEvent(new Event("tokens-updated"));
+          if (status.status === "Failed") window.dispatchEvent(new Event("tokens-updated"));
         }
       } catch (e) {
         if (alive) {
@@ -547,6 +548,9 @@ export function Studio({ route }: { route: string }) {
         </section>}
         {(tool === "upscale" || tool === "layers" || tool === "live") && (
           <div className="cloud-processing">
+            {cloud && <p className="job-state">{tool === "upscale"
+              ? `최초 ${resolution === 1920 ? 2 : resolution === 2560 ? 4 : 6}토큰 · 같은 해상도 재수정 ${resolution === 1920 ? 1 : resolution === 2560 ? 2 : 3}토큰`
+              : tool === "live" ? "최초 7토큰 · 재수정 3토큰" : "최초 3토큰 · 재수정 1토큰"}</p>}
             <button
               className={`button primary full ${tool === "layers" ? "separation-action" : ""}`}
               disabled={

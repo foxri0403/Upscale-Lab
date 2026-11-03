@@ -1,0 +1,30 @@
+# 토큰 정책과 결제 배포
+
+토큰·토스 결제 도입 브랜치 `feature/main-runpod-toss-release`는 현행 브랜치 이력에 포함되어 있다. `inho/live2d-main-merged`의 `396dc04`에서 토큰 계산·예약·정산·환불과 PostgreSQL 동시성 검증을 가져오며, 운영에 적용된 처리 코드와 해상도 출력 상한 수정을 보존한다. GPU 작업 취소 UI 등 별도 Live2D 기능은 이 병합 범위에 포함하지 않는다.
+
+## 차감 정책
+
+| 작업 | 최초 실행 | 재수정 |
+|---|---:|---:|
+| FHD 업스케일 | 2 | 1 |
+| QHD 업스케일 | 4 | 2 |
+| 4K 업스케일 | 6 | 3 |
+| 배경 분리 | 3 | 1 |
+| Live2D 파츠 분리 | 7 | 3 |
+
+같은 프로젝트의 성공한 작업 이력을 기준으로 계산하며 업스케일 재수정은 같은 목표 해상도를 기준으로 한다. 실패한 작업은 재수정 이력으로 계산하지 않는다. 프로젝트 행 잠금·작업 생성·토큰 예약은 같은 DB 트랜잭션으로 처리한다. 성공 시 정산하고 실패 시 예약분을 환불하며 중복 정산·환불은 잔액을 추가로 변경하지 않는다. 월 제공 토큰을 먼저 사용하고 부족분은 구매 토큰을 사용한다. 기존 월 지급 정책(Free 10, Plus 20, Pro 40)과 유료 플랜의 결제 완료 후 지급 절차는 유지한다.
+
+## 결제 키가 병합 후 사라지는 문제
+
+웹 빌드에 `VITE_TOSS_CLIENT_KEY`가 없으면 결제 버튼이 비활성화된다. 서버 시크릿 키가 존재하더라도 웹 클라이언트 키를 대신할 수 없다.
+
+- 웹: 공개 클라이언트 키를 무시되는 `web/.env.production.local` 또는 빌드 프로세스 환경변수 `VITE_TOSS_CLIENT_KEY`로 공급한다.
+- API: 같은 상점·모드의 시크릿 키를 서버의 보안 설정 `TossPayments__SecretKey`로 공급한다. 브라우저 번들과 Git에 넣지 않는다.
+- `pnpm build:cloud`는 클라이언트 키가 누락되거나 시크릿 키·지원하지 않는 라이브 키가 잘못 지정되면 빌드 전에 중단한다. 정상 키를 Vite 하위 프로세스에 명시적으로 전달한다.
+- 현재 결제 화면은 `test_ck_` 기반 테스트 결제 전용이다. 라이브 키 입력만으로 실제 청구 모드로 전환하지 않는다.
+
+실제 키 값과 운영 주소는 이 문서·Git에 저장하지 않는다. 토스 API 키의 용도와 테스트/라이브 모드 구분은 [공식 문서](https://docs.tosspayments.com/reference/using-api/api-keys)를 따른다.
+
+## 검증
+
+일반 백엔드 회귀 테스트는 `dotnet test UpscaleLab.sln --filter "Category!=PostgreSQLIntegration"`으로 실행한다. PostgreSQL 통합 테스트는 전용 `upscalelab_token_test` DB와 `UPSCALELAB_TOKEN_TEST_CONNECTION`이 필요하며 `Category=PostgreSQLIntegration`으로 선택한다. 이 테스트는 실제 청구·GPU 호출 없이 동시 예약, 거부된 마스크 정리, 월 갱신, 구독 지급과 중복 처리 방지를 검증한다. 운영 DB를 테스트 연결 문자열에 지정하지 않는다.

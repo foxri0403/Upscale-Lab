@@ -60,6 +60,8 @@ tests/*.html과 브라우저 진입 파일은 선택 마스크·기기·작업�
 
 ## 수동 배포
 
+`build:cloud`에는 결제용 공개 `VITE_TOSS_CLIENT_KEY`가 필요하다. 실제 값은 `.env.production.local` 또는 빌드 환경변수로 공급한다. 누락 시 빌드를 중단하므로, 병합 후 결제 버튼이 조용히 비활성화되는 웹을 배포하지 않는다. 서버 시크릿 키는 웹에 넣지 않는다. 현재 테스트 결제 모드와 토큰 사용량은 [결제 가이드](../docs/billing.md)를 따른다.
+
 자동 배포는 구성하지 않는다. [배포 가이드](../docs/deployment.md), [nginx 예시](../deploy/nginx-web.conf.example), [수동 설치 스크립트](../deploy/install-web.sh)를 따른다. 기존 서명 설치 파일을 포함한 cloud 빌드를 만든 다음 수동으로 전달한다.
 
 ```powershell

@@ -5,6 +5,7 @@ namespace UpscaleLab.Tests;
 public sealed class FakeTokenService : ITokenService
 {
     public int ReservedCount { get; private set; }
+    public List<int> ReservedCosts { get; } = new();
     public int CompletedCount { get; private set; }
     public int RefundedCount { get; private set; }
 
@@ -15,6 +16,17 @@ public sealed class FakeTokenService : ITokenService
         CancellationToken ct)
     {
         ReservedCount++;
+        return Task.CompletedTask;
+    }
+
+    public Task ReserveCostAsync(
+        Guid userId,
+        Guid jobId,
+        int cost,
+        CancellationToken ct)
+    {
+        ReservedCount++;
+        ReservedCosts.Add(cost);
         return Task.CompletedTask;
     }
 
