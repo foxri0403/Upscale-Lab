@@ -34,8 +34,10 @@ internal object CompanionRuntime {
     private var displayListener: DisplayManager.DisplayListener? = null
     private var wallpaperReceiver: android.content.BroadcastReceiver? = null
     private var nextHeartbeat = 0L
+    private val testSession = CompanionTestSession(BuildConfig.COMPANION_LOCAL_TEST)
 
-    fun inventoryAllowed() = initialized && CompanionPrivacy(context).accepted && verified && store.read().has("session")
+    fun inventoryAllowed() = initialized && CompanionPrivacy(context).accepted &&
+        (if (BuildConfig.COMPANION_LOCAL_TEST) testSession.loggedIn else verified && store.read().has("session"))
     private fun requireConsent() = check(CompanionPrivacy(context).accepted) { "기기·화면 정보 수집·이용 동의가 필요합니다." }
 
     @Synchronized fun initialize(value: Context) {
@@ -90,6 +92,7 @@ internal object CompanionRuntime {
         context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putLong("companion_valid_until", 0).apply()
     }
     fun resume(): Boolean {
+        if (BuildConfig.COMPANION_LOCAL_TEST) return false
         val state = store.read()
         if (!CompanionPrivacy(context).accepted || !state.optBoolean("enabled") || !state.has("session")) return false
         running = true; synchronized(watchSignal) { watchSignal.notifyAll() }; inventoryDirty.set(true); pollSoon(); return true
@@ -99,11 +102,13 @@ internal object CompanionRuntime {
         val state = store.read(); val user = state.optJSONObject("session")?.optJSONObject("user")
         val allowed = inventoryAllowed()
         val displays = CompanionInventoryAccess.read(CompanionPrivacy(context).accepted, allowed) {
-            runCatching { CompanionInventory(context).read(applied(state)) }.getOrDefault(JSONArray())
+            runCatching { CompanionInventory(context).read(if (BuildConfig.COMPANION_LOCAL_TEST) JSONObject() else applied(state)) }.getOrDefault(JSONArray())
         } ?: JSONArray()
-        return mapOf("server" to state.optString("server"), "account" to user?.optString("email"),
+        return mapOf("server" to state.optString("server"), "account" to (if (BuildConfig.COMPANION_LOCAL_TEST) testSession.account else user?.optString("email")),
+            "testApp" to BuildConfig.COMPANION_LOCAL_TEST,
             "privacyAccepted" to CompanionPrivacy(context).accepted,
-            "loggedIn" to (allowed && user != null), "enabled" to running, "message" to message,
+            "loggedIn" to allowed, "enabled" to (if (BuildConfig.COMPANION_LOCAL_TEST) testSession.enabled else running),
+            "message" to (if (BuildConfig.COMPANION_LOCAL_TEST) testSession.message else message),
             "pendingLive" to (pending != null),
             "osVersion" to (if (allowed) "Android ${Build.VERSION.RELEASE}" else ""), "displays" to (0 until displays.length()).map {
                 val item = displays.getJSONObject(it)
@@ -117,6 +122,10 @@ internal object CompanionRuntime {
         worker.execute {
             try {
                 if (name !in listOf("acceptPrivacy", "logout", "disable")) requireConsent()
+                if (BuildConfig.COMPANION_LOCAL_TEST && name != "acceptPrivacy") {
+                    testSession.action(name, arguments["identifier"] as? String ?: "")
+                    done(status(), null); return@execute
+                }
                 when (name) {
                     "acceptPrivacy" -> {
                         require(arguments["accepted"] == true) { "동의 항목을 선택해 주세요." }

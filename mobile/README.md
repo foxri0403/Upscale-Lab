@@ -23,10 +23,12 @@ cd android
 
 ## 현재 배포 파일과 서명
 
-Current release: **1.4.1**, Android build **42**, `artifacts/companion-local/Upscale_Lab-1.4.1-local.apk` (로컬 테스트용).
+Current release: **1.5.0**, Android build **43**, `artifacts/companion-local/Upscale_Lab-1.5.0-local.apk` (로컬 테스트용).
 
 시안의 로고·연보라 기기 카드·동기화 스위치·화면 정보·Live 2D 승인 카드로 UI를 구성했다. Android 설치 화면은 OS에서 제공하므로 첫 실행 시 필수 수집·이용 동의를 받으며, 로그인 화면에는 로그인 기능만 표시한다. 동의와 계정 인증을 모두 확인한 뒤 화면 감지와 변경 이벤트 구독을 시작한다. 동의 버전·UTC 시각·대상 서버를 로컬에 저장하며 동의는 다른 서버로 이전하지 않는다. 로그아웃 후에는 화면 목록을 비우고 감지를 중지한다.
 
-서버 입력란은 없으며 이 로컬 테스트 APK는 에뮬레이터에서 PC의 `http://10.0.2.2:5080`으로 연결한다. 패키지는 `com.livelayer.app.localtest`이고 팀 공유 키로 서명한다. [로컬 테스트 가이드](../companion/LOCAL-TESTING.md)에 실행 절차가 있다. 기기 이름·OS·화면 해상도·주사율은 유지하며 제조사·모델·CPU 구조는 수집하지 않는다.
+로컬 테스트 APK는 서버 없이 임의의 아이디·비밀번호나 빈칸으로 로그인하는 UI 미리보기를 제공한다. 런처와 모든 화면 상단에 `테스트 앱`을 표시한다. 동의와 테스트 로그인 후에만 실제 화면 정보를 로컬에서 읽으며, 로그인 정보 저장·API 요청·기기 등록·실제 배경화면 변경은 하지 않는다. 동기화 스위치는 미리보기 상태만 변경하고 자동 로그인은 비활성화한다. 일반 빌드의 서버 인증은 유지한다.
+
+패키지는 `com.livelayer.app.localtest`이고 팀 공유 키로 서명한다. [로컬 테스트 가이드](../companion/LOCAL-TESTING.md)에 실행 절차가 있다. 기기 이름·OS·화면 해상도·주사율은 유지하며 제조사·모델·CPU 구조는 수집하지 않는다.
 
 이 APK는 팀 공유 릴리스 키로 서명하고 apksigner로 검증하며, 이전 운영 APK와 인증서를 대조한다. 다음 APK 생성 때도 [AGENTS.md](../AGENTS.md)의 버전 증가·문서 동기화·공유 keystore·apksigner 검증 규칙을 따른다. 릴리스 서명은 Git 밖 C:\UpscaleLab-Secrets\key.properties를 UPSCALE_SIGNING_PROPERTIES_FILE로 지정하고 debug key로 대체하지 않는다. 별도 로컬 테스트 패키지는 운영 앱 업그레이드용이 아니다.

@@ -10,6 +10,7 @@ Future<void> runCompanion() async {
 const primary = Color(0xff536dfe);
 const ink = Color(0xff172033);
 const muted = Color(0xff778196);
+const testApp = bool.fromEnvironment('COMPANION_LOCAL_TEST');
 const privacyTitle = '기기·화면 정보 수집·이용 동의';
 const privacyDetails =
     '수집·이용 목적\n기기를 계정에 연결하고 웹에서 선택한 배경화면과 적용 상태를 동기화합니다.\n\n수집·전송 항목\n기기 이름, OS·앱 버전, 화면 이름·개수·해상도·주사율·배율·회전·위치·주 화면·연결 상태, 이 앱이 적용한 배경화면의 식별 정보와 적용 상태.\n\n외부 배경화면 사진, 다른 앱 목록, 제조사·모델·CPU 구조는 전송하지 않습니다. 동의 및 로그인 확인 후에만 화면을 감지합니다. 로그아웃하면 수집·동기화를 중지합니다.\n\n동의를 거부할 수 있으며, 거부하면 연결 앱을 사용할 수 없습니다.';
@@ -18,7 +19,7 @@ class CompanionApp extends StatelessWidget {
   const CompanionApp({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'Upscale Lab Connect',
+        title: testApp ? 'Upscale Lab Connect (테스트 앱)' : 'Upscale Lab Connect',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: primary),
@@ -99,7 +100,7 @@ class _CompanionPageState extends State<CompanionPage> {
               ? {
                   'identifier': identifier.text.trim(),
                   'password': password.text,
-                  'remember': remember
+                  'remember': !testApp && remember
                 }
               : action == 'acceptPrivacy'
                   ? {'accepted': consent}
@@ -150,7 +151,11 @@ class _CompanionPageState extends State<CompanionPage> {
   List<Widget> loginView() => [
         heading('이 기기를 연결하세요'),
         const SizedBox(height: 8),
-        const Text('웹과 같은 계정으로 로그인해 주세요.', style: TextStyle(color: muted)),
+        const Text(
+            testApp
+                ? '아무 정보나 입력해도 시작할 수 있습니다. 빈칸도 가능합니다.'
+                : '웹과 같은 계정으로 로그인해 주세요.',
+            style: TextStyle(color: muted)),
         const SizedBox(height: 26),
         panel(AutofillGroup(
             child: Column(
@@ -187,11 +192,11 @@ class _CompanionPageState extends State<CompanionPage> {
                               : Icons.visibility_off_outlined)))),
               const SizedBox(height: 8),
               CheckboxListTile(
-                  value: remember,
+                  value: testApp ? false : remember,
                   contentPadding: EdgeInsets.zero,
                   controlAffinity: ListTileControlAffinity.leading,
                   title: const Text('자동 로그인'),
-                  onChanged: busy
+                  onChanged: busy || testApp
                       ? null
                       : (v) => setState(() => remember = v ?? false)),
               const SizedBox(height: 12),
@@ -200,7 +205,10 @@ class _CompanionPageState extends State<CompanionPage> {
                   child: const Text('로그인하고 연결')),
             ]))),
         const SizedBox(height: 22),
-        const Text('배경화면은 웹의 기기 관리에서 선택해 주세요.',
+        const Text(
+            testApp
+                ? '테스트 앱은 서버 연결 없이 UI를 확인합니다.\n입력 내용은 전송하거나 저장하지 않습니다.'
+                : '배경화면은 웹의 기기 관리에서 선택해 주세요.',
             textAlign: TextAlign.center,
             style: TextStyle(color: muted, height: 1.6)),
       ];
@@ -214,6 +222,12 @@ class _CompanionPageState extends State<CompanionPage> {
         panel(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text(privacyTitle,
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          if (testApp)
+            const Padding(
+              padding: EdgeInsets.only(top: 16),
+              child: Text('테스트 앱은 화면 정보를 이 기기에서만 확인하며 서버로 전송하지 않습니다.',
+                  style: TextStyle(color: primary)),
+            ),
           const SizedBox(height: 18),
           const Text(privacyDetails, style: TextStyle(height: 1.7)),
           const SizedBox(height: 16),
@@ -249,7 +263,7 @@ class _CompanionPageState extends State<CompanionPage> {
                 decoration: BoxDecoration(
                     color: const Color(0xffdff6e6),
                     borderRadius: BorderRadius.circular(24)),
-                child: const Text('● 연결됨',
+                child: const Text(testApp ? '● 테스트 중' : '● 연결됨',
                     style: TextStyle(
                         color: Color(0xff24834d),
                         fontWeight: FontWeight.w700))),
@@ -281,7 +295,7 @@ class _CompanionPageState extends State<CompanionPage> {
       const SizedBox(height: 14),
       panel(SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          title: const Text('배경화면 동기화',
+          title: const Text(testApp ? '동기화 미리보기' : '배경화면 동기화',
               style: TextStyle(fontWeight: FontWeight.w700)),
           value: state['enabled'] == true,
           onChanged: busy ? null : (v) => act(v ? 'enable' : 'disable'))),
@@ -384,64 +398,86 @@ class _CompanionPageState extends State<CompanionPage> {
     final loggedIn = accepted && state['loggedIn'] == true;
     final tablet = MediaQuery.sizeOf(context).shortestSide >= 600;
     return Scaffold(
+        appBar: testApp
+            ? AppBar(
+                title: const Text('테스트 앱'),
+                backgroundColor: const Color(0xffeeebff),
+                foregroundColor: primary,
+                automaticallyImplyLeading: false,
+              )
+            : null,
         body: DecoratedBox(
-      decoration: const BoxDecoration(
-          gradient: LinearGradient(
-              begin: Alignment.topRight,
-              end: Alignment.bottomLeft,
-              colors: [Color(0xfff0ecff), Color(0xfffafbff), Color(0xfffafbff)],
-              stops: [0, .3, 1])),
-      child: Material(
-          color: Colors.transparent,
-          child: SafeArea(
-              child: Center(
-                  child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 680),
-            child:
-                ListView(padding: EdgeInsets.all(tablet ? 32 : 22), children: [
-              Row(children: [
-                Image.asset('assets/app-icon.png', width: 58, height: 58),
-                const SizedBox(width: 12),
-                const Expanded(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      Text('Upscale Lab',
-                          style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w800,
-                              color: ink)),
-                      Text('Connect',
-                          style: TextStyle(
-                              fontSize: 17,
-                              color: muted,
-                              fontWeight: FontWeight.w600)),
-                    ])),
-              ]),
-              const SizedBox(height: 34),
-              if (state.isEmpty && error == null)
-                const Text('연결 준비 중…',
-                    textAlign: TextAlign.center, style: TextStyle(color: muted))
-              else if (!accepted)
-                ...consentView()
-              else if (!loggedIn)
-                ...loginView()
-              else
-                ...connectedView(tablet),
-              if (busy)
-                const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 16),
-                    child: LinearProgressIndicator()),
-              if (error != null)
-                Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    child: Semantics(
-                        liveRegion: true,
-                        child: Text(error!,
-                            style: TextStyle(
-                                color: Theme.of(context).colorScheme.error)))),
-            ]),
-          )))),
-    ));
+          decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                  begin: Alignment.topRight,
+                  end: Alignment.bottomLeft,
+                  colors: [
+                Color(0xfff0ecff),
+                Color(0xfffafbff),
+                Color(0xfffafbff)
+              ],
+                  stops: [
+                0,
+                .3,
+                1
+              ])),
+          child: Material(
+              color: Colors.transparent,
+              child: SafeArea(
+                  child: Center(
+                      child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 680),
+                child: ListView(
+                    controller: scroll,
+                    padding: EdgeInsets.all(tablet ? 32 : 22),
+                    children: [
+                      Row(children: [
+                        Image.asset('assets/app-icon.png',
+                            width: 58, height: 58),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              Text('Upscale Lab',
+                                  style: TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w800,
+                                      color: ink)),
+                              Text('Connect',
+                                  style: TextStyle(
+                                      fontSize: 17,
+                                      color: muted,
+                                      fontWeight: FontWeight.w600)),
+                            ])),
+                      ]),
+                      const SizedBox(height: 34),
+                      if (state.isEmpty && error == null)
+                        const Text('연결 준비 중…',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: muted))
+                      else if (!accepted)
+                        ...consentView()
+                      else if (!loggedIn)
+                        ...loginView()
+                      else
+                        ...connectedView(tablet),
+                      if (busy)
+                        const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 16),
+                            child: LinearProgressIndicator()),
+                      if (error != null)
+                        Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            child: Semantics(
+                                liveRegion: true,
+                                child: Text(error!,
+                                    style: TextStyle(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .error)))),
+                    ]),
+              )))),
+        ));
   }
 }

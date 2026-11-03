@@ -108,9 +108,10 @@ android {
     }
 
     defaultConfig {
+        buildConfigField("boolean", "COMPANION_LOCAL_TEST", companionLocalTest.toString())
         manifestPlaceholders["companionCleartext"] = companionAllowHttp.toString()
         applicationId = if (companionLocalTest) "com.livelayer.app.localtest" else "com.livelayer.app"
-        manifestPlaceholders["companionAppLabel"] = if (companionLocalTest) "Upscale Lab Connect (Local Test)" else "Upscale Lab Connect"
+        manifestPlaceholders["companionAppLabel"] = if (companionLocalTest) "Upscale Lab Connect (테스트 앱)" else "Upscale Lab Connect"
         minSdk = maxOf(24, flutter.minSdkVersion)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

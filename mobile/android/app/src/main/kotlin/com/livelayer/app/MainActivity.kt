@@ -15,7 +15,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         CompanionRuntime.initialize(applicationContext)
         val companionState = CompanionStore(applicationContext).read()
-        if (CompanionPrivacy(applicationContext).accepted && companionState.optBoolean("remember") && companionState.optBoolean("enabled") && companionState.has("session"))
+        if (!BuildConfig.COMPANION_LOCAL_TEST && CompanionPrivacy(applicationContext).accepted && companionState.optBoolean("remember") && companionState.optBoolean("enabled") && companionState.has("session"))
             androidx.core.content.ContextCompat.startForegroundService(this, Intent(this, CompanionSyncService::class.java))
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "upscale/companion").setMethodCallHandler { call, result ->
             if (call.method == "status") { result.success(CompanionRuntime.status()); return@setMethodCallHandler }
@@ -27,10 +27,10 @@ class MainActivity : FlutterActivity() {
                 runOnUiThread {
                     if (error != null) result.error("companion_failed", error, null)
                     else try {
-                        if (call.method == "activateLive") {
+                        if (!BuildConfig.COMPANION_LOCAL_TEST && call.method == "activateLive") {
                             startActivity(Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER)
                                 .putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, ComponentName(this, LiveLayerWallpaperService::class.java)))
-                        } else if (call.method in listOf("login", "enable", "reconnect")) {
+                        } else if (!BuildConfig.COMPANION_LOCAL_TEST && call.method in listOf("login", "enable", "reconnect")) {
                             if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
                                 requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2102)
                             androidx.core.content.ContextCompat.startForegroundService(this, Intent(this, CompanionSyncService::class.java))
