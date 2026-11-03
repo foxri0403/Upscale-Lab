@@ -8,6 +8,14 @@ internal static class AppBrand
     internal static readonly Color Primary = Color.FromArgb(83, 109, 254);
     internal static readonly Color Ink = Color.FromArgb(23, 32, 51);
     internal static readonly Color Muted = Color.FromArgb(119, 129, 150);
+    internal static Color Surface(Control? control) {
+        while (control != null) {
+            if (control is BrandPanel panel) return panel.Fill;
+            if (control.BackColor.A == 255) return control.BackColor;
+            control = control.Parent;
+        }
+        return Background;
+    }
 
     internal static Icon Icon() {
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("UpscaleLab.Companion.AppIcon")!;

@@ -1,17 +1,17 @@
 # 연결 앱 로컬 테스트
 
-현재 테스트 파일은 **1.3.0**, Android build **39**이다. 운영 배포와 원격 Git 푸시는 하지 않는다.
+현재 테스트 파일은 **1.4.1**, Android build **42**이다. 운영 배포와 원격 Git 푸시는 하지 않는다.
 
 ## 실행 파일
 
-- Windows: `artifacts/companion-local/UpscaleLab-Connect-1.3.0-local-win-x64.exe`
-- Android: `artifacts/companion-local/Upscale_Lab-1.3.0-local.apk`
+- Windows: `artifacts/companion-local/UpscaleLab-Connect-1.4.1-local-win-x64.exe`
+- Android: `artifacts/companion-local/Upscale_Lab-1.4.1-local.apk`
 - 해시·크기: 같은 폴더의 `manifest.json`
 
-Windows EXE에는 .NET 런타임이 포함된다. 더블클릭하면 현재 사용자 계정에 설치하는 창이 열린다. 바탕화면 바로 가기와 시작 메뉴 등록을 선택할 수 있다. 설치하지 않고 바로 실행하려면 저장소 루트 PowerShell에서 다음 명령을 사용한다.
+Windows EXE에는 .NET 런타임이 포함된다. 더블클릭하면 현재 사용자 계정에 설치하는 창이 열린다. 바탕화면 바로 가기와 시작 메뉴 등록을 선택하고, 기본 미선택인 기기·화면 정보 수집·이용 동의를 확인한 뒤 설치한다. `--run`으로 직접 실행하거나 기존 설치를 업데이트하는 경우에도 새 동의가 없으면 첫 실행 동의 화면이 먼저 표시된다. 설치하지 않고 바로 실행하려면 저장소 루트 PowerShell에서 다음 명령을 사용한다.
 
 ```powershell
-& '.\artifacts\companion-local\UpscaleLab-Connect-1.3.0-local-win-x64.exe' --run
+& '.\artifacts\companion-local\UpscaleLab-Connect-1.4.1-local-win-x64.exe' --run
 ```
 
 Android Studio에서 휴대폰 또는 태블릿 AVD를 실행한 뒤 APK를 에뮬레이터 창에 끌어 놓는다. x86_64 및 ARM64 에뮬레이터에 사용할 수 있는 APK다. 테스트 패키지 ID는 `com.livelayer.app.localtest`이며 기존 운영 앱과 별도로 설치된다. Windows도 `Upscale Lab Connect (Local Test)` 경로와 바로 가기를 사용한다. Windows 계정 세션·기기 자격은 서버별 DPAPI 프로필로 분리된다.
@@ -43,6 +43,9 @@ pnpm dev:production-ui
 3. 휴대폰과 태블릿 AVD를 각각 연결한다. 태블릿도 기존 기기 카드·홈/잠금 화면·메타데이터·버튼 구조를 사용하고 테두리만 넓은 태블릿 형태로 표시한다. 내장 화면의 짧은 변을 배율로 나눈 값이 600dp 이상이면 태블릿으로 분류한다. 외부 모니터는 분류에서 제외한다.
 4. Windows 설치에서 바탕화면 바로 가기를 선택/해제했을 때 선택한 항목만 생성되는지 확인한다.
 5. 동기화 중지, Live 2D 최초 승인, 로그아웃, 연결 해제 후 앱의 기기 다시 연결을 확인한다. 실제 OS 배경화면 변경은 수동으로 확인한다.
+6. Windows 설치 및 Android 첫 실행에서 수집 목적·기기/화면 정보 항목을 확인한다. 동의 항목을 선택하기 전에는 진행할 수 없어야 한다. Android OS 설치 화면 자체는 변경하지 않는다.
+7. 동의 후에는 로그인 UI만 표시한다. 로그인 실패 시에도 화면 정보는 읽거나 표시하지 않아야 하며, 로그인 성공 후에만 기기 카드·화면 정보·동기화·재연결을 표시한다. 로그아웃하면 화면 목록과 감지를 중지한다. 저장된 자동 로그인도 동의가 있어야 복원한다.
+8. 웹의 기기 관리 상단에서 연결 앱 다운로드 버튼이 사라졌는지 확인한다. 앱 다운로드는 별도 메뉴에서 이용한다.
 
 ## 다시 빌드
 

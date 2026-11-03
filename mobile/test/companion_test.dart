@@ -3,6 +3,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:live_layer/main.dart' as entry;
 
+Future<void> reveal(WidgetTester tester, Finder target) async {
+  await tester.drag(find.byType(ListView), const Offset(0, 10000));
+  await tester.pumpAndSettle();
+  await tester.scrollUntilVisible(target, 200,
+      scrollable: find.byType(Scrollable).first);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('upscale/companion');
@@ -12,6 +20,7 @@ void main() {
   setUp(() {
     calls.clear();
     state = {
+      'privacyAccepted': true,
       'loggedIn': false,
       'server': 'https://api.example.invalid',
       'enabled': false,
@@ -31,6 +40,8 @@ void main() {
       switch (call.method) {
         case 'status':
           return state;
+        case 'acceptPrivacy':
+          state = {...state, 'privacyAccepted': true};
         case 'login':
           state = {
             ...state,
@@ -44,7 +55,12 @@ void main() {
         case 'disable':
           state = {...state, 'enabled': false};
         case 'logout':
-          state = {...state, 'loggedIn': false, 'enabled': false};
+          state = {
+            ...state,
+            'privacyAccepted': true,
+            'loggedIn': false,
+            'enabled': false
+          };
       }
       return null;
     });
@@ -53,6 +69,43 @@ void main() {
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
+  });
+
+  testWidgets('first launch requires an explicit consent before showing login',
+      (tester) async {
+    state = {...state, 'privacyAccepted': false};
+    await entry.main();
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('이 기기의 화면'), findsNothing);
+    expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+        isNull);
+    await reveal(tester, find.byType(CheckboxListTile));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.pumpAndSettle();
+    await reveal(tester, find.text('동의하고 계속'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('동의하고 계속'));
+    await tester.pumpAndSettle();
+    expect(
+        calls.singleWhere((call) => call.method == 'acceptPrivacy').arguments,
+        {'accepted': true});
+    expect(find.byType(TextField), findsNWidgets(2));
+    expect(calls.where((call) => call.method == 'login'), isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('login page hides inventory even if stale native data exists',
+      (tester) async {
+    await entry.main();
+    await tester.pumpAndSettle();
+    expect(find.text('이 기기의 화면'), findsNothing);
+    expect(find.textContaining('1080'), findsNothing);
+    expect(find.byType(SwitchListTile), findsNothing);
+    expect(find.text('수집 정보 안내'), findsNothing);
+    expect(find.text('기기 다시 연결'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets(
@@ -65,8 +118,8 @@ void main() {
     expect(find.text('서버 주소'), findsNothing);
     await tester.enterText(find.byType(TextField).at(0), 'web-user');
     await tester.enterText(find.byType(TextField).at(1), 'Password1!');
-    await tester.ensureVisible(find.text('로그인하고 기기 연결'));
-    await tester.tap(find.text('로그인하고 기기 연결'));
+    await reveal(tester, find.text('로그인하고 연결'));
+    await tester.tap(find.text('로그인하고 연결'));
     await tester.pumpAndSettle();
     final login = calls.singleWhere((call) => call.method == 'login');
     expect(login.arguments, {
@@ -75,20 +128,22 @@ void main() {
       'remember': true,
     });
     expect(find.text('web-user'), findsOneWidget);
-    await tester.ensureVisible(find.text('Live 2D 적용 확인'));
+    await reveal(tester, find.text('Live 2D 적용 확인'));
     await tester.tap(find.text('Live 2D 적용 확인'));
     await tester.pumpAndSettle();
     expect(calls.where((call) => call.method == 'activateLive'), hasLength(1));
     expect(find.text('Live 2D 적용 확인'), findsNothing);
-    await tester.ensureVisible(find.byType(SwitchListTile));
+    await reveal(tester, find.byType(SwitchListTile));
     await tester.tap(find.byType(SwitchListTile));
     await tester.pumpAndSettle();
     expect(calls.where((call) => call.method == 'disable'), hasLength(1));
-    await tester.ensureVisible(find.text('로그아웃'));
+    await reveal(tester, find.text('로그아웃'));
     await tester.tap(find.text('로그아웃'));
     await tester.pumpAndSettle();
-    expect(find.text('로그인하고 기기 연결'), findsOneWidget);
+    expect(find.text('로그인하고 연결'), findsOneWidget);
     expect(calls.where((call) => call.method == 'logout'), hasLength(1));
+    expect(find.text('이 기기의 화면'), findsNothing);
+    expect(find.textContaining('1080'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -100,8 +155,8 @@ void main() {
     });
     await entry.main();
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('로그인하고 기기 연결'));
-    await tester.tap(find.text('로그인하고 기기 연결'));
+    await reveal(tester, find.text('로그인하고 연결'));
+    await tester.tap(find.text('로그인하고 연결'));
     await tester.pumpAndSettle();
     expect(find.text('연결 실패'), findsOneWidget);
     expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
@@ -120,13 +175,14 @@ void main() {
       await entry.main();
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      await tester.ensureVisible(find.text('로그인하고 기기 연결'));
+      await reveal(tester, find.text('로그인하고 연결'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('로그인하고 기기 연결'));
+      await tester.tap(find.text('로그인하고 연결'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      await reveal(tester, find.text('Live 2D 적용 확인'));
       expect(find.text('Live 2D 적용 확인'), findsOneWidget);
-      await tester.ensureVisible(find.text('로그아웃'));
+      await reveal(tester, find.text('로그아웃'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());

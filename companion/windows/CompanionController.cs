@@ -6,7 +6,11 @@ namespace UpscaleLab.Companion;
 
 internal sealed class CompanionController : IDisposable
 {
-    private readonly HttpClient requests = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
+    private readonly HttpClient requests;
+    private readonly Func<bool> privacyAccepted;
+    private readonly Func<MonitorInfo[]> readDisplays;
+    private readonly Func<Credentials?> readCredentials;
+    private readonly Action<Credentials> writeCredentials;
     private readonly HttpClient downloads = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromMinutes(3) };
     private readonly WallpaperEngine engine = new();
     private AgentApi? api;
@@ -19,6 +23,23 @@ internal sealed class CompanionController : IDisposable
     private bool remember;
     private bool verified;
     private Dictionary<string, AppliedWallpaper> applied = new();
+    internal CompanionController(HttpClient? requests = null, Func<bool>? privacyAccepted = null, Func<MonitorInfo[]>? readDisplays = null,
+        Func<Credentials?>? readCredentials = null, Action<Credentials>? writeCredentials = null)
+    {
+        this.requests = requests ?? new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
+        this.privacyAccepted = privacyAccepted ?? (() => PrivacyConsent.Current.Accepted);
+        this.readDisplays = readDisplays ?? DisplayInventory.Read;
+        this.readCredentials = readCredentials ?? SecureStore.Read;
+        this.writeCredentials = writeCredentials ?? SecureStore.Write;
+    }
+    private void RequireConsent() {
+        if (!privacyAccepted()) throw new InvalidOperationException("기기·화면 정보 수집·이용 동의가 필요합니다.");
+    }
+    private MonitorInfo[] ReadDisplays() {
+        RequireConsent();
+        if (!verified || api?.Session is null) throw new InvalidOperationException("로그인이 필요합니다.");
+        return readDisplays();
+    }
     public event Action? Changed;
     public string Status { get; private set; } = "웹과 같은 계정으로 로그인해 주세요.";
     public string Account => api?.Session?.User.Email ?? "";
@@ -29,7 +50,7 @@ internal sealed class CompanionController : IDisposable
     public MonitorInfo[] Monitors { get; private set; } = [];
     private string AppliedFile => Path.Combine(SecureStore.Root, $"applied-{api!.Session!.User.Id:N}-{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(api.Server)))[..12]}.json");
     private void Notify(string status) { Status = status; Changed?.Invoke(); }
-    private void Persist() { if (api != null) SecureStore.Write(new(api.Server, api.Session, api.Device, Enabled, remember)); }
+    private void Persist() { if (api != null) writeCredentials(new(api.Server, api.Session, api.Device, Enabled, remember)); }
     private void SetApi(string server, Login? session, Binding? binding)
     {
         api = new AgentApi(server, requests) { Session = session, Device = binding };
@@ -37,19 +58,21 @@ internal sealed class CompanionController : IDisposable
     }
     public async Task Restore()
     {
-        var saved = SecureStore.Read(); if (saved is null || !CompanionConfiguration.CanRestore(saved, Server)) return;
+        if (!privacyAccepted()) return;
+        var saved = readCredentials(); if (saved is null || !CompanionConfiguration.CanRestore(saved, Server)) return;
         remember = true; SetApi(Server, saved.Session, saved.Device);
         try
         {
             await api!.Call<Account>("/api/auth/me"); verified = true;
-            LoadApplied(); if (saved.Enabled) await Enable(); else Notify("동기화가 꺼져 있습니다.");
+            LoadApplied(); if (saved.Enabled) await Enable(); else { RefreshInventory(); Notify("동기화가 꺼져 있습니다."); }
         }
         catch (Exception error) { Notify("자동 연결 대기: " + error.Message); }
     }
     public async Task SignIn(string identifier, string password, bool automatic)
     {
-        await Stop(); verified = false;
-        var saved = SecureStore.Read(); SetApi(Server, null, null);
+        RequireConsent();
+        await Stop(); verified = false; Monitors = [];
+        var saved = readCredentials(); SetApi(Server, null, null);
         var login = await api!.Call<Login>("/api/auth/login", HttpMethod.Post, new { email = identifier.Trim(), password }, anonymous: true);
         if (string.IsNullOrWhiteSpace(login.RefreshToken)) throw new InvalidOperationException("계정 세션을 지원하는 서버가 필요합니다.");
         api.Session = login; remember = automatic; verified = true;
@@ -67,7 +90,7 @@ internal sealed class CompanionController : IDisposable
     {
         if (api is null || api.Session is null) return;
         if (api.Device != null && !force) return;
-        Monitors = DisplayInventory.Read(); var primary = Monitors.FirstOrDefault(m => m.IsPrimary) ?? Monitors.FirstOrDefault()
+        Monitors = ReadDisplays(); var primary = Monitors.FirstOrDefault(m => m.IsPrimary) ?? Monitors.FirstOrDefault()
             ?? throw new InvalidOperationException("연결된 화면을 찾지 못했습니다.");
         Guid id = api.Device?.DeviceId ?? Guid.Empty;
         if (id != Guid.Empty)
@@ -84,6 +107,7 @@ internal sealed class CompanionController : IDisposable
     }
     public async Task Enable()
     {
+        RequireConsent();
         if (Enabled || !verified || api?.Session is null) return;
         await Bind(); Enabled = true; Persist(); cancellation = new(); inventoryDirty = true; ui = SynchronizationContext.Current;
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplayChanged;
@@ -111,7 +135,7 @@ internal sealed class CompanionController : IDisposable
             catch (Exception) { Wake(); try { await Task.Delay(3000, ct); } catch (OperationCanceledException) { return; } }
         }
     }
-    public void RefreshInventory() { Monitors = DisplayInventory.Read(); Changed?.Invoke(); }
+    public void RefreshInventory() { Monitors = verified && privacyAccepted() ? ReadDisplays() : []; Changed?.Invoke(); }
     public async Task Stop()
     {
         Enabled = false; cancellation?.Cancel();
@@ -125,7 +149,7 @@ internal sealed class CompanionController : IDisposable
     }
     public async Task Logout()
     {
-        await Stop(); var previous = api?.Session; if (api != null) api.Session = null; verified = false; Persist();
+        await Stop(); var previous = api?.Session; if (api != null) api.Session = null; verified = false; Monitors = []; Persist();
         if (previous != null && api != null)
             try { await api.Call<object>("/api/auth/logout", HttpMethod.Post, new { refreshToken = previous.RefreshToken }, anonymous: true); }
             catch (Exception) { /* Local credentials and synchronization have already been removed. */ }
@@ -140,7 +164,7 @@ internal sealed class CompanionController : IDisposable
     private async Task<AgentState> State(CancellationToken ct) => await api!.Call<AgentState>("/api/agent/state", agent: true, ct: ct);
     private async Task Heartbeat(CancellationToken ct)
     {
-        Monitors = DisplayInventory.Read(); var state = await State(ct);
+        Monitors = ReadDisplays(); var state = await State(ct);
         var body = new { revision = state.InventoryRevision + 1, osVersion = RuntimeInformation.OSDescription,
             agentVersion = typeof(CompanionController).Assembly.GetName().Version?.ToString(3) ?? "1.0.1",
             supportsLive2D = engine.SupportsLive, supportsLockScreen = false, supportsWallpaperRemoval = true,

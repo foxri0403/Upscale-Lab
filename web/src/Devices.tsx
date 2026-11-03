@@ -3,7 +3,6 @@ import {
   Monitor,
   Smartphone,
   Tablet,
-  Download,
   ChevronDown,
   RefreshCw,
   Unplug,
@@ -14,12 +13,10 @@ import { useDemo } from "./Workspace";
 import { sampleImages, uuid, type Device, type Picture } from "./model";
 import { Modal, Notice, Empty, PictureView } from "./ui";
 import { cloud, post, request } from "./api";
-import { Downloads } from "./Downloads";
 import { deviceDisplays, registeredDevices } from "./device-layout";
 
 export function Devices() {
   const { library, session, update, toast, apply, refresh, refreshDevices } = useDemo();
-  const [connecting, setConnecting] = useState(false);
   const [target, setTarget] = useState<{
     device: Device;
     displayId: string;
@@ -118,7 +115,6 @@ export function Devices() {
           </h1>
           <p>내 기기의 배경화면을 한곳에서 관리하세요.</p>
         </div>
-        <button className="button secondary" onClick={() => setConnecting(true)}><Download size={17} />연결 앱 다운로드</button>
       </div>
       <div className="account-device-note">
         <Link2 size={15} />
@@ -264,7 +260,6 @@ export function Devices() {
           })}
         </div>
       )}
-      {connecting && <Modal title="연결 앱 다운로드" close={() => setConnecting(false)}><Downloads /></Modal>}
       {target && (
         <Modal
           title={`${target.device.name} 배경화면 변경`}

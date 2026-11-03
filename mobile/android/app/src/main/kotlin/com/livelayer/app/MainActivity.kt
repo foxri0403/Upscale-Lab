@@ -15,7 +15,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         CompanionRuntime.initialize(applicationContext)
         val companionState = CompanionStore(applicationContext).read()
-        if (companionState.optBoolean("remember") && companionState.optBoolean("enabled") && companionState.has("session"))
+        if (CompanionPrivacy(applicationContext).accepted && companionState.optBoolean("remember") && companionState.optBoolean("enabled") && companionState.has("session"))
             androidx.core.content.ContextCompat.startForegroundService(this, Intent(this, CompanionSyncService::class.java))
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "upscale/companion").setMethodCallHandler { call, result ->
             if (call.method == "status") { result.success(CompanionRuntime.status()); return@setMethodCallHandler }

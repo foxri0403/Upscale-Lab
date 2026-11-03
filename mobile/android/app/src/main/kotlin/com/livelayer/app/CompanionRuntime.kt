@@ -31,7 +31,12 @@ internal object CompanionRuntime {
     @Volatile private var verified = false
     @Volatile private var message = "웹과 같은 계정으로 로그인해 주세요."
     @Volatile private var pending: JSONObject? = null
+    private var displayListener: DisplayManager.DisplayListener? = null
+    private var wallpaperReceiver: android.content.BroadcastReceiver? = null
     private var nextHeartbeat = 0L
+
+    fun inventoryAllowed() = initialized && CompanionPrivacy(context).accepted && verified && store.read().has("session")
+    private fun requireConsent() = check(CompanionPrivacy(context).accepted) { "기기·화면 정보 수집·이용 동의가 필요합니다." }
 
     @Synchronized fun initialize(value: Context) {
         if (initialized) return
@@ -41,15 +46,6 @@ internal object CompanionRuntime {
         if (saved.has("server") && saved.optString("server") != configuredServer)
             store.save(JSONObject().put("server", configuredServer))
         worker.scheduleWithFixedDelay({ if (running) poll() }, 0, 15, TimeUnit.SECONDS)
-        androidx.core.content.ContextCompat.registerReceiver(context, object : android.content.BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: android.content.Intent) { inventoryDirty.set(true); pollSoon() }
-        }, android.content.IntentFilter(android.content.Intent.ACTION_WALLPAPER_CHANGED), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
-        (context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).registerDisplayListener(object : DisplayManager.DisplayListener {
-            private fun changed() { inventoryDirty.set(true); pollSoon() }
-            override fun onDisplayAdded(id: Int) = changed()
-            override fun onDisplayRemoved(id: Int) = changed()
-            override fun onDisplayChanged(id: Int) = changed()
-        }, Handler(Looper.getMainLooper()))
         watcher.execute {
             var cursor: String? = null; var epoch = generation.get()
             while (!Thread.currentThread().isInterrupted) {
@@ -64,24 +60,52 @@ internal object CompanionRuntime {
             }
         }
     }
+    @Synchronized private fun observeInventory() {
+        check(inventoryAllowed()) { "로그인과 정보 수집 동의가 필요합니다." }
+        if (displayListener != null) return
+        val listener = object : DisplayManager.DisplayListener {
+            private fun changed() { inventoryDirty.set(true); pollSoon() }
+            override fun onDisplayAdded(id: Int) = changed()
+            override fun onDisplayRemoved(id: Int) = changed()
+            override fun onDisplayChanged(id: Int) = changed()
+        }
+        (context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).registerDisplayListener(listener, Handler(Looper.getMainLooper()))
+        displayListener = listener
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: android.content.Intent) { inventoryDirty.set(true); pollSoon() }
+        }
+        androidx.core.content.ContextCompat.registerReceiver(context, receiver,
+            android.content.IntentFilter(android.content.Intent.ACTION_WALLPAPER_CHANGED), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        wallpaperReceiver = receiver
+    }
+    @Synchronized private fun stopObservingInventory() {
+        displayListener?.let { (context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).unregisterDisplayListener(it) }
+        wallpaperReceiver?.let { context.unregisterReceiver(it) }
+        displayListener = null; wallpaperReceiver = null
+    }
     fun invalidate() {
         generation.incrementAndGet(); running = false; pending = null
+        stopObservingInventory()
         api.cancelUpdates()
         context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putLong("companion_valid_until", 0).apply()
     }
     fun resume(): Boolean {
         val state = store.read()
-        if (!state.optBoolean("enabled") || !state.has("session")) return false
+        if (!CompanionPrivacy(context).accepted || !state.optBoolean("enabled") || !state.has("session")) return false
         running = true; synchronized(watchSignal) { watchSignal.notifyAll() }; inventoryDirty.set(true); pollSoon(); return true
     }
     fun pollSoon() { if (initialized && running && pollQueued.compareAndSet(false, true)) worker.execute { pollQueued.set(false); if (running) poll() } }
     fun status(): Map<String, Any?> {
         val state = store.read(); val user = state.optJSONObject("session")?.optJSONObject("user")
-        val displays = runCatching { CompanionInventory(context).read(applied(state)) }.getOrDefault(JSONArray())
+        val allowed = inventoryAllowed()
+        val displays = CompanionInventoryAccess.read(CompanionPrivacy(context).accepted, allowed) {
+            runCatching { CompanionInventory(context).read(applied(state)) }.getOrDefault(JSONArray())
+        } ?: JSONArray()
         return mapOf("server" to state.optString("server"), "account" to user?.optString("email"),
-            "loggedIn" to (verified && user != null), "enabled" to running, "message" to message,
+            "privacyAccepted" to CompanionPrivacy(context).accepted,
+            "loggedIn" to (allowed && user != null), "enabled" to running, "message" to message,
             "pendingLive" to (pending != null),
-            "osVersion" to "Android ${Build.VERSION.RELEASE}", "displays" to (0 until displays.length()).map {
+            "osVersion" to (if (allowed) "Android ${Build.VERSION.RELEASE}" else ""), "displays" to (0 until displays.length()).map {
                 val item = displays.getJSONObject(it)
                 mapOf("name" to item.optString("name"), "width" to item.optInt("width"), "height" to item.optInt("height"),
                     "refreshRateHz" to item.optDouble("refreshRateHz").takeIf { hz -> hz.isFinite() }, "canApply" to item.optBoolean("canApplyWallpaper"))
@@ -89,9 +113,15 @@ internal object CompanionRuntime {
     }
     fun action(name: String, arguments: Map<*, *>, done: (Any?, String?) -> Unit) {
         if (name in listOf("login", "logout", "disable", "reconnect")) invalidate()
+        if (name in listOf("login", "logout")) verified = false
         worker.execute {
             try {
+                if (name !in listOf("acceptPrivacy", "logout", "disable")) requireConsent()
                 when (name) {
+                    "acceptPrivacy" -> {
+                        require(arguments["accepted"] == true) { "동의 항목을 선택해 주세요." }
+                        CompanionPrivacy(context).accept()
+                    }
                     "login" -> {
                         val server = CompanionApi.normalize(BuildConfig.COMPANION_API_BASE_URL)
                         val previous = store.read(); verified = false
@@ -128,11 +158,13 @@ internal object CompanionRuntime {
         }
     }
     private fun verifyAccount() {
+        requireConsent()
         val user = api.request("/api/auth/me") as JSONObject
         require(user.getString("id") == owner(store.read())) { "로그인 계정이 일치하지 않습니다." }; verified = true
     }
     private fun owner(state: JSONObject) = state.getJSONObject("session").getJSONObject("user").getString("id")
     private fun bind(force: Boolean) {
+        check(inventoryAllowed()) { "로그인과 정보 수집 동의가 필요합니다." }
         val state = store.read()
         if (state.has("binding") && !force) return
         var id = state.optJSONObject("binding")?.optString("deviceId")
@@ -163,6 +195,7 @@ internal object CompanionRuntime {
         temp.writeText(value.toString()); check(temp.renameTo(file))
     }
     private fun lease() {
+        check(inventoryAllowed()) { "로그인과 정보 수집 동의가 필요합니다." }
         context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putString("companion_owner", owner(store.read()))
             .putLong("companion_valid_until", System.currentTimeMillis() + 60000).apply()
     }
@@ -186,8 +219,10 @@ internal object CompanionRuntime {
     private fun poll() {
         val epoch = generation.get()
         try {
-            if (!running) return
+            if (!running || !CompanionPrivacy(context).accepted) return
             if (!verified) verifyAccount()
+            if (epoch != generation.get() || !running) return
+            observeInventory()
             val state = store.read(); val saved = applied(state)
             val inventory = CompanionInventory(context)
             val remote = api.request("/api/agent/state", agent = true) as JSONObject
