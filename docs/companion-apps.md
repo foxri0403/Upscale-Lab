@@ -1,11 +1,11 @@
 # Windows / Android 연결 앱
 
-웹의 **앱 다운로드**에서 Windows EXE와 Android APK를 받습니다. iOS는 **준비 중**으로만 표시합니다. 연결 앱에서 웹과 같은 계정으로 로그인하면 실제 화면 크기로 기기를 자동 등록하고 기기 자격을 발급받습니다. 웹의 **기기 관리** 또는 작업실에서 이미지와 화면을 선택하면 연결 앱이 내려받아 적용하고, OS에서 적용을 확인한 뒤 완료를 보고합니다.
+웹의 **앱 다운로드**에서 Windows EXE와 Android APK를 받습니다. Windows와 Android만 표시합니다. 연결 앱에서 웹과 같은 계정으로 로그인하면 실제 화면 크기로 기기를 자동 등록하고 기기 자격을 발급받습니다. 웹의 **기기 관리** 또는 작업실에서 이미지와 화면을 선택하면 연결 앱이 내려받아 적용하고, OS에서 적용을 확인한 뒤 완료를 보고합니다.
 
 ## 사용 방법
 
 1. 연결할 기기에 앱을 내려받아 실행합니다. Windows는 x64 Windows 10/11, Android는 7.0(API 24) 이상을 대상으로 합니다.
-2. 서버 주소를 확인하고 웹과 같은 아이디/이메일 및 비밀번호로 로그인합니다. 비밀번호는 저장하지 않습니다.
+2. 서버 주소 입력 없이 웹과 같은 아이디/이메일 및 비밀번호로 로그인합니다. 서버는 빌드 시 앱에 포함됩니다. 비밀번호는 저장하지 않습니다.
 3. 웹 기기 관리에 기기가 나타나면 화면별 배경화면을 선택합니다. 웹과 연결 앱은 인증된 변경 알림을 대기하다가 요청·처리 결과를 즉시 조회합니다. 20초 대기 응답은 변경이 없을 때의 연결 유지 시간입니다. Windows/Android 화면 연결·해상도 변경도 OS 이벤트로 즉시 보고하고, 30초 주기 보고는 보조로 유지합니다. 이미지 다운로드·OS 처리와 Android 최초 승인에 필요한 시간은 별도로 걸립니다. 이 동작은 **1.0.2 연결 앱으로 업데이트**해야 사용할 수 있습니다.
 4. Android Live 2D의 첫 적용은 앱의 **Live 2D 적용 확인**을 눌러 시스템 승인 화면에서 적용합니다. 승인 전에는 웹에 **기기 확인 필요**로 표시됩니다. 시스템이 홈/잠금 화면을 함께 바꾸는 기종에서는 실제 변경 상태를 보고합니다.
 5. 동기화를 끄거나 로그아웃하면 새 요청을 적용하지 않습니다. 적용된 정적 배경화면은 남고 Live 2D 움직임은 중지합니다. 로그아웃은 이 앱의 계정 세션을 폐기합니다.
@@ -28,11 +28,11 @@ Windows 창을 닫으면 트레이에서 계속 실행합니다. 트레이의 �
 - `mobile/lib/companion.dart`: Flutter 연결 전용 화면. Kotlin foreground service가 네트워크·기기 자격·WallpaperManager를 처리하므로 Flutter 화면을 닫아도 동기화합니다. 기존 Kotlin Live 2D 엔진과 자이로 센서를 재사용하며 계정 인증의 유효 시간이 지나면 움직임을 중지합니다.
 - 기본 앱 진입점은 연결 화면입니다. 실행되지 않던 옛 모바일 편집/보관함 화면과 전용 네이티브 채널은 정리했으며 현재 배경화면 엔진·센서·companion 캐시는 유지합니다. 이미지 처리는 웹/API의 클라우드 규격을 사용합니다.
 - Windows EXE는 현재 Authenticode 코드 서명 인증서가 없어 서명되지 않았습니다. Android APK는 팀 공유 릴리스 키로 서명합니다. 다른 인증서로 배포한 예전 APK와의 덮어쓰기 설치는 별도 인증서 확인이 필요합니다.
-- Windows 실제 화면 정보 수집은 확인했습니다. 실제 기기의 계정 로그인 → 웹 적용 → OS 배경화면 변경과 Android 제조사별 홈/잠금 동작은 설치 후 통합 검증이 필요합니다. 현재 개발 환경에는 연결된 Android 기기/에뮬레이터가 없습니다.
+- Windows 실제 화면 정보 수집은 확인했습니다. 실제 기기의 계정 로그인 → 웹 적용 → OS 배경화면 변경과 Android 제조사별 홈/잠금 동작은 설치 후 통합 검증이 필요합니다. 실제 OS 적용과 Android 에뮬레이터 통합 검증은 설치 후 별도로 확인합니다.
 
 ## 빌드와 다운로드 배포
 
-APK 버전/빌드 번호는 `AGENTS.md`, `mobile/pubspec.yaml`, `mobile/README.md`를 함께 갱신합니다. 공유 서명 설정은 Git 밖 파일을 지정하고 `apksigner verify --print-certs`로 반드시 검증합니다. 최신 APK는 **1.2.2+36**, Windows 앱은 **1.2.2**입니다. 1.2.2는 제조사·모델·CPU 구조 수집을 제거하며 기기 이름·OS·화면 해상도·주사율은 유지합니다. 신규 Android 기기는 OS에 설정된 이름으로 등록하며 이름을 읽을 수 없을 때만 일반 이름을 사용합니다.
+APK 버전/빌드 번호는 `AGENTS.md`, `mobile/pubspec.yaml`, `mobile/README.md`를 함께 갱신합니다. 공유 서명 설정은 Git 밖 파일을 지정하고 `apksigner verify --print-certs`로 반드시 검증합니다. 최신 로컬 테스트 APK는 **1.3.0+39**, Windows 앱은 **1.3.0**입니다. 앱 아이콘·모바일/PC UI·서버 입력 제거·태블릿 미리보기·바탕화면 바로 가기 설치를 추가했으며 기기 이름·OS·화면 해상도·주사율은 유지합니다. 신규 Android 기기는 OS에 설정된 이름으로 등록하며 이름을 읽을 수 없을 때만 일반 이름을 사용합니다.
 
 Windows Live 2D는 아이콘 아래·시스템 배경 위의 layered child 창을 사용하며 테마 변경 후 순서를 재확인한다. Android는 gyroEnabled와 센서 지원에 따라 회전 벡터 또는 원시 자이로를 사용한다. 배경화면 삭제는 선택 화면의 OS 초기화를 확인한 뒤 보고하며 다른 화면과 개인 보관함은 보존한다. 실기기별 동작은 별도 확인한다.
 
@@ -41,7 +41,7 @@ $env:UPSCALE_SIGNING_PROPERTIES_FILE = 'C:\UpscaleLab-Secrets\key.properties'
 .\companion\Build-Release.ps1 -ApiBaseUrl 'https://YOUR_SERVER' -Flutter 'C:\dev\flutter\bin\flutter.bat'
 ```
 
-현재 HTTP 테스트 서버로 빌드할 때만 `companionAllowHttp=true`를 Gradle에 전달합니다. 기본 릴리스 설정은 HTTP를 허용하지 않습니다. 서버 주소는 빌드 인수로 공급하며 코드에 환경별 값을 추가하지 않습니다.
+빌드 스크립트는 HTTP 테스트 서버를 명시한 경우에만 `COMPANION_ALLOW_HTTP=true`를 빌드 인수로 전달합니다. 기본 릴리스 설정은 HTTP를 허용하지 않습니다. 서버 주소는 빌드 인수로 공급하며 코드에 운영 환경별 값을 추가하지 않습니다. `-LocalTest`는 별도 테스트 패키지·설치 경로를 사용하고 운영 다운로드 파일을 교체하지 않습니다.
 
 스크립트는 서명을 검증한 APK와 Windows EXE를 무시되는 `web/public/downloads/`에 복사하고 버전·SHA-256·바이트 크기·동일 출처 다운로드 URL을 `manifest.json`에 기록합니다. 그 후 `web`에서 `pnpm run build:cloud`를 실행하고 정적 파일 전체를 수동 배포합니다. 바이너리/서명키는 Git에 커밋하지 않습니다. `/downloads/`는 SPA fallback 없이 파일 부재 시 404를 반환해야 하며 manifest는 캐시하지 않습니다.
 
@@ -58,3 +58,11 @@ $env:UPSCALE_SIGNING_PROPERTIES_FILE = 'C:\UpscaleLab-Secrets\key.properties'
 관련 규격: [agent API](agent-api.md). 플랫폼 문서: [Windows IDesktopWallpaper](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-idesktopwallpaper), [Android Display.Mode](https://developer.android.com/reference/android/view/Display.Mode), [Android specialUse foreground service](https://developer.android.com/develop/background-work/services/fgs/service-types#special-use).
 
 최신 로컬 정리 검증은 [정리 보고서](repository-cleanup.md)를 참고합니다. 실제 기기의 OS 배경화면 적용·삭제와 제조사별 동작은 설치 후 통합 확인이 필요합니다. 이번 소스 정리에서 기존 배포 APK/EXE를 교체하지 않았습니다.
+
+## 로컬 테스트와 연결 키
+
+[EXE/APK 로컬 테스트 가이드](../companion/LOCAL-TESTING.md)에 API·웹·에뮬레이터 실행 절차를 정리했다. 테스트 빌드는 별도 설치 경로/패키지를 사용한다. Windows는 바탕화면·시작 메뉴 바로 가기를 선택해 사용자별로 설치하며 EXE의 `--run`으로 설치 없이 직접 실행할 수 있다. 기존 로고는 `web/public/favicon.svg`에서 변환한 아이콘을 사용하며 `companion/Update-BrandAssets.ps1`로 동기화한다.
+
+웹은 내장 Android 화면의 짧은 변을 배율로 나눈 값이 600dp 이상이면 태블릿으로 표시한다. 기존 모니터·모바일과 같은 카드·메타데이터·홈/잠금 화면·버튼 구성을 유지하며 태블릿 테두리만 구분한다. 배율이 없는 구형 상태는 휴대폰으로 표시하고 외부 모니터로 태블릿 여부를 판별하지 않는다. 새 DB 필드나 마이그레이션은 필요하지 않다.
+
+계정 JWT는 사용자 세션, 기기 키는 해당 계정의 특정 기기를 인증한다. 앱 로그인 시 자동 발급하므로 웹의 수동 키 재발급 메뉴는 제거했다. 기존 키가 폐기되거나 기기 등록이 삭제된 경우 앱의 **기기 다시 연결**을 사용한다. 내부 발급·검증 API는 유지하며 키만으로 계정 인증을 대체하지 않는다.

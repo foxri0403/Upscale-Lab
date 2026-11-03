@@ -300,6 +300,7 @@ export type CloudState = {
     name: string;
     width: number;
     height: number;
+    scale?: number;
     isConnected: boolean;
     refreshRateHz?: number | null;
     canApplyWallpaper?: boolean;

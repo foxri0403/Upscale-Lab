@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import {
   Monitor,
   Smartphone,
+  Tablet,
+  Download,
   ChevronDown,
-  Check,
   RefreshCw,
   Unplug,
   Link2,
@@ -19,16 +20,12 @@ import { deviceDisplays, registeredDevices } from "./device-layout";
 export function Devices() {
   const { library, session, update, toast, apply, refresh, refreshDevices } = useDemo();
   const [connecting, setConnecting] = useState(false);
-  const [platform, setPlatform] = useState<"Windows" | "Android">("Windows");
-  const [deviceName, setDeviceName] = useState("");
   const [target, setTarget] = useState<{
     device: Device;
     displayId: string;
   } | null>(null);
   const [selected, setSelected] = useState("");
   const [removing, setRemoving] = useState<Device | null>(null);
-  const [agentToken, setAgentToken] = useState("");
-  const [issuedId, setIssuedId] = useState("");
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState<string | null>(null);
   const [clearing, setClearing] = useState<{ device: Device; displayId: string; requestId: string } | null>(null);
@@ -65,72 +62,6 @@ export function Devices() {
       }))
     )
       toast("샘플 동기화를 완료했습니다. 실제 기기에는 적용하지 않습니다.");
-  }
-  async function connect(e: FormEvent) {
-    e.preventDefault();
-    if (!deviceName.trim()) return;
-    if (cloud) return;
-    const device: Device = {
-      id: crypto.randomUUID(),
-      created: new Date().toISOString(),
-      name: deviceName.trim(),
-      platform,
-      online: true,
-      displays:
-        platform === "Windows"
-          ? [
-              {
-                id: "monitor1",
-                name: "모니터 1",
-                resolution: "1920 × 1080",
-                connected: true,
-                current: "lake",
-              },
-            ]
-          : [
-              {
-                id: "home",
-                name: "홈 화면",
-                resolution: "1080 × 2400",
-                connected: true,
-                current: "ocean",
-              },
-              {
-                id: "lock",
-                name: "잠금 화면",
-                resolution: "1080 × 2400",
-                connected: true,
-                current: "lake",
-              },
-            ],
-    };
-    if (update((v) => ({ ...v, devices: [...v.devices, device] }))) {
-      setConnecting(false);
-      setDeviceName("");
-      toast("현재 계정에 샘플 기기를 연결했습니다.");
-    }
-  }
-  function closeConnection() {
-    setConnecting(false);
-    setAgentToken("");
-    setIssuedId("");
-    setDeviceName("");
-  }
-  async function rotate(device: Device) {
-    setBusy(true);
-    try {
-      const r = await post<{ token: string }>(
-        `/api/devices/${device.id}/agent-token`,
-        {},
-      );
-      setIssuedId(device.id);
-      setAgentToken(r.token);
-      setConnecting(true);
-    } catch (e) {
-      toast((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
   }
   async function remove(device: Device) {
     if (cloud) {
@@ -187,6 +118,7 @@ export function Devices() {
           </h1>
           <p>내 기기의 배경화면을 한곳에서 관리하세요.</p>
         </div>
+        <button className="button secondary" onClick={() => setConnecting(true)}><Download size={17} />연결 앱 다운로드</button>
       </div>
       <div className="account-device-note">
         <Link2 size={15} />
@@ -200,6 +132,8 @@ export function Devices() {
         <div className="device-grid">
           {registeredDevices(library.devices).map((device) => {
             const mobile = device.platform === "Android";
+            const tablet = mobile && device.formFactor === "tablet";
+            const DeviceIcon = tablet ? Tablet : mobile ? Smartphone : Monitor;
             const connection = device.connection ?? (device.online ? "connected" : "disconnected");
             const displayConnection = device.displays.some(display => display.connected) ? connection : "disconnected";
             const screens = device.physicalDisplayCount ?? (mobile ? Math.min(1, device.displays.filter(d => d.connected).length)
@@ -207,11 +141,11 @@ export function Devices() {
             return (
               <article
                 key={device.id}
-                className={`device-card ${mobile ? "mobile-device" : "pc-device"} ${screens >= 3 ? "device-many-screens" : screens === 2 ? "device-two-screens" : "device-one-screen"}`}
+                className={`device-card ${mobile ? "mobile-device" : "pc-device"} ${tablet ? "tablet-device" : ""} ${screens >= 3 ? "device-many-screens" : screens === 2 ? "device-two-screens" : "device-one-screen"}`}
               >
                 <div className="device-card-header">
                   <span className="device-icon">
-                    {mobile ? <Smartphone size={28} /> : <Monitor size={28} />}
+                    <DeviceIcon size={28} />
                   </span>
                   <div>
                     <h2>{device.name}</h2>
@@ -231,14 +165,6 @@ export function Devices() {
                       <ChevronDown size={17} />
                     </summary>
                     <div>
-                      {cloud && (
-                        <button
-                          disabled={busy}
-                          onClick={() => void rotate(device)}
-                        >
-                          <Link2 size={15} /> 연결 키 재발급
-                        </button>
-                      )}
                       <button
                         className="danger-text"
                         onClick={() => setRemoving(device)}
@@ -251,8 +177,7 @@ export function Devices() {
                 {!device.displays.length && (
                   <Notice>
                     <span className={`device-connection device-connection-${connection}`}>{connection === "connected" ? "연결됨" : connection === "connecting" ? "연결중" : "연결안됨"}</span>{" "}
-                    연결 앱의 첫 보고를 기다리고 있습니다. 연결 키와 동일한 계정
-                    로그인이 필요합니다.
+                    연결 앱의 첫 보고를 기다리고 있습니다. 연결 앱에서 웹과 같은 계정으로 로그인해 주세요.
                   </Notice>
                 )}
                 <div className={`device-displays ${mobile ? "mobile-display-group" : ""}`}>
@@ -286,14 +211,14 @@ export function Devices() {
                           <div className="display-preview">
                             <div
                               className={
-                                mobile && display.canApplyWallpaper !== false ? "phone-wallpaper" : "monitor-wallpaper"
+                                mobile && display.canApplyWallpaper !== false ? (tablet ? "tablet-wallpaper" : "phone-wallpaper") : "monitor-wallpaper"
                               }
                             >
                               {current ? (
                                 <PictureView picture={current} />
                               ) : (
                                 <div className="unknown-wallpaper">
-                                  {mobile && display.canApplyWallpaper !== false ? <Smartphone size={30} /> : <Monitor size={30} />}
+                                  {mobile && display.canApplyWallpaper !== false ? <DeviceIcon size={30} /> : <Monitor size={30} />}
                                   <span>{display.observation === "Cleared" ? "기본 바탕화면" : "이미지 정보 없음"}</span>
                                 </div>
                               )}
@@ -339,83 +264,7 @@ export function Devices() {
           })}
         </div>
       )}
-      {connecting && (
-        <Modal
-          title={agentToken ? "기기 연결 키" : "기기 연결"}
-          close={closeConnection}
-        >
-          {agentToken ? (
-            <>
-              <Notice>
-                이 키는 수동 연동용으로 한 번만 표시됩니다. 배포된 연결 앱은 같은 계정으로 로그인하면 기기를 자동 등록합니다.
-              </Notice>
-              <label>
-                기기 ID
-                <input
-                  readOnly
-                  value={issuedId}
-                  onFocus={(e) => e.target.select()}
-                />
-              </label>
-              <label>
-                연결 키
-                <input
-                  readOnly
-                  value={agentToken}
-                  onFocus={(e) => e.target.select()}
-                />
-              </label>
-              <button className="button primary full" onClick={closeConnection}>
-                확인
-              </button>
-            </>
-          ) : cloud ? <Downloads /> : (
-            <>
-              <p>
-                현재 로그인한 <strong>{session.name}</strong> 계정에{" "}
-                {cloud ? "기기를 등록합니다." : "테스트 기기를 추가합니다."}
-              </p>
-              <form onSubmit={connect}>
-                <label>
-                  기기 이름
-                  <input
-                    required
-                    value={deviceName}
-                    maxLength={40}
-                    placeholder="예: 작업용 PC"
-                    onChange={(e) => setDeviceName(e.target.value)}
-                  />
-                </label>
-                <label>
-                  운영체제
-                  <select
-                    value={platform}
-                    onChange={(e) =>
-                      setPlatform(e.target.value as "Windows" | "Android")
-                    }
-                  >
-                    <option>Windows</option>
-                    <option>Android</option>
-                  </select>
-                </label>
-                <Notice>
-                  {cloud
-                    ? "연결 앱의 계정 로그인과 기기 자격 검증이 필요합니다. 화면 정보는 연결 앱이 보고하면 갱신됩니다."
-                    : "여기서는 샘플 기기만 추가합니다."}
-                </Notice>
-                <button
-                  className="button primary full"
-                  type="submit"
-                  disabled={busy}
-                >
-                  <Link2 size={17} />{" "}
-                  {cloud ? "기기 등록 및 연결 키 발급" : "샘플 기기 연결"}
-                </button>
-              </form>
-            </>
-          )}
-        </Modal>
-      )}
+      {connecting && <Modal title="연결 앱 다운로드" close={() => setConnecting(false)}><Downloads /></Modal>}
       {target && (
         <Modal
           title={`${target.device.name} 배경화면 변경`}

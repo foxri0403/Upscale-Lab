@@ -87,6 +87,7 @@ export type Device = {
   created?: string;
   name: string;
   platform: "Windows" | "Android";
+  formFactor?: "phone" | "tablet";
   osVersion?: string;
   physicalDisplayCount?: number;
   online: boolean;
@@ -188,6 +189,14 @@ export function sampleLibrary(): Library {
             current: "lake",
             connected: true,
           },
+        ],
+      },
+      {
+        id: "tablet", name: "내 태블릿", platform: "Android", formFactor: "tablet",
+        physicalDisplayCount: 1, online: true,
+        displays: [
+          { id: "lock", target: "Lock", name: "잠금 화면", resolution: "2560 × 1600", refreshRateHz: 120, current: "lake", connected: true },
+          { id: "home", target: "Home", name: "홈 화면", resolution: "2560 × 1600", refreshRateHz: 120, current: "fox", connected: true },
         ],
       },
     ],

@@ -1,6 +1,6 @@
 import type { CloudDevice, CloudState } from "./api";
 import type { Device } from "./model";
-import { registeredDevices } from "./device-layout.ts";
+import { androidFormFactor, registeredDevices } from "./device-layout.ts";
 export function mapDeviceLibrary(states: CloudState[], registrations: CloudDevice[] = []) {
   const created = new Map(registrations.map(device => [device.id, device.createdAt]));
   const mappedDevices: Device[] = states.map((s) => ({
@@ -8,6 +8,7 @@ export function mapDeviceLibrary(states: CloudState[], registrations: CloudDevic
     created: created.get(s.id),
     name: s.name,
     platform: s.platform,
+    formFactor: s.platform === "Android" ? androidFormFactor(s.displays) : undefined,
     osVersion: s.osVersion,
     physicalDisplayCount: s.displays.filter(d => d.isConnected).length,
     online: s.recentlySeen,

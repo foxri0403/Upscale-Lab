@@ -36,6 +36,10 @@ internal object CompanionRuntime {
     @Synchronized fun initialize(value: Context) {
         if (initialized) return
         context = value.applicationContext; store = CompanionStore(context); api = CompanionApi(store); initialized = true
+        val configuredServer = CompanionApi.normalize(BuildConfig.COMPANION_API_BASE_URL)
+        val saved = store.read()
+        if (saved.has("server") && saved.optString("server") != configuredServer)
+            store.save(JSONObject().put("server", configuredServer))
         worker.scheduleWithFixedDelay({ if (running) poll() }, 0, 15, TimeUnit.SECONDS)
         androidx.core.content.ContextCompat.registerReceiver(context, object : android.content.BroadcastReceiver() {
             override fun onReceive(context: Context, intent: android.content.Intent) { inventoryDirty.set(true); pollSoon() }
@@ -89,7 +93,7 @@ internal object CompanionRuntime {
             try {
                 when (name) {
                     "login" -> {
-                        val server = CompanionApi.normalize(arguments["server"] as String)
+                        val server = CompanionApi.normalize(BuildConfig.COMPANION_API_BASE_URL)
                         val previous = store.read(); verified = false
                         store.save(JSONObject().put("server", server).put("remember", arguments["remember"] == true))
                         val session = api.request("/api/auth/login", "POST", JSONObject().put("email", (arguments["identifier"] as String).trim())

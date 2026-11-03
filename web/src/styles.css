@@ -3131,6 +3131,12 @@ small {
 .devices-page .monitor-wallpaper > .picture-view, .devices-page .monitor-wallpaper > .unknown-wallpaper { width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; }
 .devices-page .monitor-wallpaper img { height: 100%; aspect-ratio: auto; }
 .devices-page .mobile-device .phone-wallpaper { width: calc(var(--device-preview-height) * 0.5); height: var(--device-preview-height); aspect-ratio: auto; margin: 0; }
+.devices-page .tablet-wallpaper { position: relative; width: min(100%, calc(var(--device-preview-height) * 1.35)); height: var(--device-preview-height); border: 5px solid #2d3747; border-radius: 12px; overflow: hidden; background: #303a4b; flex-shrink: 0; }
+.devices-page .tablet-wallpaper > .picture-view, .devices-page .tablet-wallpaper > .unknown-wallpaper { width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; }
+.devices-page .tablet-wallpaper img { width: 100%; height: 100%; object-fit: cover; }
+.devices-page .tablet-wallpaper .unknown-wallpaper { padding: 10px; text-align: center; }
+.devices-page .tablet-device .display-preview { width: 100%; }
+.devices-page .tablet-device.mobile-device .display-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--device-preview-height) * 1.35)), 1fr)); }
 .devices-page .display-resolution, .devices-page .mobile-device .display-resolution { margin: 12px 0 6px; }
 .devices-page .display-wallpaper-title, .devices-page .mobile-device .display-wallpaper-title { display: block; margin: 0 0 14px; min-height: 20px; min-width: 0; line-height: 20px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.7857143rem; font-weight: 500; color: #647591; }
 .devices-page .mobile-device .display-card { padding-top: 14px; }

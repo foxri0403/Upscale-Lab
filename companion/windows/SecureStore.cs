@@ -6,7 +6,7 @@ namespace UpscaleLab.Companion;
 internal static class SecureStore
 {
     public static string Root { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "UpscaleLab", "Connect");
-    private static string PathName => Path.Combine(Root, "credentials.bin");
+    private static string PathName => Path.Combine(Root, "profiles", CompanionConfiguration.ServerId, "credentials.bin");
     [StructLayout(LayoutKind.Sequential)] private struct Blob { public int Length; public IntPtr Data; }
     [DllImport("crypt32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool CryptProtectData(ref Blob input, string description, IntPtr entropy, IntPtr reserved, IntPtr prompt, int flags, out Blob output);
@@ -29,12 +29,16 @@ internal static class SecureStore
     }
     public static Credentials? Read()
     {
-        try { return JsonSerializer.Deserialize<Credentials>(Transform(File.ReadAllBytes(PathName), false), AgentApi.Json); }
+        try {
+            var path = File.Exists(PathName) ? PathName : Path.Combine(Root, "credentials.bin");
+            var saved = JsonSerializer.Deserialize<Credentials>(Transform(File.ReadAllBytes(path), false), AgentApi.Json);
+            return saved?.Server == CompanionConfiguration.ApiBaseUrl ? saved : null;
+        }
         catch (Exception error) when (error is IOException or JsonException or System.ComponentModel.Win32Exception) { return null; }
     }
     public static void Write(Credentials value)
     {
-        Directory.CreateDirectory(Root);
+        Directory.CreateDirectory(Path.GetDirectoryName(PathName)!);
         var bytes = Transform(JsonSerializer.SerializeToUtf8Bytes(value with { Session = value.Remember ? value.Session : null }, AgentApi.Json), true);
         File.WriteAllBytes(PathName + ".tmp", bytes);
         File.Move(PathName + ".tmp", PathName, true);

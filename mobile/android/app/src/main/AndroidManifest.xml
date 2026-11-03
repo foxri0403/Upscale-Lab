@@ -26,8 +26,8 @@
     <application
         android:allowBackup="false"
         android:usesCleartextTraffic="${companionCleartext}"
-        android:label="@string/app_name"
-        android:icon="@android:drawable/sym_def_app_icon"
+        android:label="${companionAppLabel}"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@style/LaunchTheme">
         <activity
             android:name=".MainActivity"

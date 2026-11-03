@@ -22,7 +22,7 @@ internal sealed class CompanionController : IDisposable
     public event Action? Changed;
     public string Status { get; private set; } = "웹과 같은 계정으로 로그인해 주세요.";
     public string Account => api?.Session?.User.Email ?? "";
-    public string Server => api?.Server ?? SecureStore.Read()?.Server ?? "";
+    public string Server => CompanionConfiguration.ApiBaseUrl;
     public bool LoggedIn => verified;
     public bool Enabled { get; private set; }
     public string DeviceName => Environment.MachineName;
@@ -37,8 +37,8 @@ internal sealed class CompanionController : IDisposable
     }
     public async Task Restore()
     {
-        var saved = SecureStore.Read(); if (saved?.Session is null || !saved.Remember) return;
-        remember = true; SetApi(saved.Server, saved.Session, saved.Device);
+        var saved = SecureStore.Read(); if (saved is null || !CompanionConfiguration.CanRestore(saved, Server)) return;
+        remember = true; SetApi(Server, saved.Session, saved.Device);
         try
         {
             await api!.Call<Account>("/api/auth/me"); verified = true;
@@ -46,10 +46,10 @@ internal sealed class CompanionController : IDisposable
         }
         catch (Exception error) { Notify("자동 연결 대기: " + error.Message); }
     }
-    public async Task SignIn(string server, string identifier, string password, bool automatic)
+    public async Task SignIn(string identifier, string password, bool automatic)
     {
         await Stop(); verified = false;
-        var saved = SecureStore.Read(); SetApi(server, null, null);
+        var saved = SecureStore.Read(); SetApi(Server, null, null);
         var login = await api!.Call<Login>("/api/auth/login", HttpMethod.Post, new { email = identifier.Trim(), password }, anonymous: true);
         if (string.IsNullOrWhiteSpace(login.RefreshToken)) throw new InvalidOperationException("계정 세션을 지원하는 서버가 필요합니다.");
         api.Session = login; remember = automatic; verified = true;

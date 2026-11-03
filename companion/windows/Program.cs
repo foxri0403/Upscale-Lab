@@ -16,10 +16,18 @@ internal static class Program
             if (index + 1 < args.Length) File.WriteAllText(args[index + 1], json); else Console.WriteLine(json);
             return;
         }
-        using var mutex = new Mutex(true, @"Local\UpscaleLabConnect", out var first);
+        Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
+        // Published single-file EXEs install per user. --run also lets a local
+        // tester launch the executable directly without installing anything.
+        var install = args.Contains("--install");
+#if !DEBUG
+        install |= !args.Contains("--run") && !CompanionInstaller.ForCurrentUser().IsInstalled(Environment.ProcessPath!);
+#endif
+        if (install) { Application.Run(new InstallForm()); return; }
+        using var mutex = new Mutex(true, @"Local\UpscaleLabConnect-" + CompanionConfiguration.ServerId, out var first);
         if (!first) { MessageBox.Show("Upscale Lab Connect가 이미 실행 중입니다. 트레이에서 열어 주세요."); return; }
         ResourceLimits.Memory = 256UL * 1024 * 1024;
         ResourceLimits.Disk = 256UL * 1024 * 1024; ResourceLimits.Thread = 2;
-        Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false); Application.Run(new MainForm());
+        Application.Run(new MainForm());
     }
 }

@@ -23,8 +23,8 @@ cd android
 
 ## 현재 배포 파일과 서명
 
-Current release: **1.2.2**, Android build **36**, `artifacts/Upscale_Lab-1.2.2-.apk`.
+Current release: **1.3.0**, Android build **39**, local-test APK: `artifacts/companion-local/Upscale_Lab-1.3.0-local.apk`.
 
-제조사·모델·CPU 구조 수집과 표시를 제거한 버전이다. 기기 이름·OS·물리 화면 해상도·주사율은 유지한다. 현재 웹 다운로드 파일은 web/public/downloads/manifest.json의 해시와 크기로 확인한다.
+기존 로고를 앱·런처에 적용하고 모바일 연결 UI를 개선했다. 서버 입력란을 제거했으며 Kotlin foreground service도 빌드에 포함된 서버 주소를 사용한다. 로컬 테스트 APK는 Android Studio 에뮬레이터의 `10.0.2.2:5080`에 연결하고 `com.livelayer.app.localtest`로 별도 설치된다. 자세한 실행 절차는 [로컬 테스트 가이드](../companion/LOCAL-TESTING.md)를 따른다. 기기 이름·OS·화면 해상도·주사율은 유지하며 제조사·모델·CPU 구조는 수집하지 않는다.
 
-이번 소스 정리에서 새 APK를 생성하지 않았으므로 버전·빌드 번호·기존 서명 APK는 유지한다. 다음 APK 생성 때는 [AGENTS.md](../AGENTS.md)의 버전 증가·문서 동기화·공유 keystore·apksigner 검증 규칙을 따른다. 릴리스 서명은 Git 밖 C:\UpscaleLab-Secrets\key.properties를 UPSCALE_SIGNING_PROPERTIES_FILE로 지정하고 debug key로 대체하지 않는다.
+이 APK는 팀 공유 릴리스 키로 서명하고 apksigner로 검증한다. 운영 다운로드 파일은 교체하지 않는다. 다음 APK 생성 때도 [AGENTS.md](../AGENTS.md)의 버전 증가·문서 동기화·공유 keystore·apksigner 검증 규칙을 따른다. 릴리스 서명은 Git 밖 C:\UpscaleLab-Secrets\key.properties를 UPSCALE_SIGNING_PROPERTIES_FILE로 지정하고 debug key로 대체하지 않는다. 테스트 패키지는 운영 앱 업그레이드용이 아니다.
