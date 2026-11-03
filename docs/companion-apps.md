@@ -32,7 +32,7 @@ Windows 창을 닫으면 트레이에서 계속 실행합니다. 트레이의 �
 
 ## 빌드와 다운로드 배포
 
-APK 버전/빌드 번호는 `AGENTS.md`, `mobile/pubspec.yaml`, `mobile/README.md`를 함께 갱신합니다. 공유 서명 설정은 Git 밖 파일을 지정하고 `apksigner verify --print-certs`로 반드시 검증합니다. 최신 로컬 테스트 APK는 **1.3.0+39**, Windows 앱은 **1.3.0**입니다. 앱 아이콘·모바일/PC UI·서버 입력 제거·태블릿 미리보기·바탕화면 바로 가기 설치를 추가했으며 기기 이름·OS·화면 해상도·주사율은 유지합니다. 신규 Android 기기는 OS에 설정된 이름으로 등록하며 이름을 읽을 수 없을 때만 일반 이름을 사용합니다.
+APK 버전/빌드 번호는 `AGENTS.md`, `mobile/pubspec.yaml`, `mobile/README.md`를 함께 갱신합니다. 공유 서명 설정은 Git 밖 파일을 지정하고 `apksigner verify --print-certs`로 반드시 검증합니다. 최신 운영 APK는 **1.3.1+40**, Windows 앱은 **1.3.1**입니다. 앱 아이콘·모바일/PC UI·서버 입력 제거·태블릿 미리보기·바탕화면 바로 가기 설치를 추가했으며 기기 이름·OS·화면 해상도·주사율은 유지합니다. 신규 Android 기기는 OS에 설정된 이름으로 등록하며 이름을 읽을 수 없을 때만 일반 이름을 사용합니다.
 
 Windows Live 2D는 아이콘 아래·시스템 배경 위의 layered child 창을 사용하며 테마 변경 후 순서를 재확인한다. Android는 gyroEnabled와 센서 지원에 따라 회전 벡터 또는 원시 자이로를 사용한다. 배경화면 삭제는 선택 화면의 OS 초기화를 확인한 뒤 보고하며 다른 화면과 개인 보관함은 보존한다. 실기기별 동작은 별도 확인한다.
 
@@ -57,7 +57,7 @@ $env:UPSCALE_SIGNING_PROPERTIES_FILE = 'C:\UpscaleLab-Secrets\key.properties'
 
 관련 규격: [agent API](agent-api.md). 플랫폼 문서: [Windows IDesktopWallpaper](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-idesktopwallpaper), [Android Display.Mode](https://developer.android.com/reference/android/view/Display.Mode), [Android specialUse foreground service](https://developer.android.com/develop/background-work/services/fgs/service-types#special-use).
 
-최신 로컬 정리 검증은 [정리 보고서](repository-cleanup.md)를 참고합니다. 실제 기기의 OS 배경화면 적용·삭제와 제조사별 동작은 설치 후 통합 확인이 필요합니다. 이번 소스 정리에서 기존 배포 APK/EXE를 교체하지 않았습니다.
+최신 로컬 정리 검증은 [정리 보고서](repository-cleanup.md)를 참고합니다. 실제 기기의 OS 배경화면 적용·삭제와 제조사별 동작은 설치 후 통합 확인이 필요합니다. 운영 배포에서는 HTTPS 서버 주소가 포함된 Windows EXE와 공유 키로 서명한 Android APK를 함께 갱신합니다. 로컬 테스트 패키지는 운영 다운로드에 포함하지 않습니다.
 
 ## 로컬 테스트와 연결 키
 
