@@ -1,19 +1,19 @@
 # 연결 앱 로컬 테스트
 
-테스트를 마친 임시 EXE·APK와 오프라인 미리보기 코드는 정리했다. 현재 운영 버전은 **1.5.1**, Android build **44**이며 앱 다운로드에서 제공한다. 아래 명령은 향후 실제 API 연동을 로컬에서 검증할 때 사용하는 개발 절차다. 임의 로그인은 지원하지 않는다.
+테스트를 마친 임시 EXE·APK와 오프라인 미리보기 코드는 정리했다. 현재 운영 버전은 **1.6.0**, Android build **45**이며 앱 다운로드에서 제공한다. 아래 명령은 향후 실제 API 연동을 로컬에서 검증할 때 사용하는 개발 절차다. 임의 로그인은 지원하지 않는다.
 
 ## 개발 빌드 후 생성되는 파일
 
 아래 파일은 현재 제공하지 않는다. 문서 마지막의 로컬 개발 빌드 명령을 명시적으로 실행한 경우에만 생성한다.
 
-- Windows: `artifacts/companion-local/UpscaleLab-Connect-1.5.1-local-win-x64.exe`
-- Android: `artifacts/companion-local/Upscale_Lab-1.5.1-local.apk`
+- Windows: `artifacts/companion-local/UpscaleLab-Connect-1.6.0-local-win-x64.exe`
+- Android: `artifacts/companion-local/Upscale_Lab-1.6.0-local.apk`
 - 해시·크기: 같은 폴더의 `manifest.json`
 
 Windows EXE에는 .NET 런타임이 포함된다. 더블클릭하면 현재 사용자 계정에 설치하는 창이 열린다. 바탕화면 바로 가기와 시작 메뉴 등록을 선택하고, 기본 미선택인 기기·화면 정보 수집·이용 동의를 확인한 뒤 설치한다. `--run`으로 직접 실행하거나 기존 설치를 업데이트하는 경우에도 새 동의가 없으면 첫 실행 동의 화면이 먼저 표시된다. 설치하지 않고 바로 실행하려면 저장소 루트 PowerShell에서 다음 명령을 사용한다.
 
 ```powershell
-& '.\artifacts\companion-local\UpscaleLab-Connect-1.5.1-local-win-x64.exe' --run
+& '.\artifacts\companion-local\UpscaleLab-Connect-1.6.0-local-win-x64.exe' --run
 ```
 
 Android Studio에서 휴대폰 또는 태블릿 AVD를 실행한 뒤 APK를 에뮬레이터 창에 끌어 놓는다. x86_64 및 ARM64 에뮬레이터에 사용할 수 있는 APK다. 테스트 패키지 ID는 `com.livelayer.app.localtest`이며 기존 운영 앱과 별도로 설치된다. Windows도 `Upscale Lab Connect (Local Test)` 경로와 바로 가기를 사용한다. Windows 계정 세션·기기 자격은 서버별 DPAPI 프로필로 분리된다.

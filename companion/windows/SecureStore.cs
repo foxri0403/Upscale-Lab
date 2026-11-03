@@ -13,7 +13,7 @@ internal static class SecureStore
     [DllImport("crypt32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool CryptUnprotectData(ref Blob input, IntPtr description, IntPtr entropy, IntPtr reserved, IntPtr prompt, int flags, out Blob output);
     [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr pointer);
-    private static byte[] Transform(byte[] data, bool protect)
+    internal static byte[] Transform(byte[] data, bool protect)
     {
         var input = new Blob { Length = data.Length, Data = Marshal.AllocHGlobal(data.Length) };
         Blob output = default;

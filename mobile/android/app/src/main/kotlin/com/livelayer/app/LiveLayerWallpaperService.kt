@@ -55,8 +55,8 @@ class LiveLayerWallpaperService : WallpaperService() {
         private var canvasWidth = 1f
         private var canvasHeight = 1f
         private var decodeSide = maxDecodedSide
-        private fun authorized() = !agent || (preferences.getString("companion_owner", "") == owner &&
-            preferences.getLong("companion_valid_until", 0) > System.currentTimeMillis())
+        private fun authorized() = !agent || LiveActivationPolicy.mayAnimate(preferences.getBoolean("companion_live_enabled", false),
+            preferences.getString("companion_owner", "") == owner, preferences.getLong("companion_valid_until", 0), System.currentTimeMillis())
         private val leaseCheck = object : Runnable {
             override fun run() {
                 if (agent && !authorized()) { sensor.stop(); tiltX = 0f; tiltY = 0f; scheduleDraw() }
@@ -106,7 +106,7 @@ class LiveLayerWallpaperService : WallpaperService() {
             if (key == "companion_manifest_revision" && agent) {
                 loadedManifest = null; lifecycle.selectionChanged()
             }
-            if (key == "companion_valid_until" && agent) {
+            if ((key == "companion_valid_until" || key == "companion_live_enabled") && agent) {
                 if (authorized() && lifecycle.visible && motionEnabled) sensor.start() else { sensor.stop(); tiltX = 0f; tiltY = 0f }
                 scheduleDraw()
             }
@@ -249,7 +249,7 @@ class LiveLayerWallpaperService : WallpaperService() {
                             continue
                         }
                         // Live 2D anchors the background. Only the second layer moves.
-                        val moving = motionEnabled && (!live2D || index > 0)
+                        val moving = motionEnabled && authorized() && (!live2D || index > 0)
                         val amplitudeX = if (live2D) canvas.width * .035f else layer.movementX * 4f
                         val amplitudeY = if (live2D) canvas.height * .035f else layer.movementY * 4f
                         drawBitmap(canvas, layer.bitmap,

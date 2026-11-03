@@ -65,7 +65,7 @@ These are expected to come from local user secrets, environment variables, or a 
 
 ## Mobile versioning
 
-- Current APK version: **1.5.1** (Android build **44**, production companion release with real account authentication, consent and post-login inventory; offline preview removed). Keep only this latest version entry; replace it after every generated APK and never append a version history here.
+- Current APK version: **1.6.0** (Android build **45**, companion account popups, saved identifiers, automatic sync, Windows instance activation and mobile Live 2D/notification settings). Keep only this latest version entry; replace it after every generated APK and never append a version history here.
 - Use semantic version numbers in `major.minor.patch` form for every new APK release.
 - Increase the first number (`major`) by exactly 1 for a large feature or major product update.
 - Increase the second number (`minor`) by exactly 1 for a smaller feature update.

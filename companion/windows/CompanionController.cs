@@ -43,6 +43,10 @@ internal sealed class CompanionController : IDisposable
     public event Action? Changed;
     public string Status { get; private set; } = "웹과 같은 계정으로 로그인해 주세요.";
     public string Account => api?.Session?.User.Email ?? "";
+    public string Username => Profile?.Username ?? api?.Session?.User.Username ?? "";
+    public AccountProfile? Profile { get; private set; }
+    public string Plan { get; private set; } = "확인 중";
+    public ConnectionState Connection { get; private set; }
     public string Server => CompanionConfiguration.ApiBaseUrl;
     public bool LoggedIn => verified;
     public bool Enabled { get; private set; }
@@ -64,21 +68,48 @@ internal sealed class CompanionController : IDisposable
         try
         {
             await api!.Call<Account>("/api/auth/me"); verified = true;
-            LoadApplied(); if (saved.Enabled) await Enable(); else { RefreshInventory(); Notify("동기화가 꺼져 있습니다."); }
+            LoadApplied(); await Enable(); await RefreshProfile();
         }
         catch (Exception error) { Notify("자동 연결 대기: " + error.Message); }
     }
     public async Task SignIn(string identifier, string password, bool automatic)
     {
         RequireConsent();
-        await Stop(); verified = false; Monitors = [];
+        await Stop(); verified = false; Monitors = []; Profile = null; Plan = "확인 중";
+        Connection = ConnectionState.Connecting; Notify("로그인 중입니다.");
         var saved = readCredentials(); SetApi(Server, null, null);
         var login = await api!.Call<Login>("/api/auth/login", HttpMethod.Post, new { email = identifier.Trim(), password }, anonymous: true);
         if (string.IsNullOrWhiteSpace(login.RefreshToken)) throw new InvalidOperationException("계정 세션을 지원하는 서버가 필요합니다.");
         api.Session = login; remember = automatic; verified = true;
         if (saved?.Device is { } binding && binding.Server == api.Server && binding.UserId == login.User.Id) api.Device = binding;
-        LoadApplied(); await Enable();
+        LoadApplied(); await Bind(force: true); await Enable(); await RefreshProfile();
     }
+    public async Task RefreshProfile() {
+        if (!verified || api?.Session is null) return;
+        var owner = api.Session.User.Id;
+        try {
+            var profile = await api.Call<AccountProfile>("/api/account");
+            if (api.Session?.User.Id != owner || !verified) return;
+            if (profile.Id != owner) throw new InvalidDataException("계정 정보가 일치하지 않습니다.");
+            Profile = profile;
+            var wallet = await api.Call<AccountWallet>("/api/tokens/me");
+            if (api.Session?.User.Id == owner && verified) Plan = wallet.Plan;
+        } catch (Exception e) when (e is HttpRequestException or ApiFailure or TaskCanceledException or InvalidDataException) { Plan = "확인 불가"; }
+        Changed?.Invoke();
+    }
+    public async Task<Image?> LoadAvatar(string url) {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != "https") return null;
+        using var response = await downloads.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength > 6 * 1024 * 1024) return null;
+        using var source = await response.Content.ReadAsStreamAsync(); using var bytes = new MemoryStream();
+        var buffer = new byte[8192]; int count;
+        while ((count = await source.ReadAsync(buffer)) > 0) { if (bytes.Length + count > 6 * 1024 * 1024) return null; bytes.Write(buffer, 0, count); }
+        bytes.Position = 0; using var image = new ImageMagick.MagickImage(bytes); image.Resize(128, 128);
+        using var png = new MemoryStream(image.ToByteArray(ImageMagick.MagickFormat.Png));
+        using var decoded = Image.FromStream(png); return new Bitmap(decoded);
+    }
+    public void ConnectionFailed() { Connection = ConnectionState.Disconnected; Changed?.Invoke(); }
     public async Task Reconnect()
     {
         await Stop(); if (!verified || api?.Session is null) return;
@@ -109,6 +140,7 @@ internal sealed class CompanionController : IDisposable
     {
         RequireConsent();
         if (Enabled || !verified || api?.Session is null) return;
+        Connection = ConnectionState.Connecting;
         await Bind(); Enabled = true; Persist(); cancellation = new(); inventoryDirty = true; ui = SynchronizationContext.Current;
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplayChanged;
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += PreferencesChanged;
@@ -138,7 +170,7 @@ internal sealed class CompanionController : IDisposable
     public void RefreshInventory() { Monitors = verified && privacyAccepted() ? ReadDisplays() : []; Changed?.Invoke(); }
     public async Task Stop()
     {
-        Enabled = false; cancellation?.Cancel();
+        Enabled = false; Connection = ConnectionState.Disconnected; cancellation?.Cancel();
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= DisplayChanged;
         Microsoft.Win32.SystemEvents.UserPreferenceChanged -= PreferencesChanged;
         if (loop != null) try { await loop; } catch (OperationCanceledException) { }
@@ -149,7 +181,7 @@ internal sealed class CompanionController : IDisposable
     }
     public async Task Logout()
     {
-        await Stop(); var previous = api?.Session; if (api != null) api.Session = null; verified = false; Monitors = []; Persist();
+        await Stop(); var previous = api?.Session; if (api != null) api.Session = null; verified = false; Monitors = []; Profile = null; Plan = "확인 중"; Persist();
         if (previous != null && api != null)
             try { await api.Call<object>("/api/auth/logout", HttpMethod.Post, new { refreshToken = previous.RefreshToken }, anonymous: true); }
             catch (Exception) { /* Local credentials and synchronization have already been removed. */ }
@@ -181,6 +213,7 @@ internal sealed class CompanionController : IDisposable
         var nextHeartbeat = DateTime.MinValue; var restore = true;
         while (!ct.IsCancellationRequested)
         {
+            if (Connection != ConnectionState.Connected) { Connection = ConnectionState.Connecting; Changed?.Invoke(); }
             try
             {
                 if (inventoryDirty || DateTime.UtcNow >= nextHeartbeat) { inventoryDirty = false; await Heartbeat(ct); nextHeartbeat = DateTime.UtcNow.AddSeconds(30); }
@@ -257,12 +290,14 @@ internal sealed class CompanionController : IDisposable
                         Notify(didApply ? "적용 결과 보고를 다시 시도합니다." : error.Message);
                     }
                 }
+                Connection = ConnectionState.Connected;
+                if (Status == "웹과 같은 계정으로 로그인해 주세요." || Status == "로그인 중입니다." || Status.StartsWith("연결 재시도 중:")) Status = "연결됨 · 배경화면을 자동으로 동기화합니다.";
                 Changed?.Invoke();
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (ApiFailure error) when (error.Status == 401)
-            { Enabled = false; cancellation?.Cancel(); engine.Dispose(); Persist(); Notify("계정 또는 기기 연결을 다시 확인해 주세요. [기기 다시 연결]을 눌러 주세요."); return; }
-            catch (Exception error) { engine.Dispose(); restore = true; Notify("연결 재시도 중: " + error.Message); }
+            { Enabled = false; Connection = ConnectionState.Disconnected; cancellation?.Cancel(); engine.Dispose(); Persist(); Notify("연결이 만료되었습니다. 웹의 기기 관리 또는 다시 로그인하여 확인해 주세요."); return; }
+            catch (Exception error) { Connection = ConnectionState.Disconnected; engine.Dispose(); restore = true; Notify("연결 재시도 중: " + error.Message); }
             await wake.WaitAsync(TimeSpan.FromSeconds(15), ct);
         }
     }
