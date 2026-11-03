@@ -70,9 +70,13 @@ async function getTossSdk(): Promise<TossGlobal> {
 }
 
 const clientKey = import.meta.env.VITE_TOSS_CLIENT_KEY ?? "";
+const isLocalTestHost =
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1";
+
 const canTestPay = cloud &&
   clientKey.startsWith("test_ck_") &&
-  window.location.protocol === "https:";
+  (window.location.protocol === "https:" || isLocalTestHost);
 
 
 type SubscriptionStart = {
