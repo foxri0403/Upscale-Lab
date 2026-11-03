@@ -21,12 +21,39 @@ public sealed class TokenCompatibilityTests
     }
 
     [Theory]
-    [InlineData(1920, 1)]
-    [InlineData(2560, 2)]
-    [InlineData(3840, 4)]
+    [InlineData(1920, 2)]
+    [InlineData(2560, 4)]
+    [InlineData(3840, 6)]
     public void UpscaleCost_MatchesSupportedResolutions(int longEdge, int expected)
     {
         Assert.Equal(expected, TokenPolicy.UpscaleCost(longEdge));
+    }
+
+    [Theory]
+    [InlineData(1920, 1)]
+    [InlineData(2560, 2)]
+    [InlineData(3840, 3)]
+    public void UpscaleRevisionCost_MatchesPolicy(int edge, int expected)
+    {
+        Assert.Equal(expected, TokenPolicy.UpscaleRevisionCost(edge));
+    }
+
+    [Theory]
+    [InlineData(0, 3)]
+    [InlineData(1, 1)]
+    [InlineData(2, 1)]
+    public void LayerCost_MatchesPolicy(int previousJobs, int expected)
+    {
+        Assert.Equal(expected, TokenPolicy.LayerCost(previousJobs));
+    }
+
+    [Theory]
+    [InlineData(0, 7)]
+    [InlineData(1, 3)]
+    [InlineData(2, 3)]
+    public void CharacterLayerCost_MatchesPolicy(int previousJobs, int expected)
+    {
+        Assert.Equal(expected, TokenPolicy.CharacterLayerCost(previousJobs));
     }
 
     [Theory]

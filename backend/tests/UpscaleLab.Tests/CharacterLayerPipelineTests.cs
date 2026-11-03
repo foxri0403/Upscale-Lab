@@ -22,7 +22,7 @@ public sealed class CharacterLayerPipelineTests
             storage.Files["source.png"] = input.ToByteArray(MagickFormat.Png);
 
         var service = new ProjectProcessingService(db, storage, new CharacterProcessor(),
-            new ProcessingJobQueue(), NullLogger<ProjectProcessingService>.Instance);
+            new ProcessingJobQueue(), NullLogger<ProjectProcessingService>.Instance, new FakeTokenService());
         var queued = await service.StartAsync(project.UserId, project.Id,
             new ProcessProjectRequest(ProcessingOperation.CharacterLayers), CancellationToken.None);
         await service.ExecuteAsync(queued.JobId, CancellationToken.None);

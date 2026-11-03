@@ -34,7 +34,7 @@ public sealed class SubjectMaskRefinementTests
     }
     private static ProjectProcessingService Service(UpscaleLab.Infrastructure.Database.ApplicationDbContext db,
         WorkflowStore store, CaptureProcessor processor, ProcessingJobQueue? queue = null) =>
-        new(db, store, processor, queue ?? new(), NullLogger<ProjectProcessingService>.Instance);
+        new(db, store, processor, queue ?? new(), NullLogger<ProjectProcessingService>.Instance, new FakeTokenService());
 
     [Fact]
     public async Task FirstManualSelectionCreatesLayersAndCannotOverwriteExistingLayersWithEmptyBase()

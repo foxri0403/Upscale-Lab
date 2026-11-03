@@ -22,15 +22,24 @@ public sealed class TokenService(ApplicationDbContext db) : ITokenService
                 "토큰 처리에는 DB 트랜잭션이 필요합니다.");
     }
 
-    public async Task ReserveAsync(
+    public Task ReserveAsync(
         Guid userId,
         Guid jobId,
         int targetLongEdge,
+        CancellationToken ct) =>
+        ReserveCostAsync(userId, jobId, TokenPolicy.UpscaleCost(targetLongEdge), ct);
+
+    public async Task ReserveCostAsync(
+        Guid userId,
+        Guid jobId,
+        int cost,
         CancellationToken ct)
     {
         RequireTransaction();
 
-        var cost = TokenPolicy.UpscaleCost(targetLongEdge);
+        if (cost <= 0)
+            throw new ArgumentOutOfRangeException(nameof(cost));
+
         var period = CurrentPeriodUtc();
         var now = DateTime.UtcNow;
 

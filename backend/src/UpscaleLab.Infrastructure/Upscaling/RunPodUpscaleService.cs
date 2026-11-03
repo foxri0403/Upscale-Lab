@@ -140,15 +140,15 @@ public sealed class RunPodUpscaleService(
                     throw new InvalidOperationException(
                         "RunPod output image is missing.");
 
-                // 현재 Worker의 PNG 응답 제한: 5MB
-                if (resultBase64.Length > 7 * 1024 * 1024)
+                // Base64 응답 상한: 44MiB (PNG 최대 32MiB)
+                if (resultBase64.Length > 44 * 1024 * 1024)
                     throw new InvalidOperationException(
-                        "RunPod output exceeds test size limit.");
+                        "RunPod output exceeds the configured Base64 size limit.");
 
                 byte[] resultBytes =
                     Convert.FromBase64String(resultBase64);
 
-                if (resultBytes.Length > 5 * 1024 * 1024 ||
+                if (resultBytes.Length > 32 * 1024 * 1024 ||
                     resultBytes.Length < 8 ||
                     !resultBytes.AsSpan(0, 8).SequenceEqual(
                         new byte[]
