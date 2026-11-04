@@ -16,7 +16,7 @@
 
 .token-usage-link {
   display: block;
-  margin: 8px auto 0;
+  margin: 8px 0 0;
   padding: 2px 0;
   border: 0;
   border-radius: 0;
@@ -25,13 +25,26 @@
   color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
+  text-align: left;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 .token-usage-link:hover { color: #536078; }
-.modal.token-usage-dialog { width: min(440px, calc(100vw - 24px)); padding: 20px; }
-.token-usage-dialog .modal-heading { margin-bottom: 16px; }
-.token-usage-dialog .modal-heading h2 { font-size: 17px; }
+.token-usage-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: min(380px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  padding: 16px;
+  background: white;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 35px #17203315;
+}
+.token-usage-popover h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
 .token-usage-compact table { font-size: 12px; }
 .token-usage-compact th, .token-usage-compact td { padding: 11px 10px; }
 .token-usage-compact .billing-usage-table { border-radius: 10px; }
