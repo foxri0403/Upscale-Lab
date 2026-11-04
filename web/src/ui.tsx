@@ -53,16 +53,18 @@ export function Modal({
   children,
   close,
   wide = false,
+  dismissible = true,
 }: {
   title: string;
   children: ReactNode;
   close: () => void;
   wide?: boolean;
+  dismissible?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const closeRef = useRef(close);
-  closeRef.current = close;
+  closeRef.current = dismissible ? close : () => {};
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const dialog = ref.current!;
@@ -92,15 +94,15 @@ export function Modal({
             e.clientY < r.top ||
             e.clientY > r.bottom
           )
-            close();
+            closeRef.current();
         }
       }}
     >
       <div className="modal-heading">
         <h2 id={titleId}>{title}</h2>
-        <button className="icon-button" aria-label="닫기" onClick={close}>
+        {dismissible && <button className="icon-button" aria-label="닫기" onClick={close}>
           <X size={21} />
-        </button>
+        </button>}
       </div>
       {children}
     </dialog>

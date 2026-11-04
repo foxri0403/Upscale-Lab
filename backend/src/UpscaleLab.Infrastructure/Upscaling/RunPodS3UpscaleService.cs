@@ -16,7 +16,7 @@ public sealed class RunPodS3UpscaleService(
         string outputUrl,
         int scale,
         CancellationToken cancellationToken,
-        int? targetLongEdge = null)
+        int? targetLongEdge = null, Guid jobId = default)
     {
         if (scale is not (2 or 4))
             throw new ArgumentException("Scale must be 2 or 4.");
@@ -70,16 +70,18 @@ public sealed class RunPodS3UpscaleService(
         using var document = JsonDocument.Parse(
             await response.Content.ReadAsStringAsync(token));
 
-        var jobId = document.RootElement
+        var remoteId = document.RootElement
             .GetProperty("id").GetString();
 
-        if (string.IsNullOrWhiteSpace(jobId))
+        if (string.IsNullOrWhiteSpace(remoteId))
             throw new InvalidOperationException(
                 "RunPod job ID is missing.");
 
         var statusUrl =
-            $"{baseUrl}/{endpoint}/status/{Uri.EscapeDataString(jobId)}";
+            $"{baseUrl}/{endpoint}/status/{Uri.EscapeDataString(remoteId)}";
 
+        try
+        {
         while (true)
         {
             token.ThrowIfCancellationRequested();
@@ -130,6 +132,12 @@ public sealed class RunPodS3UpscaleService(
                     $"Unexpected RunPod status: {status}");
 
             await Task.Delay(TimeSpan.FromSeconds(2), token);
+        }
+        }
+        catch (OperationCanceledException) when (Processing.ProcessingJobControl.IsUserCancelled(jobId))
+        {
+            await RunPodCancellation.TryCancelAsync(httpClient, baseUrl, endpoint, remoteId, options.ApiKey);
+            throw;
         }
     }
 }

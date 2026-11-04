@@ -6,15 +6,15 @@ export function usePreviewPan(enabled: boolean, primary = true) {
   const moved = useRef(false);
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (e.code !== "Space" || /INPUT|TEXTAREA|SELECT|BUTTON/.test((e.target as HTMLElement)?.tagName) || (e.target as HTMLElement)?.isContentEditable) return;
+      if (!enabled || e.code !== "Space" || /INPUT|TEXTAREA|SELECT|BUTTON/.test((e.target as HTMLElement)?.tagName) || (e.target as HTMLElement)?.isContentEditable) return;
       e.preventDefault(); setSpace(true);
     };
     const up = (e: KeyboardEvent) => { if (e.code === "Space") setSpace(false); };
     const blur = () => { setSpace(false); drag.current = null; setDragging(false); };
     window.addEventListener("keydown", down); window.addEventListener("keyup", up); window.addEventListener("blur", blur);
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", blur); };
-  }, []);
-  useEffect(() => { if (!enabled) { root.current?.scrollTo(0, 0); drag.current = null; setDragging(false); } }, [enabled]);
+  }, [enabled]);
+  useEffect(() => { if (!enabled) { root.current?.scrollTo(0, 0); drag.current = null; setDragging(false); setSpace(false); } }, [enabled]);
   const finish = (e: PointerEvent<HTMLDivElement>) => {
     if (drag.current?.id !== e.pointerId) return;
     e.stopPropagation(); drag.current = null; setDragging(false);
@@ -23,7 +23,7 @@ export function usePreviewPan(enabled: boolean, primary = true) {
   return { root, canPan: enabled && (primary || space), dragging, events: {
     onPointerDownCapture: (e: PointerEvent<HTMLDivElement>) => {
       if (!enabled || !e.isPrimary || !(e.button === 1 || (e.button === 0 && (primary || space)))) return;
-      if ((e.target as HTMLElement).closest("button,select,input") && !(e.target as HTMLElement).closest(".studio-palette-toggle")) return;
+      if ((e.target as HTMLElement).closest("button,select,input") && !(e.target as HTMLElement).closest(".studio-palette-toggle,[data-crop-handle]")) return;
       e.preventDefault(); e.stopPropagation();
       moved.current = false;
       drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, left: e.currentTarget.scrollLeft, top: e.currentTarget.scrollTop };

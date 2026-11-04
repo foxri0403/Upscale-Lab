@@ -54,6 +54,7 @@ public interface IProjectProcessingService
     Task<ProcessingStatusResponse> StartAsync(Guid userId, Guid projectId, ProcessProjectRequest request, CancellationToken cancellationToken);
     Task<UpscaleLab.Application.Images.DownloadUrlResponse> GetResultUrlAsync(Guid userId, Guid projectId, Guid jobId, CancellationToken cancellationToken);
     Task<ProcessingStatusResponse> GetStatusAsync(Guid userId, Guid projectId, CancellationToken cancellationToken);
+    Task<ProcessingStatusResponse> CancelAsync(Guid userId, Guid projectId, Guid jobId, CancellationToken cancellationToken);
     Task RecoverPendingAsync(CancellationToken cancellationToken);
     Task ExecuteAsync(Guid jobId, CancellationToken cancellationToken);
 }

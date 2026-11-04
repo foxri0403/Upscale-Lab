@@ -1,20 +1,21 @@
 import { useEffect, useRef } from "react";
 import { setNavigationGuard } from "./navigation";
 
-export function useUnsavedWarning(active: boolean, discard: () => void) {
-  const current = useRef({ active, discard });
-  current.current = { active, discard };
+export function useUnsavedWarning(active: boolean, discard: () => void, lock?: { active: boolean; blocked: () => void }) {
+  const current = useRef({ active, discard, lock });
+  current.current = { active, discard, lock };
   useEffect(() => {
     const confirm = () => {
+      if (current.current.lock?.active) { current.current.lock.blocked(); return false; }
       if (!current.current.active) return true;
       if (!window.confirm("저장하지 않은 이미지 또는 변경 사항이 있습니다. 저장하지 않고 나가시겠습니까?")) return false;
       current.current.discard(); return true;
     };
     const stop = setNavigationGuard(confirm);
     const unload = (event: BeforeUnloadEvent) => {
-      if (current.current.active) { event.preventDefault(); event.returnValue = ""; }
+      if (current.current.active || current.current.lock?.active) { event.preventDefault(); event.returnValue = ""; }
     };
-    const hide = () => { if (current.current.active) current.current.discard(); };
+    const hide = () => { if (current.current.active && !current.current.lock?.active) current.current.discard(); };
     const external = (event: MouseEvent) => {
       const link = (event.target as Element)?.closest?.("a");
       if (!link || link.hasAttribute("data-spa-link") || link.download || link.target === "_blank" ||

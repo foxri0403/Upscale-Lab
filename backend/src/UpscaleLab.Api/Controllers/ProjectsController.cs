@@ -150,6 +150,10 @@ public sealed class ProjectsController(
         CancellationToken cancellationToken) =>
         Ok(await processingService.GetStatusAsync(User.GetRequiredUserId(), projectId, cancellationToken));
 
+    [HttpPost("{projectId:guid}/jobs/{jobId:guid}/cancel")]
+    public async Task<ActionResult<ProcessingStatusResponse>> Cancel(Guid projectId, Guid jobId, CancellationToken ct) =>
+        Ok(await processingService.CancelAsync(User.GetRequiredUserId(), projectId, jobId, ct));
+
     [HttpGet("{projectId:guid}/layers")]
     public async Task<ActionResult<IReadOnlyList<LayerResponse>>> GetLayers(
         Guid projectId,

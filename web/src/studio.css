@@ -1,4 +1,8 @@
 /* Keep the shared header/navigation; only the editor fills the available viewport. */
+.studio-processing-status { display: flex; align-items: center; gap: 10px; line-height: 1.7; }
+.studio-processing-progress { width: 100%; accent-color: var(--primary); }
+.studio-processing-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+.studio-cancel-warning { line-height: 1.8; }
 .app-main.studio-main:has(.studio-editor) {
   height: calc(100dvh - 70px);
   min-height: 0;

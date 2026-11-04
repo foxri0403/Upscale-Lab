@@ -29,7 +29,7 @@ import {
   type Tool,
 } from "./model";
 import { Modal, Notice, Busy, Empty, Link } from "./ui";
-import { cloud, request, post, type Job } from "./api";
+import { ApiError, cloud, request, post, type Job } from "./api";
 import { detailPicture, discardDraft, loadProjectPicture, processProject, refineSubject, resetProjectEffects, saveImageEdit } from "./cloud-store";
 import { processingStatus } from "./processing-status";
 import { useUnsavedWarning } from "./use-unsaved-warning";
@@ -133,6 +133,10 @@ export function Studio({ route }: { route: string }) {
   const [imageDimensions, setImageDimensions] = useState({ src: "", width: 0, height: 0 });
   const [dialog, setDialog] = useState<"apply" | "info" | "layerStack" | null>(null);
   const [busy, setBusy] = useState(false);
+  const [startingProcessing, setStartingProcessing] = useState(false);
+  const [cancelPrompt, setCancelPrompt] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [checkingJob, setCheckingJob] = useState(cloud && !!picture?.projectId);
   const [downloading, setDownloading] = useState(false);
   const saving = useRef(false);
   const [target, setTarget] = useState("pc/monitor1");
@@ -156,7 +160,8 @@ export function Studio({ route }: { route: string }) {
     if (allTags.current) allTags.current.indeterminate = tags.length > 0 && !allTagsSelected(tags);
   }, [tags, tool]);
   useEffect(() => {
-    setJob(null); setBusy(false);
+    setJob(null); setBusy(false); setStartingProcessing(false); setCancelPrompt(false); setCancelling(false);
+    setCheckingJob(cloud && !!picture?.projectId);
     setTool("upscale"); setShareFeedback(null); setSelectedLayer("all"); discarding.current = false;
     subjectJob.current = null;
   }, [picture?.id]);
@@ -221,7 +226,8 @@ export function Studio({ route }: { route: string }) {
       update(v => ({ ...v, images: v.images.filter(p => p.id !== picture.id) }));
       if (cloud) void discardDraft(picture).catch(() => {});
     }
-  });
+  }, { active: busy || processing || checkingJob || cropAutosave.pending || separation.tracing,
+    blocked: () => toast("작업 중에는 다른 기능이나 화면으로 전환할 수 없습니다. 작업 완료를 기다리거나 작업 취소를 눌러 주세요.") });
   const options = library.devices.flatMap((d) =>
     d.displays
       .filter((s) => s.connected && s.canApplyWallpaper !== false)
@@ -345,13 +351,13 @@ export function Studio({ route }: { route: string }) {
     finally { sharePending.current = false; setBusy(false); }
   }
   async function startProcessing() {
-    if (!picture || published || busy || processing || cropAutosave.pending || separation.tracing || separation.drawing || separation.polygonPoints) return;
+    if (!picture || published || busy || processing || checkingJob || cropAutosave.pending || separation.tracing || separation.drawing || separation.polygonPoints) return;
     if (tool === "layers") {
       if (isFox) { await applySubjectEdits(); return; }
       setSelectedLayer("all"); separation.setView("overlay");
     }
     if (tool !== "layers" && separation.dirty) return;
-    setBusy(true);
+    setBusy(true); setStartingProcessing(true);
     try {
       const value = await processProject(
         picture,
@@ -362,22 +368,35 @@ export function Studio({ route }: { route: string }) {
       setJob(value);
       window.dispatchEvent(new Event("tokens-updated"));
     } catch (e) {
+      setJob(null); setCheckingJob(true);
       toast((e as Error).message);
     } finally {
-      setBusy(false);
+      setBusy(false); setStartingProcessing(false);
     }
   }
   async function applySubjectEdits() {
     if (!cloud || !picture?.projectId || !isFox || capabilities?.layers === false || published || busy || processing || cropAutosave.pending || !separation.ready || !separation.dirty || separation.drawing || separation.tracing || separation.polygonPoints) return;
     setSelectedLayer("all"); separation.setView("overlay");
-    setBusy(true);
+    setBusy(true); setStartingProcessing(true);
     try {
       const value = await refineSubject(picture, await separation.exportSelection());
       subjectJob.current = value.jobId;
       setJob(value);
       window.dispatchEvent(new Event("tokens-updated"));
-    } catch (error) { toast((error as Error).message); }
-    finally { setBusy(false); }
+    } catch (error) { setJob(null); setCheckingJob(true); toast((error as Error).message); }
+    finally { setBusy(false); setStartingProcessing(false); }
+  }
+  async function cancelProcessing() {
+    if (!picture?.projectId || !job || !processing || cancelling) return;
+    setCancelling(true);
+    try {
+      const result = await post<Job>(`/api/projects/${picture.projectId}/jobs/${job.jobId}/cancel`, {});
+      setJob(result); subjectJob.current = null; setCancelPrompt(false);
+      window.dispatchEvent(new Event("tokens-updated"));
+      toast("작업을 취소했습니다. 사용한 토큰은 반환되지 않습니다.");
+    } catch (error) {
+      toast((error as Error).message); setCancelPrompt(false);
+    } finally { setCancelling(false); }
   }
   useEffect(() => {
     if (!cloud || !picture?.projectId) return;
@@ -392,6 +411,7 @@ export function Studio({ route }: { route: string }) {
         );
         if (!alive) return;
         if (status.status === "Completed") {
+          setCancelPrompt(false);
           const p = await detailPicture(picture);
           if (alive) {
             update((v) => ({
@@ -416,33 +436,36 @@ export function Studio({ route }: { route: string }) {
           setJob(status);
           if (status.status === "Failed")
             toast(status.errorMessage || "이미지 처리에 실패했습니다.");
-          if (status.status === "Failed") window.dispatchEvent(new Event("tokens-updated"));
+          if (["Failed", "Cancelled"].includes(status.status)) { setCancelPrompt(false); window.dispatchEvent(new Event("tokens-updated")); }
         }
       } catch (e) {
         if (alive) {
-          setJob(null);
-          toast((e as Error).message);
+          toast(`작업 상태를 다시 확인하고 있습니다. ${(e as Error).message}`);
         }
       } finally {
         polling = false;
       }
     };
-    if (!job) {
-      request<Job>(`/api/projects/${picture.projectId}/processing-status`)
-        .then((s) => {
-          if (alive && ["Queued", "Processing"].includes(s.status)) setJob(s);
-        })
-        .catch(() => {});
-    }
+    const probe = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const status = await request<Job>(`/api/projects/${picture.projectId}/processing-status`);
+        if (alive) { if (["Queued", "Processing"].includes(status.status)) setJob(status); setCheckingJob(false); }
+      } catch (error) {
+        if (alive && error instanceof ApiError && error.status === 404) setCheckingJob(false);
+      } finally { polling = false; }
+    };
+    if (!job && checkingJob) void probe();
     const timer =
       job && ["Queued", "Processing"].includes(job.status)
         ? setInterval(() => void poll(), 2200)
-        : null;
+        : !job && checkingJob ? setInterval(() => void probe(), 2200) : null;
     return () => {
       alive = false;
       if (timer) clearInterval(timer);
     };
-  }, [picture?.id, job?.jobId, job?.status]);
+  }, [picture?.id, job?.jobId, job?.status, checkingJob]);
   async function download() {
     if (!picture || busy || processing || downloading || separation.dirty || cropAutosave.pending) return;
     setDownloading(true);
@@ -495,10 +518,11 @@ export function Studio({ route }: { route: string }) {
       <div className="tool-tabs studio-tool-dock" role="tablist" aria-label="이미지 편집 도구" aria-orientation={compact ? "horizontal" : "vertical"}>
         {tools.map(({ id, name, icon: Icon }) => (
           <button key={id} id={`studio-tool-${id}`} type="button" role="tab"
-            disabled={busy || separation.drawing || separation.tracing || separation.polygonPoints > 0}
+            disabled={busy || processing || checkingJob || cropAutosave.pending || separation.drawing || separation.tracing || separation.polygonPoints > 0}
             aria-controls="studio-properties" aria-selected={tool === id}
             tabIndex={tool === id ? 0 : -1}
             onKeyDown={(event) => {
+              if (busy || processing || checkingJob || cropAutosave.pending) return;
               const direction = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1
                 : event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 0;
               const next = event.key === "Home" ? tools[0] : event.key === "End" ? tools.at(-1)
@@ -551,7 +575,7 @@ export function Studio({ route }: { route: string }) {
             <button
               className={`button primary full ${tool === "layers" ? "separation-action" : ""}`}
               disabled={
-                busy || cropAutosave.pending ||
+                busy || checkingJob || cropAutosave.pending ||
                 !cloud ||
                 !picture.projectId ||
                 processing ||
@@ -715,6 +739,21 @@ export function Studio({ route }: { route: string }) {
         </div>
         </div>
       </aside>
+      {(startingProcessing || processing || checkingJob) && <Modal title={cancelPrompt ? "작업을 취소할까요?" : "이미지 처리 중"}
+        close={() => {}} dismissible={false}>
+        {cancelPrompt ? <>
+          <p className="studio-cancel-warning" role="alert">작업을 취소하면 결과를 받을 수 없으며, 사용한 토큰은 반환되지 않습니다.</p>
+          <div className="studio-processing-actions">
+            <button type="button" className="button secondary" disabled={cancelling} onClick={() => setCancelPrompt(false)}>작업 계속하기</button>
+            <button type="button" className="button danger" disabled={cancelling} onClick={() => void cancelProcessing()}>{cancelling ? <Busy /> : null}토큰 반환 없이 취소</button>
+          </div>
+        </> : <>
+          <p className="studio-processing-status" role="status" aria-live="polite"><Busy />{job && processing ? processingStatus(job) : checkingJob ? "진행 중인 작업을 확인하고 있습니다." : "작업을 시작하고 있습니다."}</p>
+          {processing && <progress className="studio-processing-progress" max={100} value={job?.progress || 0} aria-label="이미지 처리 진행률" />}
+          <p className="notice">작업이 끝날 때까지 다른 기능이나 화면으로 전환할 수 없습니다.</p>
+          <button type="button" className="button secondary full" disabled={!processing || startingProcessing || cancelling} onClick={() => setCancelPrompt(true)}>작업 취소</button>
+        </>}
+      </Modal>}
       {shareFeedback && <div className="studio-share-feedback" role="status" aria-live="polite"
         style={{ left: shareFeedback.x, top: shareFeedback.y - 18 }}>{shareFeedback.text}</div>}
       {dialog === "layerStack" && picture.projectId && <LayerStackEditor

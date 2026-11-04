@@ -288,6 +288,33 @@ public sealed class ProjectProcessingService(
         return MapStatus(job);
     }
 
+    public async Task<ProcessingStatusResponse> CancelAsync(Guid userId, Guid projectId, Guid jobId, CancellationToken cancellationToken)
+    {
+        using var gate = await ProcessingJobControl.LockAsync(jobId, cancellationToken);
+        var job = await dbContext.ProcessingJobs.Include(x => x.Project)
+            .SingleOrDefaultAsync(x => x.Id == jobId && x.ProjectId == projectId && x.Project.UserId == userId, cancellationToken)
+            ?? throw new NotFoundException("처리 작업을 찾을 수 없습니다.");
+        await dbContext.Entry(job).ReloadAsync(cancellationToken);
+        if (job.Status == ProcessingJobStatus.Cancelled) { ProcessingJobControl.Cancel(jobId); return MapStatus(job); }
+        if (job.Status is ProcessingJobStatus.Completed or ProcessingJobStatus.Failed)
+            throw new ConflictException("이미 종료된 작업입니다. 최신 처리 상태를 확인해 주세요.");
+
+        await using var transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        job.Status = ProcessingJobStatus.Cancelled;
+        job.CompletedAt = DateTime.UtcNow;
+        job.ErrorMessage = "사용자가 작업을 취소했습니다. 사용한 토큰은 반환되지 않습니다.";
+        job.Project.Status = await dbContext.ProcessingJobs.AnyAsync(x => x.ProjectId == projectId && x.Status == ProcessingJobStatus.Completed, cancellationToken)
+            ? ProjectStatus.Completed : ProjectStatus.Uploaded;
+        job.Project.FailureReason = null;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        // Explicit cancellation consumes the reservation; provider failures still refund it.
+        await tokenService.CompleteAsync(job.Id, cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+        ProcessingJobControl.Cancel(jobId);
+        return MapStatus(job);
+    }
+
     public async Task RecoverPendingAsync(CancellationToken cancellationToken)
     {
         var jobs = await dbContext.ProcessingJobs
@@ -309,20 +336,26 @@ public sealed class ProjectProcessingService(
 
     public async Task ExecuteAsync(Guid jobId, CancellationToken cancellationToken)
     {
-        var job = await dbContext.ProcessingJobs
+        var hostCancellation = cancellationToken;
+        using var execution = ProcessingJobControl.Register(jobId, hostCancellation, out cancellationToken);
+        if (execution is null) return;
+        ProcessingJob? job;
+        using (await ProcessingJobControl.LockAsync(jobId, hostCancellation))
+        {
+        job = await dbContext.ProcessingJobs
             .Include(x => x.Project).ThenInclude(x => x.OriginalImage)
             .Include(x => x.Project).ThenInclude(x => x.Layers)
             .Include(x => x.Project).ThenInclude(x => x.ProcessingJobs)
-            .SingleOrDefaultAsync(x => x.Id == jobId, cancellationToken);
-        if (job is null || job.Status is ProcessingJobStatus.Completed or ProcessingJobStatus.Failed)
+            .SingleOrDefaultAsync(x => x.Id == jobId, hostCancellation);
+        if (job is not null) await dbContext.Entry(job).ReloadAsync(hostCancellation);
+        if (job is null || job.Status is ProcessingJobStatus.Completed or ProcessingJobStatus.Failed or ProcessingJobStatus.Cancelled)
         {
             return;
         }
 
-        var ownerId = job.Project.UserId;
         if (ProjectDraftState.IsDiscarded(job.Project.SavedEditJson))
         {
-            job.Status = ProcessingJobStatus.Failed; job.CompletedAt = DateTime.UtcNow;
+            job.Status = ProcessingJobStatus.Cancelled; job.CompletedAt = DateTime.UtcNow;
 
             await using (var transaction = dbContext.Database.IsRelational()
                 ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
@@ -330,15 +363,21 @@ public sealed class ProjectProcessingService(
             {
                 await dbContext.SaveChangesAsync(cancellationToken);
 
-                await tokenService.RefundAsync(job.Id, cancellationToken);
+                await tokenService.CompleteAsync(job.Id, cancellationToken);
 
                 if (transaction is not null)
                     await transaction.CommitAsync(cancellationToken);
             }
 
-            await Projects.DraftProjectCleanup.DiscardAsync(dbContext, storageService, ownerId, job.ProjectId, false, cancellationToken);
+            await Projects.DraftProjectCleanup.DiscardAsync(dbContext, storageService, job.Project.UserId, job.ProjectId, false, cancellationToken);
             return;
         }
+        job.Status = ProcessingJobStatus.Processing;
+        job.Progress = 5;
+        job.StartedAt ??= DateTime.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        var ownerId = job.Project.UserId;
         var workspace = Path.Combine(Path.GetTempPath(), "live-layer", job.Id.ToString("N"));
         var inputPath = Path.Combine(workspace, $"input{Path.GetExtension(job.Project.OriginalImage.FileName)}");
         var outputPath = Path.Combine(workspace, "output");
@@ -347,10 +386,6 @@ public sealed class ProjectProcessingService(
         try
         {
             Directory.CreateDirectory(outputPath);
-            job.Status = ProcessingJobStatus.Processing;
-            job.Progress = 5;
-            job.StartedAt ??= DateTime.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
 
             // Separation uses the latest successful image, even if a subsequent job failed.
             var latestImage = job.Project.ProcessingJobs.Where(x => x.Status == ProcessingJobStatus.Completed && x.ResultObjectKey != null)
@@ -479,6 +514,9 @@ public sealed class ProjectProcessingService(
                 });
             }
 
+            using var completionGate = await ProcessingJobControl.LockAsync(jobId, cancellationToken);
+            await dbContext.Entry(job).ReloadAsync(cancellationToken);
+            if (job.Status == ProcessingJobStatus.Cancelled) throw new OperationCanceledException(cancellationToken);
             var oldKeys = hasLayers ? job.Project.Layers.Select(x => x.ObjectKey).ToArray() : [];
             if (hasLayers)
             {
@@ -512,26 +550,25 @@ public sealed class ProjectProcessingService(
                 await TryDeleteAsync(oldKey);
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            foreach (var uploadedKey in uploadedKeys) await TryDeleteAsync(uploadedKey);
-            dbContext.ChangeTracker.Clear();
-            job = await dbContext.ProcessingJobs.SingleAsync(x => x.Id == jobId, CancellationToken.None);
-            job.Status = ProcessingJobStatus.Queued;
-            job.ErrorMessage = null;
-            job.ResultObjectKey = null; job.ResultWidth = 0; job.ResultHeight = 0;
-            await dbContext.SaveChangesAsync(CancellationToken.None);
-            throw;
-        }
         catch (Exception exception)
         {
-            logger.LogError(exception, "LiveLayer processing job {JobId} failed", jobId);
             foreach (var uploadedKey in uploadedKeys)
             {
                 await TryDeleteAsync(uploadedKey);
             }
             dbContext.ChangeTracker.Clear();
+            using var failureGate = await ProcessingJobControl.LockAsync(jobId, CancellationToken.None);
             job = await dbContext.ProcessingJobs.Include(x => x.Project).SingleAsync(x => x.Id == jobId, CancellationToken.None);
+            if (job.Status == ProcessingJobStatus.Cancelled) return;
+            if (exception is OperationCanceledException && hostCancellation.IsCancellationRequested)
+            {
+                job.Status = ProcessingJobStatus.Queued;
+                job.ErrorMessage = null;
+                job.ResultObjectKey = null; job.ResultWidth = 0; job.ResultHeight = 0;
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+                throw;
+            }
+            logger.LogError(exception, "LiveLayer processing job {JobId} failed", jobId);
             var message = exception is TimeoutException
                 ? $"클라우드 처리 대기 또는 실행 제한 시간을 초과했습니다. 잠시 후 다시 시도해 주세요. 작업 ID: {jobId}"
                 : $"이미지 처리에 실패했습니다. 작업 ID: {jobId}";

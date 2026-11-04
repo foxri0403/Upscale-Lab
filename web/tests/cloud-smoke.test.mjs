@@ -5,6 +5,13 @@ const base = process.env.WEB_TEST_URL;
 const run = (name, action) => test(name, { skip: !base }, action);
 const get = (path) =>
   fetch(`${base}${path}`, { signal: AbortSignal.timeout(15000) });
+run("processing cancellation requires an authenticated account", async () => {
+  const id = "00000000-0000-0000-0000-000000000001";
+  const response = await fetch(`${base}/api/projects/${id}/jobs/${id}/cancel`, {
+    method: "POST", signal: AbortSignal.timeout(15000),
+  });
+  assert.equal(response.status, 401);
+});
 run("companion release manifest points to real Windows and signed Android binaries", async () => {
   const response = await get("/downloads/manifest.json");
   assert.equal(response.status, 200);

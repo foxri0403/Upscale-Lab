@@ -181,7 +181,7 @@ public sealed class RunPodPretrainedSeeThroughProcessor(
             if (request.ReportProgress != null) await request.ReportProgress(75, token);
             return layers;
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested || ProcessingJobControl.IsUserCancelled(request.JobId))
         {
             if (remote is { Completed: false })
             {
@@ -194,6 +194,7 @@ public sealed class RunPodPretrainedSeeThroughProcessor(
                 }
                 catch { /* Provider TTL also bounds execution. */ }
             }
+            if (cancellationToken.IsCancellationRequested) throw;
             throw new TimeoutException("클라우드 캐릭터 분리 제한 시간을 초과했습니다.");
         }
         // Keep job-scoped metadata and ZIP for restart recovery, as with photo layers.

@@ -29,8 +29,8 @@ export function StudioCanvas({ picture, edit, tool, layered, background, foregro
   const [darkPalette, setDarkPalette] = useState(false);
   const [hand, setHand] = useState(false);
   const inline = tool === "layers" && !published && selectedLayer !== "background" && separation.view !== "motion";
-  const pan = usePreviewPan(tool === "layers" && zoom !== "fit", !inline || hand);
-  useEffect(() => { if (zoom === "fit" || tool !== "layers") setHand(false); }, [zoom, tool]);
+  const pan = usePreviewPan(tool !== "crop" && zoom !== "fit", hand);
+  useEffect(() => { setHand(false); }, [zoom, tool, picture.id]);
   const palette = { dark: darkPalette, toggle: () => setDarkPalette(value => !value) };
   const visible = visibleLayers(tool === "live" ? "all" : selectedLayer);
   const showingLayers = layered && (tool === "layers" || tool === "live");
@@ -67,7 +67,7 @@ export function StudioCanvas({ picture, edit, tool, layered, background, foregro
         <div className="studio-ruler studio-ruler-y" aria-hidden="true">
           {Array.from({ length: 7 }, (_, i) => <span key={i}>{Math.round(croppedHeight * i / 6).toLocaleString("en-US")}</span>)}
         </div>
-        {tool === "crop" ? <CropEditor picture={layered ? { ...picture, background, foregrounds } : picture} edit={edit} change={onEdit} disabled={readOnly} zoom={zoom} palette={palette} rulers /> : <div ref={pan.root} {...pan.events} className={`studio-canvas-center ${pan.canPan ? "preview-can-pan" : ""} ${pan.dragging ? "preview-panning" : ""}`}>
+        {tool === "crop" ? <CropEditor picture={layered ? { ...picture, background, foregrounds } : picture} edit={edit} change={onEdit} disabled={readOnly || hand} zoom={zoom} palette={palette} rulers panImage={hand} /> : <div ref={pan.root} {...pan.events} className={`studio-canvas-center ${pan.canPan ? "preview-can-pan" : ""} ${pan.dragging ? "preview-panning" : ""}`}>
           <div className="studio-pan-surface" style={{ width: zoom === "fit" ? "100%" : croppedWidth * Number(zoom) / 100 + 44, height: zoom === "fit" ? "100%" : croppedHeight * Number(zoom) / 100 + 44 }}>
           <PreviewPaletteButton {...palette} />
           <div className={`canvas-stage studio-preview-stage ${cropped ? "crop-stage" : ""} ${layered && selectedLayer === "subject" && tool === "layers" ? "subject-only" : ""}`}
@@ -99,7 +99,7 @@ export function StudioCanvas({ picture, edit, tool, layered, background, foregro
           {imageFeatures(picture).map(feature => <span key={feature} className="studio-feature-badge">{feature}</span>)}
         </div>
         <div className="studio-zoom">
-          {tool === "layers" && <button aria-label="이미지 이동" title="드래그로 이동 · 스페이스 키 또는 마우스 휠 버튼으로도 이동" aria-pressed={hand} disabled={zoom === "fit" || separation.drawing} onClick={() => setHand(value => !value)}><Hand size={16} /><span>이동</span></button>}
+          <button aria-label="이미지 이동" title="확대한 이미지 드래그로 이동 · 스페이스 키 또는 마우스 휠 버튼으로도 이동" aria-pressed={hand} disabled={zoom === "fit" || separation.drawing} onClick={() => setHand(value => !value)}><Hand size={16} /><span>이동</span></button>
           <button aria-label="화면 맞춤" title="화면 맞춤" aria-pressed={zoom === "fit"} onClick={() => setZoom("fit")}><Expand size={16} /> 화면 맞춤</button>
           <select aria-label="미리보기 확대 비율" value={zoom === "fit" ? "" : zoom} onChange={(event) => setZoom(event.target.value)}>
             <option value="" disabled hidden>배율</option>

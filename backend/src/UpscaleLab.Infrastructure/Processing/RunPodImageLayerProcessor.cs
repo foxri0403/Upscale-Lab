@@ -132,7 +132,7 @@ public sealed class RunPodImageLayerProcessor(HttpClient http, RunPodOptions opt
             return [new(background, LayerType.Background, 0, 0, 0, 0, 0, 1, 0, 0),
                 new(foreground, LayerType.Body, 1, 1, 0, 0, 0, 1, width * .025, height * .025)];
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested || ProcessingJobControl.IsUserCancelled(request.JobId))
         {
             if (remote != null)
             {
@@ -140,6 +140,7 @@ public sealed class RunPodImageLayerProcessor(HttpClient http, RunPodOptions opt
                     using var _ = await SendAsync(HttpMethod.Post, baseUrl + "/cancel/" + Uri.EscapeDataString(remote.Id), null, cancel.Token); }
                 catch { /* The provider TTL still bounds work if cancellation cannot reach it. */ }
             }
+            if (ct.IsCancellationRequested) throw;
             throw new TimeoutException("클라우드 배경 분리 제한 시간을 초과했습니다.");
         }
         finally { File.Delete(input); }

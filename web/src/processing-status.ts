@@ -1,6 +1,7 @@
 import type { Job } from "./api";
 
 export function processingStatus(job: Pick<Job, "status" | "progress" | "operation" | "errorMessage">): string {
+  if (job.status === "Cancelled") return "작업 취소됨 · 사용한 토큰은 반환되지 않습니다.";
   if (job.status === "Failed") return job.errorMessage || "처리 실패";
   if (job.status === "Completed") return "처리 완료";
   if (job.status === "Queued") return "작업 대기 중";

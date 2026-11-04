@@ -8,4 +8,5 @@ test("remote queue and character inference are explained as stages", () => {
   assert.match(processingStatus({ status: "Processing", progress: 45, operation: "Upscale" }), /45%/);
   assert.equal(processingStatus({ status: "Failed", progress: 20, errorMessage: "시간 초과" }), "시간 초과");
   assert.equal(processingStatus({ status: "Completed", progress: 100 }), "처리 완료");
+  assert.match(processingStatus({ status: "Cancelled", progress: 45 }), /작업 취소됨.*반환되지/);
 });

@@ -86,7 +86,7 @@ public sealed class RunPodProjectImageProcessor(
                     request.UpscaleFactor,
                     outputPath,
                     cancellationToken,
-                    request.TargetLongEdge);
+                    request.TargetLongEdge, request.JobId);
 
                 return CreateUpscaleResult(
                     request, result.FilePath, result.Width, result.Height);
@@ -168,7 +168,7 @@ public sealed class RunPodProjectImageProcessor(
                 uploadUrl,
                 request.UpscaleFactor,
                 cancellationToken,
-                request.TargetLongEdge);
+                request.TargetLongEdge, request.JobId);
 
             // 5. RunPod가 업로드한 결과를 다운로드
             await using (var output = File.Create(outputPath))
