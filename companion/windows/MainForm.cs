@@ -19,7 +19,7 @@ internal sealed class MainForm : Form
     private readonly Label email = new() { AutoSize = true, ForeColor = AppBrand.Muted, Font = new("맑은 고딕", 9), Margin = new(0, 4, 0, 0) };
     private readonly Label plan = new() { AutoSize = true, ForeColor = AppBrand.Primary, Margin = new(0, 4, 0, 0) };
     private readonly CircularAvatar avatar = new() { Size = new(64, 64), Margin = new(0, 0, 14, 0) };
-    private readonly TableLayoutPanel account = new() { Dock = DockStyle.Fill, ColumnCount = 2, Margin = Padding.Empty };
+    private readonly TableLayoutPanel account = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Top | AnchorStyles.Right, ColumnCount = 2, Margin = Padding.Empty };
     private readonly Label screens = new() { AutoSize = true, Font = new("맑은 고딕", 11), Margin = new(0, 16, 0, 10) };
     private readonly TableLayoutPanel credentials = Stack();
     private readonly TableLayoutPanel connected = Stack();
@@ -48,8 +48,8 @@ internal sealed class MainForm : Form
         var content = Stack(); content.Padding = new(28);
         var header = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, Height = 100, Margin = new(0, 0, 0, 22) };
         header.ColumnStyles.Add(new(SizeType.Percent, 57)); header.ColumnStyles.Add(new(SizeType.Percent, 43));
-        header.Controls.Add(new Label { Text = "Upscale Lab Connect", Font = new(Font.FontFamily, 22, FontStyle.Bold), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft });
-        account.ColumnStyles.Add(new(SizeType.Absolute, 82)); account.ColumnStyles.Add(new(SizeType.Percent, 100));
+        header.Controls.Add(new Label { Text = "Upscale Lab Connect", Font = new(Font.FontFamily, 22, FontStyle.Bold), Dock = DockStyle.Fill, TextAlign = ContentAlignment.TopLeft, Margin = Padding.Empty });
+        account.ColumnStyles.Add(new(SizeType.Absolute, 82)); account.ColumnStyles.Add(new(SizeType.AutoSize));
         var identity = Stack(); identity.Controls.Add(username); identity.Controls.Add(email); identity.Controls.Add(plan);
         account.Controls.Add(avatar); account.Controls.Add(identity); header.Controls.Add(account); content.Controls.Add(header);
         credentials.Controls.Add(Copy("로그인", 18, true));
@@ -116,7 +116,8 @@ internal sealed class MainForm : Form
         AcceptButton = controller.LoggedIn ? null : login;
         login.Enabled = identifier.Enabled = password.Enabled = remember.Enabled = saveIdentifier.Enabled = !busy;
         logout.Enabled = startup.Enabled = !busy;
-        if (replaceStatus) status.Text = controller.LoggedIn ? controller.Status : "";
+        if (replaceStatus) status.Text = "";
+        status.Visible = status.Text.Length > 0;
         username.Text = controller.Username; email.Text = controller.Account; plan.Text = controller.Plan + " 플랜";
         connection.Text = controller.Connection switch { ConnectionState.Connected => "● 연결됨", ConnectionState.Connecting => "● 연결중", _ => "● 연결안됨" };
         connection.ForeColor = controller.Connection switch { ConnectionState.Connected => Color.FromArgb(38, 153, 83), ConnectionState.Connecting => Color.FromArgb(230, 139, 32), _ => Color.FromArgb(208, 64, 64) };

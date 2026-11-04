@@ -406,9 +406,24 @@ class _CompanionPageState extends State<CompanionPage>
 
   List<Widget> connectedView(bool tablet) {
     final displays = state['displays'] as List? ?? [];
+    final (connectionText, connectionColor) =
+        switch (state['connectionState']) {
+      'connected' => ('연결됨', const Color(0xff269953)),
+      'connecting' => ('연결중', const Color(0xffe68b20)),
+      _ => ('연결안됨', const Color(0xffd04040)),
+    };
     return [
       panel(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        heading('연결된 화면'),
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(child: heading('연결된 화면')),
+          const SizedBox(width: 8),
+          Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('● $connectionText',
+                  key: const ValueKey('connectionStatus'),
+                  style: TextStyle(
+                      color: connectionColor, fontWeight: FontWeight.w700))),
+        ]),
         const SizedBox(height: 20),
         if (displays.isEmpty)
           const Text('화면 정보를 확인하고 있어요.', style: TextStyle(color: muted)),
@@ -450,9 +465,6 @@ class _CompanionPageState extends State<CompanionPage>
               ])),
       ])),
       const SizedBox(height: 10),
-      if (state['message'] != null)
-        Text(state['message'] as String,
-            style: const TextStyle(fontSize: 12, color: muted)),
       ExpansionTile(
           tilePadding: EdgeInsets.zero,
           title: const Text('수집 정보 안내',

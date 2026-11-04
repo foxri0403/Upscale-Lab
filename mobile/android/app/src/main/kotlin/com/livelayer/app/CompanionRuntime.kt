@@ -29,6 +29,7 @@ internal object CompanionRuntime {
     @Volatile private var initialized = false
     @Volatile private var running = false
     @Volatile private var verified = false
+    @Volatile private var connectionState = "disconnected"
     @Volatile private var message = "웹과 같은 계정으로 로그인해 주세요."
     @Volatile private var pending: JSONObject? = null
     private var displayListener: DisplayManager.DisplayListener? = null
@@ -93,7 +94,7 @@ internal object CompanionRuntime {
         displayListener = null; wallpaperReceiver = null
     }
     fun invalidate() {
-        generation.incrementAndGet(); running = false; pending = null
+        generation.incrementAndGet(); running = false; connectionState = "disconnected"; pending = null
         stopObservingInventory()
         api.cancelUpdates()
         context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putLong("companion_valid_until", 0).apply()
@@ -101,6 +102,7 @@ internal object CompanionRuntime {
     fun resume(): Boolean {
         val state = store.read()
         if (!CompanionPrivacy(context).accepted || !state.has("session")) return false
+        if (!running) connectionState = "connecting"
         running = true; synchronized(watchSignal) { watchSignal.notifyAll() }; inventoryDirty.set(true); pollSoon(); return true
     }
     fun pollSoon() { if (initialized && running && pollQueued.compareAndSet(false, true)) worker.execute { pollQueued.set(false); if (running) poll() } }
@@ -120,7 +122,7 @@ internal object CompanionRuntime {
             "liveEnabled" to liveEnabled(), "alarmsEnabled" to alarmsEnabled(), "needsLiveSetup" to needsSetup,
             "notificationPermissionGranted" to (Build.VERSION.SDK_INT < 33 || androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED),
             "privacyAccepted" to CompanionPrivacy(context).accepted,
-            "loggedIn" to (allowed && user != null), "enabled" to running, "message" to message,
+            "loggedIn" to (allowed && user != null), "enabled" to running, "connectionState" to connectionState, "message" to message,
             "pendingLive" to (pending != null),
             "osVersion" to (if (allowed) "Android ${Build.VERSION.RELEASE}" else ""), "displays" to (0 until displays.length()).map {
                 val item = displays.getJSONObject(it)
@@ -283,6 +285,7 @@ internal object CompanionRuntime {
         val epoch = generation.get()
         try {
             if (!running || !CompanionPrivacy(context).accepted) return
+            if (connectionState != "connected") connectionState = "connecting"
             if (!verified) verifyAccount()
             if (epoch != generation.get() || !running) return
             observeInventory()
@@ -300,6 +303,8 @@ internal object CompanionRuntime {
             if (epoch != generation.get() || !running) return
             lease()
             val commands = api.request("/api/agent/commands", agent = true) as JSONArray
+            if (epoch != generation.get() || !running) return
+            connectionState = "connected"
             if (pending != null && !(0 until commands.length()).any { commands.getJSONObject(it).getString("id") == pending!!.getString("id") }) pending = null
             for (i in 0 until commands.length()) {
                 if (epoch != generation.get() || !running) return
@@ -367,6 +372,7 @@ internal object CompanionRuntime {
                     if (epoch != generation.get() || !running) return
                     if (error is CompanionApiError && error.status == 401) throw error
                     if (error is CompanionApiError && error.status in listOf(404, 409)) continue
+                    if (error is java.io.IOException || error is CompanionApiError) connectionState = "disconnected"
                     if (!didApply && error !is java.io.IOException) runCatching { api.report(id, "Failed", error.message) }
                     message = if (didApply) "적용 결과 보고를 다시 시도합니다." else error.message ?: "배경화면 적용에 실패했습니다."
                 }
@@ -374,6 +380,7 @@ internal object CompanionRuntime {
             if (commands.length() == 0) message = "연결됨 · 웹의 새 배경화면 요청을 기다리고 있습니다."
         } catch (error: Exception) {
             if (epoch != generation.get() || !running) return
+            connectionState = "disconnected"
             context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putLong("companion_valid_until", 0).apply()
             if (error is CompanionApiError && error.status == 401) {
                 running = false; verified = false; api.cancelUpdates(); store.save(store.read().put("enabled", false)); message = "계정 또는 기기 연결이 만료되었습니다. 다시 로그인하거나 웹의 기기 관리에서 확인해 주세요."

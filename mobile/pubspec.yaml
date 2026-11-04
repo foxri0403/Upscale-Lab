@@ -1,7 +1,7 @@
 name: live_layer
 description: Upscale Lab Android wallpaper companion
 publish_to: "none"
-version: 1.6.0+45
+version: 1.6.1+46
 
 environment:
   sdk: ">=3.5.0 <4.0.0"

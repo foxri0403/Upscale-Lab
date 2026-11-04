@@ -25,6 +25,7 @@ void main() {
       'privacyAccepted': true,
       'loggedIn': false,
       'enabled': false,
+      'connectionState': 'disconnected',
       'saveIdentifier': false,
       'savedIdentifier': '',
       'liveEnabled': false,
@@ -54,6 +55,7 @@ void main() {
             ...state,
             'loggedIn': true,
             'enabled': true,
+            'connectionState': 'connected',
             'username': 'web-user',
             'account': 'user@example.invalid',
             'plan': 'Pro',
@@ -182,6 +184,36 @@ void main() {
     expect(find.byType(Dialog), findsNothing);
     expect(find.text('로그인'), findsOneWidget);
     expect(find.textContaining('1080'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+  testWidgets(
+      'connection status stays in the screen header without footer text',
+      (tester) async {
+    state = {
+      ...state,
+      'loggedIn': true,
+      'enabled': true,
+      'message': '연결됨 · 웹의 새 배경화면 요청을 기다리고 있습니다.'
+    };
+    await entry.main();
+    await tester.pumpAndSettle();
+    for (final (value, label, color) in [
+      ('connected', '연결됨', const Color(0xff269953)),
+      ('connecting', '연결중', const Color(0xffe68b20)),
+      ('disconnected', '연결안됨', const Color(0xffd04040)),
+    ]) {
+      state = {...state, 'connectionState': value};
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      final status = find.byKey(const ValueKey('connectionStatus'));
+      expect(tester.widget<Text>(status).data, '● $label');
+      expect(tester.widget<Text>(status).style!.color, color);
+      expect(tester.getTopLeft(status).dx,
+          greaterThan(tester.getTopRight(find.text('연결된 화면')).dx));
+      expect(tester.getTopLeft(status).dy,
+          lessThan(tester.getBottomLeft(find.text('연결된 화면')).dy));
+      expect(find.text(state['message'] as String), findsNothing);
+    }
     await tester.pumpWidget(const SizedBox.shrink());
   });
   testWidgets('failed login clears password and remains on login screen',
