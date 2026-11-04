@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Coins, CreditCard, RefreshCw, ShieldCheck } from "lucide-react";
 import { cloud, cloudMe, post, request } from "./api";
+import { tokenPricing } from "./token-pricing";
+import "./billing.css";
 
 type Wallet = {
   plan?: string;
@@ -359,7 +361,6 @@ export function Billing() {
       await post("/api/subscriptions/pending/cancel", {});
       sessionStorage.removeItem("upscale:subscription-pending");
       sessionStorage.removeItem("upscale:subscription-ready-order");
-      setSubscriptionInfo(null);
       setReadyOrderId("");
       setRecoverOrderId("");
 
@@ -496,12 +497,6 @@ export function Billing() {
 
 
   const [recoverOrderId, setRecoverOrderId] = useState("");
-  const [subscriptionInfo, setSubscriptionInfo] = useState<{
-    plan?: string;
-    status: string;
-    orderStatus?: string | null;
-    billingKeyRegistered?: boolean;
-  } | null>(null);
 
   useEffect(() => {
     if (!cloud) return;
@@ -517,8 +512,6 @@ export function Billing() {
         }>("/api/subscriptions/me");
 
         if (!alive) return;
-
-        setSubscriptionInfo(subscription);
 
         if (
           subscription.status === "Pending" &&
@@ -574,29 +567,11 @@ export function Billing() {
   const tokenProducts = products.filter(p => !p.isSubscription);
 
   return (
-    <section style={{ maxWidth: 1040, margin: "0 auto", padding: "24px 18px 60px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+    <section className="billing-page" style={{ maxWidth: 1040, margin: "0 auto", padding: "24px 18px 60px" }}>
+      <div className="billing-heading">
         <Coins size={30} />
-        <h1 style={{ margin: 0 }}>토큰 · 요금제</h1>
+        <h1>토큰 요금제</h1>
       </div>
-
-      <p style={{ opacity: 0.75, marginBottom: 28 }}>
-        업스케일링·배경 분리·Live2D에 사용할 수 있는 토큰과 요금제 정보를 확인하세요.
-      </p>
-      <section aria-label="작업별 토큰 사용량" style={{ marginBottom: 28, overflowX: "auto" }}>
-        <h2>작업별 토큰 사용량</h2>
-        <table style={{ width: "100%", textAlign: "left", borderSpacing: "0 10px" }}>
-          <thead><tr><th>작업</th><th>최초 실행</th><th>재수정</th></tr></thead>
-          <tbody>
-            <tr><td>FHD 업스케일</td><td>2토큰</td><td>1토큰</td></tr>
-            <tr><td>QHD 업스케일</td><td>4토큰</td><td>2토큰</td></tr>
-            <tr><td>4K 업스케일</td><td>6토큰</td><td>3토큰</td></tr>
-            <tr><td>배경 분리</td><td>3토큰</td><td>1토큰</td></tr>
-            <tr><td>Live2D 파츠 분리</td><td>7토큰</td><td>3토큰</td></tr>
-          </tbody>
-        </table>
-        <p>동일 프로젝트의 완료 이력을 기준으로 계산합니다. 업스케일 재수정은 같은 목표 해상도에 적용하며, 처리 실패 시 예약한 토큰을 환불합니다.</p>
-      </section>
 
       {subscriptionMessage && (
         <p role="status">{subscriptionMessage}</p>
@@ -737,24 +712,6 @@ export function Billing() {
           )}
 
 
-          {subscriptionInfo?.status === "Pending" && (
-            <div style={{
-              padding: 18,
-              border: "1px solid var(--border, #bbb4)",
-              borderRadius: 14,
-              marginBottom: 20
-            }}>
-              <h3>진행 중인 구독</h3>
-              <p>요금제: {subscriptionInfo.plan}</p>
-              <p>구독 상태: {subscriptionInfo.status}</p>
-              <p>주문 상태: {subscriptionInfo.orderStatus ?? "없음"}</p>
-              <p>
-                카드 등록:
-                {subscriptionInfo.billingKeyRegistered ? " 완료" : " 미완료"}
-              </p>
-            </div>
-          )}
-
           <h2>추가 토큰 구매</h2>
           <div style={{
             display: "grid",
@@ -783,6 +740,27 @@ export function Billing() {
               </article>
             ))}
           </div>
+
+          <section className="billing-usage" aria-labelledby="token-usage-heading">
+            <h2 id="token-usage-heading">작업별 토큰 사용량</h2>
+            <div className="billing-usage-table">
+              <table aria-label="작업별 토큰 사용량">
+                <thead><tr><th scope="col">작업</th><th scope="col">최초 사용</th><th scope="col">재수정</th></tr></thead>
+                <tbody>
+                  {tokenPricing.map(rate => (
+                    <tr key={rate.label}>
+                      <th scope="row">{rate.label}</th>
+                      <td>{rate.firstUse}</td>
+                      <td>{rate.revision === null
+                        ? <span className="unsupported-revision" aria-label="재수정 미지원">-</span>
+                        : rate.revision}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="billing-usage-note">같은 프로젝트의 성공한 작업을 기준으로 계산합니다. FHD 재수정은 지원하지 않으며, 처리 실패 시 예약한 토큰을 환불합니다.</p>
+          </section>
 
           <p style={{ marginTop: 28, opacity: 0.7, fontSize: 13 }}>
             현재 토큰 구매와 정기 구독은 테스트 결제 전용입니다.

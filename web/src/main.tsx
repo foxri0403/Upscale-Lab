@@ -55,7 +55,7 @@ function App() {
     };
   }, []);
   useEffect(() => {
-    document.title = `${import.meta.env.DEV && path === "/lab/separation" ? "피사체 분리 실험실" : path.startsWith("/app/") ? ({ images: "내 이미지", explore: "탐색", studio: "작업실", devices: "기기 관리" } as Record<string, string>)[path.split("/")[2]] || "Upscale Lab" : path === "/login" ? "로그인" : path === "/signup" ? "회원가입" : "이미지에 새로운 가능성을"} · Upscale Lab`;
+    document.title = `${import.meta.env.DEV && path === "/lab/separation" ? "피사체 분리 실험실" : path.startsWith("/app/") ? ({ images: "내 이미지", explore: "탐색", studio: "작업실", devices: "기기 관리", billing: "토큰 요금제" } as Record<string, string>)[path.split("/")[2]] || "Upscale Lab" : path === "/login" ? "로그인" : path === "/signup" ? "회원가입" : "이미지에 새로운 가능성을"} · Upscale Lab`;
   }, [path]);
   function logout() {
     clearCloudCache();

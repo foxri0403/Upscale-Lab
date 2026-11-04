@@ -197,7 +197,9 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         if (Application.Projects.ProjectDraftState.IsDraft(metadataProject.SavedEditJson))
             throw new ConflictException("이미지를 보관함에 저장한 뒤 공유하거나 적용해 주세요.");
         var independentMotion = request.MouseEnabled.HasValue || request.GyroEnabled.HasValue;
-        var features = ProjectFeatures.For(metadataProject).Where(feature => independentMotion || request.MotionEnabled || feature != "Live 2D").ToArray();
+        var character = ProjectFeatures.HasCharacterLayers(metadataProject);
+        var features = ProjectFeatures.For(metadataProject).Where(feature => character ||
+            independentMotion || request.MotionEnabled || feature != "Live 2D").ToArray();
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new {
             Project = project.Id, Origin = origin, Title = request.Title.Trim(), request.Mode, request.MotionEnabled, width, height, sources,
             Tags = metadata?.Tags, Features = features, request.MouseEnabled, request.GyroEnabled, request.Render

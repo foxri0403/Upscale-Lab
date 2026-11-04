@@ -593,8 +593,9 @@ public sealed class ProjectProcessingService(
             ProcessingOperation.Upscale when targetLongEdge is int edge =>
                 completed.Any(x =>
                     x.Operation == ProcessingOperation.Upscale &&
-                    x.TargetLongEdge == edge)
+                    UpscaleBillingEdge(x) == edge)
                     ? TokenPolicy.UpscaleRevisionCost(edge)
+                        ?? throw new ConflictException("FHD 업스케일링은 재수정을 지원하지 않습니다.")
                     : TokenPolicy.UpscaleCost(edge),
 
             ProcessingOperation.Layers =>
@@ -610,6 +611,14 @@ public sealed class ProjectProcessingService(
             _ => throw new InvalidOperationException(
                 "토큰 비용을 계산할 수 없는 작업입니다.")
         };
+    }
+
+    private static int? UpscaleBillingEdge(ProcessingJob job)
+    {
+        if (job.TargetLongEdge.HasValue) return job.TargetLongEdge;
+        // Older scale-based requests did not store TargetLongEdge.
+        var edge = Math.Max(job.ResultWidth, job.ResultHeight);
+        return edge <= 0 ? null : edge <= 1920 ? 1920 : edge <= 2560 ? 2560 : edge <= 3840 ? 3840 : null;
     }
 
     public static ProcessingStatusResponse MapStatus(ProcessingJob job) => new(

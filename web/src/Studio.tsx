@@ -548,9 +548,6 @@ export function Studio({ route }: { route: string }) {
         </section>}
         {(tool === "upscale" || tool === "layers" || tool === "live") && (
           <div className="cloud-processing">
-            {cloud && <p className="job-state">{tool === "upscale"
-              ? `최초 ${resolution === 1920 ? 2 : resolution === 2560 ? 4 : 6}토큰 · 같은 해상도 재수정 ${resolution === 1920 ? 1 : resolution === 2560 ? 2 : 3}토큰`
-              : tool === "live" ? "최초 7토큰 · 재수정 3토큰" : "최초 3토큰 · 재수정 1토큰"}</p>}
             <button
               className={`button primary full ${tool === "layers" ? "separation-action" : ""}`}
               disabled={

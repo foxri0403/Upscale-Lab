@@ -29,10 +29,10 @@ public static class TokenPolicy
         };
 
     // 업스케일링 재수정
-    public static int UpscaleRevisionCost(int targetLongEdge) =>
+    public static int? UpscaleRevisionCost(int targetLongEdge) =>
         targetLongEdge switch
         {
-            1920 => 1,
+            1920 => null,
             2560 => 2,
             3840 => 3,
             _ => throw new ArgumentOutOfRangeException(nameof(targetLongEdge))
@@ -44,5 +44,5 @@ public static class TokenPolicy
 
     // Live2D 레이어 분리
     public static int CharacterLayerCost(int previousCompletedJobs) =>
-        previousCompletedJobs == 0 ? 7 : 3;
+        previousCompletedJobs == 0 ? 7 : 4;
 }

@@ -223,7 +223,7 @@ public sealed class ProjectProcessingServiceTests
     [InlineData(ProcessingOperation.Layers, false, 3)]
     [InlineData(ProcessingOperation.Layers, true, 1)]
     [InlineData(ProcessingOperation.CharacterLayers, false, 7)]
-    [InlineData(ProcessingOperation.CharacterLayers, true, 3)]
+    [InlineData(ProcessingOperation.CharacterLayers, true, 4)]
     public async Task LayerOperations_ReserveExpectedTokenCost(
         ProcessingOperation operation,
         bool isRevision,
@@ -269,12 +269,14 @@ public sealed class ProjectProcessingServiceTests
     }
 
     [Theory]
-    [InlineData(1920, 1)]
-    [InlineData(2560, 2)]
-    [InlineData(3840, 3)]
+    [InlineData(2560, 2, true)]
+    [InlineData(2560, 2, false)]
+    [InlineData(3840, 3, true)]
+    [InlineData(3840, 3, false)]
     public async Task UpscaleRevision_ReservesReducedTokenCost(
         int targetEdge,
-        int expectedCost)
+        int expectedCost,
+        bool recordedTarget)
     {
         await using var db = WorkflowData.Db();
         var project = WorkflowData.Project(Guid.NewGuid());
@@ -287,7 +289,7 @@ public sealed class ProjectProcessingServiceTests
             ProjectId = project.Id,
             Operation = ProcessingOperation.Upscale,
             Status = ProcessingJobStatus.Completed,
-            TargetLongEdge = targetEdge,
+            TargetLongEdge = recordedTarget ? targetEdge : null,
             ResultObjectKey = "previous-result.png",
             ResultWidth = targetEdge,
             ResultHeight = targetEdge / 2
@@ -317,6 +319,59 @@ public sealed class ProjectProcessingServiceTests
 
         Assert.Single(tokens.ReservedCosts);
         Assert.Equal(expectedCost, tokens.ReservedCosts[0]);
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task FhdRevision_DoesNotCreateOrChargeAnotherJob(bool recordedTarget, bool resolutionRequest)
+    {
+        await using var db = WorkflowData.Db();
+        var project = WorkflowData.Project(Guid.NewGuid());
+        db.Add(project);
+        var prior = new ProcessingJob
+        {
+            ProjectId = project.Id, Operation = ProcessingOperation.Upscale,
+            Status = ProcessingJobStatus.Completed, TargetLongEdge = recordedTarget ? 1920 : null,
+            ResultObjectKey = "completed-fhd.png", ResultWidth = 1920, ResultHeight = 1080
+        };
+        db.ProcessingJobs.Add(prior);
+        await db.SaveChangesAsync();
+        var tokens = new FakeTokenService();
+        var service = new ProjectProcessingService(db, new WorkflowStore(), new TestProcessor(),
+            new ProcessingJobQueue(), NullLogger<ProjectProcessingService>.Instance, tokens);
+
+        var error = await Assert.ThrowsAsync<ConflictException>(() => service.StartAsync(
+            project.UserId, project.Id, new(ProcessingOperation.Upscale, TargetLongEdge: resolutionRequest ? 1920 : null), Ct));
+
+        Assert.Contains("FHD", error.Message);
+        Assert.Empty(tokens.ReservedCosts);
+        Assert.Equal(prior.Id, (await db.ProcessingJobs.SingleAsync()).Id);
+        Assert.Equal(ProjectStatus.Uploaded, (await db.LiveLayerProjects.SingleAsync()).Status);
+    }
+
+    [Theory]
+    [InlineData(ProcessingOperation.Upscale, 2)]
+    [InlineData(ProcessingOperation.Layers, 3)]
+    [InlineData(ProcessingOperation.CharacterLayers, 7)]
+    public async Task FailedAttempt_DoesNotCountAsASuccessfulFirstUse(ProcessingOperation operation, int expectedCost)
+    {
+        await using var db = WorkflowData.Db();
+        var project = WorkflowData.Project(Guid.NewGuid());
+        project.ProcessingJobs.Add(new ProcessingJob { Operation = operation,
+            Status = ProcessingJobStatus.Failed, TargetLongEdge = operation == ProcessingOperation.Upscale ? 1920 : null });
+        db.Add(project);
+        await db.SaveChangesAsync();
+        var tokens = new FakeTokenService();
+        var service = new ProjectProcessingService(db, new WorkflowStore(), new TestProcessor(),
+            new ProcessingJobQueue(), NullLogger<ProjectProcessingService>.Instance, tokens);
+
+        await service.StartAsync(project.UserId, project.Id,
+            new(operation, TargetLongEdge: operation == ProcessingOperation.Upscale ? 1920 : null), Ct);
+
+        Assert.Equal(expectedCost, Assert.Single(tokens.ReservedCosts));
     }
 
     private sealed class TestProcessor : IProjectImageProcessor
