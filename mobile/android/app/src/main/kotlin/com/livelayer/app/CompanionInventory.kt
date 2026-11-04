@@ -13,6 +13,7 @@ import org.json.JSONObject
 
 internal class CompanionInventory(private val context: Context) {
     fun read(applied: JSONObject): JSONArray {
+        check(CompanionRuntime.inventoryAllowed()) { "로그인과 정보 수집 동의 후에만 화면을 감지할 수 있습니다." }
         val displays = (context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).displays
             .filter { it.isValid && (it.flags and Display.FLAG_PRIVATE) == 0 }
         require(displays.size <= 16) { "최대 16개 화면을 연결할 수 있습니다." }

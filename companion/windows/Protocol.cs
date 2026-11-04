@@ -9,6 +9,9 @@ internal record Account(Guid Id, string Email, string Username);
 internal record Login(string AccessToken, string RefreshToken, DateTime ExpiresAt, Account User);
 internal record Binding(string Server, Guid UserId, Guid DeviceId, string Token);
 internal record Credentials(string Server, Login? Session, Binding? Device, bool Enabled, bool Remember);
+internal record AccountProfile(Guid Id, string Email, string Username, string? ProfileImageUrl);
+internal record AccountWallet(string Plan);
+internal enum ConnectionState { Disconnected, Connecting, Connected }
 internal record AppliedWallpaper(Guid AssetId, Guid CommandId, string Path, string Mode);
 internal record Assignment(string Target, Guid? DesiredAssetId, Guid? ReportedAssetId, string Observation, long Sequence);
 internal record DisplayState(Guid Id, string NativeId, bool IsConnected, Assignment[] Wallpapers);

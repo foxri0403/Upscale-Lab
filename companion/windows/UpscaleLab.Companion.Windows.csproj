@@ -6,17 +6,26 @@
     <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>1.2.2</Version>
+    <Version>1.6.1</Version>
     <AssemblyName>UpscaleLab.Connect</AssemblyName>
     <RootNamespace>UpscaleLab.Companion</RootNamespace>
     <PublishSingleFile>true</PublishSingleFile>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <ApplicationIcon>../assets/app.ico</ApplicationIcon>
+    <CompanionDefaultApiBaseUrl Condition="'$(CompanionDefaultApiBaseUrl)' == ''">$(UPSCALE_COMPANION_API_BASE_URL)</CompanionDefaultApiBaseUrl>
+    <CompanionDefaultApiBaseUrl Condition="'$(CompanionDefaultApiBaseUrl)' == '' and '$(Configuration)' == 'Debug'">http://127.0.0.1:5080</CompanionDefaultApiBaseUrl>
   </PropertyGroup>
   <ItemGroup>
     <Using Include="System.Net.Http" />
     <Using Include="System.IO" />
     <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.17.2" />
     <AssemblyMetadata Include="DefaultApiBaseUrl" Value="$(CompanionDefaultApiBaseUrl)" />
+    <AssemblyMetadata Include="LocalTest" Value="$(CompanionLocalTest)" />
+    <EmbeddedResource Include="../assets/app.ico" LogicalName="UpscaleLab.Companion.AppIcon" />
+    <EmbeddedResource Include="../assets/app-icon.png" LogicalName="UpscaleLab.Companion.BrandImage" />
   </ItemGroup>
+  <Target Name="ValidateCompanionServer" BeforeTargets="CoreCompile" Condition="'$(Configuration)' == 'Release'">
+    <Error Condition="'$(CompanionDefaultApiBaseUrl)' == ''" Text="Set CompanionDefaultApiBaseUrl or UPSCALE_COMPANION_API_BASE_URL before building the release app." />
+  </Target>
 </Project>

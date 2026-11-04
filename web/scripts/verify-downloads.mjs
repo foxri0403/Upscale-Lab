@@ -8,6 +8,8 @@ export async function verifyDownloads(directory) {
   const manifest = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8"));
   if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.releases))
     throw new Error("연결 앱 배포 manifest 형식이 올바르지 않습니다.");
+  if (manifest.localTest === true || manifest.releases.some(release => /-local(?:-|\.)/.test(release.url || "")))
+    throw new Error("로컬 테스트 연결 앱은 운영 웹에 배포할 수 없습니다.");
   for (const platform of ["Windows", "Android"]) {
     const matches = manifest.releases.filter(release => release.platform === platform);
     if (matches.length !== 1) throw new Error(`${platform} 연결 앱 배포 정보가 필요합니다.`);

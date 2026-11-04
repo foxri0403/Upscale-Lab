@@ -581,8 +581,22 @@ export function Billing() {
       </div>
 
       <p style={{ opacity: 0.75, marginBottom: 28 }}>
-        업스케일링에 사용할 수 있는 토큰과 요금제 정보를 확인하세요.
+        업스케일링·배경 분리·Live2D에 사용할 수 있는 토큰과 요금제 정보를 확인하세요.
       </p>
+      <section aria-label="작업별 토큰 사용량" style={{ marginBottom: 28, overflowX: "auto" }}>
+        <h2>작업별 토큰 사용량</h2>
+        <table style={{ width: "100%", textAlign: "left", borderSpacing: "0 10px" }}>
+          <thead><tr><th>작업</th><th>최초 실행</th><th>재수정</th></tr></thead>
+          <tbody>
+            <tr><td>FHD 업스케일</td><td>2토큰</td><td>1토큰</td></tr>
+            <tr><td>QHD 업스케일</td><td>4토큰</td><td>2토큰</td></tr>
+            <tr><td>4K 업스케일</td><td>6토큰</td><td>3토큰</td></tr>
+            <tr><td>배경 분리</td><td>3토큰</td><td>1토큰</td></tr>
+            <tr><td>Live2D 파츠 분리</td><td>7토큰</td><td>3토큰</td></tr>
+          </tbody>
+        </table>
+        <p>동일 프로젝트의 완료 이력을 기준으로 계산합니다. 업스케일 재수정은 같은 목표 해상도에 적용하며, 처리 실패 시 예약한 토큰을 환불합니다.</p>
+      </section>
 
       {subscriptionMessage && (
         <p role="status">{subscriptionMessage}</p>

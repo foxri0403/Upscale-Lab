@@ -50,7 +50,7 @@ pnpm build는 TypeScript 검사와 일반 Vite 빌드를 수행한다. build:clo
 
 ## 연결 앱 다운로드
 
-public/downloads/manifest.json과 그 manifest가 가리키는 서명된 Android APK·Windows EXE가 필요하다. Git에서 제외된 현재 배포 파일이므로 정리할 때 일반 빌드 산출물로 취급하지 않는다. `node scripts/verify-downloads.mjs public/downloads`로 크기·SHA-256을 검증한다. iOS는 준비 중이다. [연결 앱 빌드와 제약](../docs/companion-apps.md)을 따른다.
+public/downloads/manifest.json과 그 manifest가 가리키는 서명된 Android APK·Windows EXE가 필요하다. Git에서 제외된 현재 배포 파일이므로 정리할 때 일반 빌드 산출물로 취급하지 않는다. `node scripts/verify-downloads.mjs public/downloads`로 크기·SHA-256을 검증한다. 다운로드는 Windows와 Android만 표시한다. [연결 앱 빌드와 제약](../docs/companion-apps.md)을 따른다.
 
 ## 개발용 피사체 분리 실험실
 
@@ -59,6 +59,8 @@ public/downloads/manifest.json과 그 manifest가 가리키는 서명된 Android
 tests/*.html과 브라우저 진입 파일은 선택 마스크·기기·작업실 브라우저 회귀 도구다. 기본 Vite 운영 진입점에 포함되지 않아도 검증에 사용하므로 유지한다. pnpm test의 클라우드 smoke는 관련 환경변수를 지정한 경우에만 원격 서비스를 검증한다.
 
 ## 수동 배포
+
+`build:cloud`에는 결제용 공개 `VITE_TOSS_CLIENT_KEY`가 필요하다. 실제 값은 `.env.production.local` 또는 빌드 환경변수로 공급한다. 누락 시 빌드를 중단하므로, 병합 후 결제 버튼이 조용히 비활성화되는 웹을 배포하지 않는다. 서버 시크릿 키는 웹에 넣지 않는다. 현재 테스트 결제 모드와 토큰 사용량은 [결제 가이드](../docs/billing.md)를 따른다.
 
 자동 배포는 구성하지 않는다. [배포 가이드](../docs/deployment.md), [nginx 예시](../deploy/nginx-web.conf.example), [수동 설치 스크립트](../deploy/install-web.sh)를 따른다. 기존 서명 설치 파일을 포함한 cloud 빌드를 만든 다음 수동으로 전달한다.
 
@@ -69,3 +71,7 @@ tar -czf ../tmp/upscale-web.tar.gz -C dist .
 ```
 
 운영 반영은 별도 작업이다. 로컬 빌드·단위 테스트만으로 실제 AWS 권한·GPU 품질·결제 승인·Windows/Android OS 적용까지 검증한 것으로 간주하지 않는다.
+
+## 기기 UI 로컬 검증
+
+`pnpm dev` 또는 `pnpm dev:production-ui` 실행 후 [기기 UI 검증 페이지](http://localhost:5173/tests/device-ui.html)를 연다. 실제 기기 관리 컴포넌트와 API 상태 매핑에 모의 PC·휴대폰·태블릿 데이터를 공급한다. 실제 계정·서버·설치 파일을 변경하지 않으며 운영 빌드에 포함되지 않는다. 태블릿도 기존 홈/잠금 화면 카드 구조를 사용한다. 수동 키 발급 메뉴는 없으며 다운로드에는 Windows·Android 두 항목만 표시한다. 실행 파일과 실제 연동 확인은 [연결 앱 로컬 가이드](../companion/LOCAL-TESTING.md)를 따른다.

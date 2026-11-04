@@ -93,7 +93,7 @@ builder.Services.AddSingleton(cognitoOptions);
 builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure(3)));
+    options.UseNpgsql(connectionString));
 
 builder.Services.AddSingleton<IAmazonS3>(_ =>
     new AmazonS3Client(RegionEndpoint.GetBySystemName(s3Options.Region)));

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Download, Monitor, Smartphone, Apple } from "lucide-react";
+import { Download, Monitor, Smartphone } from "lucide-react";
 import { Notice } from "./ui";
 
 type Release = { platform: "Windows" | "Android"; version: string; url: string; sha256: string; sizeBytes: number };
@@ -31,7 +31,6 @@ export function Downloads() {
         {release && <a className="button primary" href={release.url} download><Download size={16} />{platform === "Windows" ? "EXE" : "APK"} 다운로드</a>}
       </div>;
     })}
-    <div className="download-platform"><Apple /><div><strong>iOS</strong><small>준비 중</small></div></div>
     {error && <Notice>{error} 잠시 후 다시 열어 주세요.</Notice>}
     <Notice>연결 중인 기기의 화면 개수·해상도·주사율·기기 정보와 배경화면 적용 상태를 표시합니다. Android Live 2D의 첫 적용은 기기에서 승인해야 합니다.</Notice>
   </>;

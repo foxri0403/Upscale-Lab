@@ -29,23 +29,33 @@ internal object CompanionRuntime {
     @Volatile private var initialized = false
     @Volatile private var running = false
     @Volatile private var verified = false
+    @Volatile private var connectionState = "disconnected"
     @Volatile private var message = "웹과 같은 계정으로 로그인해 주세요."
     @Volatile private var pending: JSONObject? = null
+    private var displayListener: DisplayManager.DisplayListener? = null
+    private var wallpaperReceiver: android.content.BroadcastReceiver? = null
     private var nextHeartbeat = 0L
+    @Volatile private var profile: JSONObject? = null
+    @Volatile private var plan = "확인 중"
+    @Volatile private var lastLiveAttempt: String? = null
+    private var notifiedLiveId: String? = null
+    private fun preferences() = CompanionPreferences(context)
+    private fun currentOwner() = store.read().optJSONObject("session")?.optJSONObject("user")?.optString("id") ?: ""
+    private fun liveEnabled() = currentOwner().isNotEmpty() && preferences().live(currentOwner())
+    fun alarmsEnabled() = currentOwner().isNotEmpty() && preferences().alarms(currentOwner())
+    private fun announce(text: String) { CompanionAlerts.show(context, alarmsEnabled(), text) }
+
+    fun inventoryAllowed() = initialized && CompanionPrivacy(context).accepted && verified && store.read().has("session")
+    private fun requireConsent() = check(CompanionPrivacy(context).accepted) { "기기·화면 정보 수집·이용 동의가 필요합니다." }
 
     @Synchronized fun initialize(value: Context) {
         if (initialized) return
         context = value.applicationContext; store = CompanionStore(context); api = CompanionApi(store); initialized = true
+        val configuredServer = CompanionApi.normalize(BuildConfig.COMPANION_API_BASE_URL)
+        val saved = store.read()
+        if (saved.has("server") && saved.optString("server") != configuredServer)
+            store.save(JSONObject().put("server", configuredServer))
         worker.scheduleWithFixedDelay({ if (running) poll() }, 0, 15, TimeUnit.SECONDS)
-        androidx.core.content.ContextCompat.registerReceiver(context, object : android.content.BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: android.content.Intent) { inventoryDirty.set(true); pollSoon() }
-        }, android.content.IntentFilter(android.content.Intent.ACTION_WALLPAPER_CHANGED), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
-        (context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).registerDisplayListener(object : DisplayManager.DisplayListener {
-            private fun changed() { inventoryDirty.set(true); pollSoon() }
-            override fun onDisplayAdded(id: Int) = changed()
-            override fun onDisplayRemoved(id: Int) = changed()
-            override fun onDisplayChanged(id: Int) = changed()
-        }, Handler(Looper.getMainLooper()))
         watcher.execute {
             var cursor: String? = null; var epoch = generation.get()
             while (!Thread.currentThread().isInterrupted) {
@@ -60,62 +70,140 @@ internal object CompanionRuntime {
             }
         }
     }
+    @Synchronized private fun observeInventory() {
+        check(inventoryAllowed()) { "로그인과 정보 수집 동의가 필요합니다." }
+        if (displayListener != null) return
+        val listener = object : DisplayManager.DisplayListener {
+            private fun changed() { inventoryDirty.set(true); pollSoon() }
+            override fun onDisplayAdded(id: Int) = changed()
+            override fun onDisplayRemoved(id: Int) = changed()
+            override fun onDisplayChanged(id: Int) = changed()
+        }
+        (context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).registerDisplayListener(listener, Handler(Looper.getMainLooper()))
+        displayListener = listener
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: android.content.Intent) { inventoryDirty.set(true); pollSoon() }
+        }
+        androidx.core.content.ContextCompat.registerReceiver(context, receiver,
+            android.content.IntentFilter(android.content.Intent.ACTION_WALLPAPER_CHANGED), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        wallpaperReceiver = receiver
+    }
+    @Synchronized private fun stopObservingInventory() {
+        displayListener?.let { (context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).unregisterDisplayListener(it) }
+        wallpaperReceiver?.let { context.unregisterReceiver(it) }
+        displayListener = null; wallpaperReceiver = null
+    }
     fun invalidate() {
-        generation.incrementAndGet(); running = false; pending = null
+        generation.incrementAndGet(); running = false; connectionState = "disconnected"; pending = null
+        stopObservingInventory()
         api.cancelUpdates()
         context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putLong("companion_valid_until", 0).apply()
     }
     fun resume(): Boolean {
         val state = store.read()
-        if (!state.optBoolean("enabled") || !state.has("session")) return false
+        if (!CompanionPrivacy(context).accepted || !state.has("session")) return false
+        if (!running) connectionState = "connecting"
         running = true; synchronized(watchSignal) { watchSignal.notifyAll() }; inventoryDirty.set(true); pollSoon(); return true
     }
     fun pollSoon() { if (initialized && running && pollQueued.compareAndSet(false, true)) worker.execute { pollQueued.set(false); if (running) poll() } }
     fun status(): Map<String, Any?> {
         val state = store.read(); val user = state.optJSONObject("session")?.optJSONObject("user")
-        val displays = runCatching { CompanionInventory(context).read(applied(state)) }.getOrDefault(JSONArray())
+        val allowed = inventoryAllowed()
+        val displays = CompanionInventoryAccess.read(CompanionPrivacy(context).accepted, allowed) {
+            runCatching { CompanionInventory(context).read(applied(state)) }.getOrDefault(JSONArray())
+        } ?: JSONArray()
+        val requiredFlag = if (pending?.optString("target") == "Lock") WallpaperManager.FLAG_LOCK else WallpaperManager.FLAG_SYSTEM
+        val active = if (allowed) runCatching { CompanionInventory(context).activeFlags() and requiredFlag != 0 }.getOrDefault(false) else false
+        val needsSetup = allowed && LiveActivationPolicy.needsPicker(liveEnabled(), pending?.has("manifest") == true, active, lastLiveAttempt == pending?.optString("id"))
         return mapOf("server" to state.optString("server"), "account" to user?.optString("email"),
-            "loggedIn" to (verified && user != null), "enabled" to running, "message" to message,
+            "username" to (profile?.optString("username") ?: user?.optString("username")),
+            "profileImageUrl" to profile?.optString("profileImageUrl")?.takeIf { it.startsWith("https://") }, "plan" to plan,
+            "saveIdentifier" to state.optBoolean("saveIdentifier"), "savedIdentifier" to state.optString("identifier"),
+            "liveEnabled" to liveEnabled(), "alarmsEnabled" to alarmsEnabled(), "needsLiveSetup" to needsSetup,
+            "notificationPermissionGranted" to (Build.VERSION.SDK_INT < 33 || androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED),
+            "privacyAccepted" to CompanionPrivacy(context).accepted,
+            "loggedIn" to (allowed && user != null), "enabled" to running, "connectionState" to connectionState, "message" to message,
             "pendingLive" to (pending != null),
-            "osVersion" to "Android ${Build.VERSION.RELEASE}", "displays" to (0 until displays.length()).map {
+            "osVersion" to (if (allowed) "Android ${Build.VERSION.RELEASE}" else ""), "displays" to (0 until displays.length()).map {
                 val item = displays.getJSONObject(it)
                 mapOf("name" to item.optString("name"), "width" to item.optInt("width"), "height" to item.optInt("height"),
                     "refreshRateHz" to item.optDouble("refreshRateHz").takeIf { hz -> hz.isFinite() }, "canApply" to item.optBoolean("canApplyWallpaper"))
             })
     }
     fun action(name: String, arguments: Map<*, *>, done: (Any?, String?) -> Unit) {
-        if (name in listOf("login", "logout", "disable", "reconnect")) invalidate()
+        if (name in listOf("login", "logout")) invalidate()
+        if (name in listOf("login", "logout")) verified = false
         worker.execute {
             try {
+                if (name !in listOf("acceptPrivacy", "logout", "disable")) requireConsent()
                 when (name) {
+                    "saveIdentifier" -> {
+                        val saved = store.read().put("saveIdentifier", arguments["enabled"] == true)
+                        if (arguments["enabled"] == true) saved.put("identifier", (arguments["identifier"] as? String ?: "").trim()) else saved.remove("identifier")
+                        store.save(saved)
+                    }
+                    "refreshProfile" -> { check(inventoryAllowed()) { "로그인이 필요합니다." }; refreshProfile() }
+                    "setAlarms" -> {
+                        check(inventoryAllowed()) { "로그인이 필요합니다." }
+                        val enabled = arguments["enabled"] == true; preferences().setAlarms(currentOwner(), enabled)
+                        if (!enabled) CompanionAlerts.cancel(context)
+                    }
+                    "setLive" -> {
+                        check(inventoryAllowed()) { "로그인이 필요합니다." }
+                        val enabled = arguments["enabled"] == true
+                        if (enabled) { verifyAccount(); api.request("/api/agent/state", agent = true) }
+                        preferences().setLive(currentOwner(), enabled); lastLiveAttempt = null
+                        context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putBoolean("companion_live_enabled", enabled).apply()
+                        if (enabled) { lease(); pollSoon() } else {
+                            context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putLong("companion_valid_until", 0).apply()
+                        }
+                    }
+                    "acceptPrivacy" -> {
+                        require(arguments["accepted"] == true) { "동의 항목을 선택해 주세요." }
+                        CompanionPrivacy(context).accept()
+                    }
                     "login" -> {
-                        val server = CompanionApi.normalize(arguments["server"] as String)
-                        val previous = store.read(); verified = false
-                        store.save(JSONObject().put("server", server).put("remember", arguments["remember"] == true))
+                        val server = CompanionApi.normalize(BuildConfig.COMPANION_API_BASE_URL)
+                        val previous = store.read(); verified = false; profile = null; plan = "확인 중"
+                        val initial = JSONObject().put("server", server).put("remember", arguments["remember"] == true).put("saveIdentifier", arguments["saveIdentifier"] == true)
+                        if (arguments["saveIdentifier"] == true) initial.put("identifier", (arguments["identifier"] as String).trim())
+                        store.save(initial)
                         val session = api.request("/api/auth/login", "POST", JSONObject().put("email", (arguments["identifier"] as String).trim())
                             .put("password", arguments["password"] as String), anonymous = true) as JSONObject
                         require(session.optString("refreshToken").isNotBlank()) { "계정 세션을 지원하는 서버가 필요합니다." }
                         val state = store.read().put("session", session).put("enabled", true)
                         val old = previous.optJSONObject("binding")
                         if (old != null && old.optString("server") == server && old.optString("owner") == session.getJSONObject("user").getString("id")) state.put("binding", old)
-                        store.save(state); verified = true; bind(false); message = "기기 연결 완료. 웹에서 배경화면을 선택해 주세요."
+                        store.save(state); verified = true; bind(true); refreshProfile(); message = "기기 연결 완료. 웹에서 배경화면을 선택해 주세요."
                     }
                     "enable" -> { require(store.read().has("session")) { "로그인이 필요합니다." }; verifyAccount(); bind(false); store.save(store.read().put("enabled", true)) }
-                    "disable" -> { store.save(store.read().put("enabled", false)); message = "동기화가 꺼져 있습니다." }
                     "logout" -> {
                         val refresh = store.read().optJSONObject("session")?.optString("refreshToken")
                         store.save(store.read().apply { remove("session"); put("enabled", false) }); verified = false
+                        profile = null; plan = "확인 중"; CompanionAlerts.cancel(context)
                         if (!refresh.isNullOrBlank()) runCatching { api.request("/api/auth/logout", "POST", JSONObject().put("refreshToken", refresh), anonymous = true) }
                         message = "로그아웃했습니다. 정적 배경화면은 기기에 남습니다."
                     }
                     "reconnect" -> { verifyAccount(); bind(true); store.save(store.read().put("enabled", true)) }
                     "activateLive" -> {
+                        check(inventoryAllowed() && liveEnabled()) { "설정에서 Live 2D를 켜 주세요." }
                         val item = pending ?: error("대기 중인 Live 2D 요청이 없습니다.")
                         requireLatest(item)
                         val path = item.getString("manifest")
+                        if (lastLiveAttempt == item.getString("id")) { done(mapOf("openLivePicker" to false), null); return@execute }
+                        lastLiveAttempt = item.getString("id")
                         lease()
                         context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putString("preview_manifest_path", path).commit()
-                        done(path, null); return@execute
+                        done(mapOf("openLivePicker" to true), null); return@execute
+                    }
+                    "completeLiveSetup" -> {
+                        check(inventoryAllowed()) { "로그인이 필요합니다." }
+                        val required = if (pending?.optString("target") == "Lock") WallpaperManager.FLAG_LOCK else WallpaperManager.FLAG_SYSTEM
+                        if (CompanionInventory(context).activeFlags() and required == 0) {
+                            preferences().setLive(currentOwner(), false)
+                            context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putBoolean("companion_live_enabled", false).putLong("companion_valid_until", 0).apply()
+                            message = "Live 2D 적용을 취소했습니다. 설정에서 다시 켤 수 있습니다."
+                        } else { lease(); inventoryDirty.set(true); pollSoon() }
                     }
                     else -> error("지원하지 않는 동작입니다.")
                 }
@@ -124,11 +212,23 @@ internal object CompanionRuntime {
         }
     }
     private fun verifyAccount() {
+        requireConsent()
         val user = api.request("/api/auth/me") as JSONObject
         require(user.getString("id") == owner(store.read())) { "로그인 계정이 일치하지 않습니다." }; verified = true
+        refreshProfile()
+    }
+    private fun refreshProfile() {
+        val owner = currentOwner()
+        try {
+            val value = api.request("/api/account") as JSONObject
+            require(value.getString("id") == owner) { "계정 정보가 일치하지 않습니다." }
+            profile = value
+            plan = (api.request("/api/tokens/me") as JSONObject).optString("plan", "확인 불가")
+        } catch (_: Exception) { plan = "확인 불가" }
     }
     private fun owner(state: JSONObject) = state.getJSONObject("session").getJSONObject("user").getString("id")
     private fun bind(force: Boolean) {
+        check(inventoryAllowed()) { "로그인과 정보 수집 동의가 필요합니다." }
         val state = store.read()
         if (state.has("binding") && !force) return
         var id = state.optJSONObject("binding")?.optString("deviceId")
@@ -159,8 +259,10 @@ internal object CompanionRuntime {
         temp.writeText(value.toString()); check(temp.renameTo(file))
     }
     private fun lease() {
+        check(inventoryAllowed()) { "로그인과 정보 수집 동의가 필요합니다." }
         context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putString("companion_owner", owner(store.read()))
-            .putLong("companion_valid_until", System.currentTimeMillis() + 60000).apply()
+            .putBoolean("companion_live_enabled", liveEnabled())
+            .putLong("companion_valid_until", if (liveEnabled()) System.currentTimeMillis() + 60000 else 0).apply()
     }
     private fun requireLatest(command: JSONObject): JSONObject {
         val clear = command.optString("action", "Apply") == "Clear"
@@ -182,8 +284,11 @@ internal object CompanionRuntime {
     private fun poll() {
         val epoch = generation.get()
         try {
-            if (!running) return
+            if (!running || !CompanionPrivacy(context).accepted) return
+            if (connectionState != "connected") connectionState = "connecting"
             if (!verified) verifyAccount()
+            if (epoch != generation.get() || !running) return
+            observeInventory()
             val state = store.read(); val saved = applied(state)
             val inventory = CompanionInventory(context)
             val remote = api.request("/api/agent/state", agent = true) as JSONObject
@@ -198,6 +303,8 @@ internal object CompanionRuntime {
             if (epoch != generation.get() || !running) return
             lease()
             val commands = api.request("/api/agent/commands", agent = true) as JSONArray
+            if (epoch != generation.get() || !running) return
+            connectionState = "connected"
             if (pending != null && !(0 until commands.length()).any { commands.getJSONObject(it).getString("id") == pending!!.getString("id") }) pending = null
             for (i in 0 until commands.length()) {
                 if (epoch != generation.get() || !running) return
@@ -243,8 +350,12 @@ internal object CompanionRuntime {
                         saveApplied(state, saved)
                     } else if (!already && mode == "Live2D") {
                         pending = JSONObject(command.toString()).put("manifest", local.absolutePath)
+                        if (!liveEnabled()) {
+                            api.report(id, "NeedsUserAction"); message = "설정에서 Live 2D를 켜면 적용됩니다."; continue
+                        }
                         if (inventory.activeFlags() and flag == 0) {
-                            api.report(id, "NeedsUserAction"); message = "앱에서 Live 2D 적용 확인을 눌러 Android 화면에서 승인해 주세요."; continue
+                            if (notifiedLiveId != id) { notifiedLiveId = id; announce("Live 2D를 적용하려면 연결 앱을 열어 시스템 적용을 확인해 주세요.") }
+                            api.report(id, "NeedsUserAction"); message = "설정에서 Live 2D를 켜고 시스템 적용을 확인해 주세요."; continue
                         }
                         val prefs = context.getSharedPreferences("live_layer", Context.MODE_PRIVATE)
                         if (prefs.getString("direct_manifest_path", null) != local.absolutePath)
@@ -256,11 +367,12 @@ internal object CompanionRuntime {
                         saved.put(target, JSONObject().put("assetId", command.getString("assetId")).put("commandId", id).put("mode", mode).put("manifest", local.absolutePath))
                         saveApplied(state, saved); pending = null
                     }
-                    didApply = true; api.report(id, "Applied"); message = "배경화면 적용 완료. 웹의 기기 관리에서 확인할 수 있습니다."; nextHeartbeat = 0
+                    didApply = true; api.report(id, "Applied"); message = "배경화면 적용 완료. 웹의 기기 관리에서 확인할 수 있습니다."; announce("배경화면을 적용했습니다."); nextHeartbeat = 0
                 } catch (error: Exception) {
                     if (epoch != generation.get() || !running) return
                     if (error is CompanionApiError && error.status == 401) throw error
                     if (error is CompanionApiError && error.status in listOf(404, 409)) continue
+                    if (error is java.io.IOException || error is CompanionApiError) connectionState = "disconnected"
                     if (!didApply && error !is java.io.IOException) runCatching { api.report(id, "Failed", error.message) }
                     message = if (didApply) "적용 결과 보고를 다시 시도합니다." else error.message ?: "배경화면 적용에 실패했습니다."
                 }
@@ -268,9 +380,10 @@ internal object CompanionRuntime {
             if (commands.length() == 0) message = "연결됨 · 웹의 새 배경화면 요청을 기다리고 있습니다."
         } catch (error: Exception) {
             if (epoch != generation.get() || !running) return
+            connectionState = "disconnected"
             context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putLong("companion_valid_until", 0).apply()
             if (error is CompanionApiError && error.status == 401) {
-                running = false; api.cancelUpdates(); store.save(store.read().put("enabled", false)); message = "계정 또는 기기 연결이 만료되었습니다. 로그인 또는 기기 다시 연결이 필요합니다."
+                running = false; verified = false; api.cancelUpdates(); store.save(store.read().put("enabled", false)); message = "계정 또는 기기 연결이 만료되었습니다. 다시 로그인하거나 웹의 기기 관리에서 확인해 주세요."
             } else message = "연결 재시도 중 · ${error.message ?: "네트워크를 확인해 주세요."}"
         }
     }

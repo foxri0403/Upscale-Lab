@@ -1,5 +1,17 @@
 import type { Device } from "./model";
 
+// Use the built-in display's logical short edge; external monitors must not
+// turn a phone into a tablet. Older agents without density remain phones.
+export function androidFormFactor(displays: {
+  width: number; height: number; scale?: number; isPrimary?: boolean;
+  canApplyWallpaper?: boolean; isConnected: boolean;
+}[]): "phone" | "tablet" {
+  const builtIn = displays.find(d => d.isPrimary && d.canApplyWallpaper !== false)
+    ?? displays.find(d => d.isConnected && d.canApplyWallpaper === true);
+  if (!builtIn || !Number.isFinite(builtIn.scale) || builtIn.scale! <= 0) return "phone";
+  return Math.min(builtIn.width, builtIn.height) / builtIn.scale! >= 600 ? "tablet" : "phone";
+}
+
 export function registeredDevices(devices: Device[]): Device[] {
   const time = (device: Device) => {
     const value = Date.parse(device.created || "");

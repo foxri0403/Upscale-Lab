@@ -9,6 +9,8 @@ using UpscaleLab.Application.Upscaling;
 using UpscaleLab.Domain.Entities;
 using UpscaleLab.Domain.Enums;
 using UpscaleLab.Infrastructure.Database;
+using UpscaleLab.Infrastructure.Tokens;
+using UpscaleLab.Domain.Tokens;
 
 namespace UpscaleLab.Infrastructure.Processing;
 
@@ -17,7 +19,8 @@ public sealed class ProjectProcessingService(
     IStorageService storageService,
     IProjectImageProcessor processor,
     IProcessingJobQueue queue,
-    ILogger<ProjectProcessingService> logger) : IProjectProcessingService
+    ILogger<ProjectProcessingService> logger,
+    ITokenService tokenService) : IProjectProcessingService
 {
     public Task<ProcessingStatusResponse> StartAsync(Guid userId, Guid projectId, CancellationToken cancellationToken) =>
         StartAsync(userId, projectId, new ProcessProjectRequest(), cancellationToken);
@@ -54,10 +57,12 @@ public sealed class ProjectProcessingService(
                 throw new ValidationException("FHD, QHD, 4K 중 업스케일 목표 해상도를 선택해 주세요.");
             if (Math.Max(project.OriginalImage.OriginalWidth, project.OriginalImage.OriginalHeight) >= edge)
                 throw new ValidationException("현재 이미지보다 높은 해상도를 선택해 주세요.");
+            // 동일 해상도 재수정은 허용한다.
+            // 더 높은 해상도의 결과가 있으면 낮은 해상도로의 재처리는 차단한다.
             if (project.ProcessingJobs.Any(x => x.Operation == ProcessingOperation.Upscale &&
                 x.Status == ProcessingJobStatus.Completed && x.ResultObjectKey != null &&
-                Math.Max(x.ResultWidth, x.ResultHeight) >= edge))
-                throw new ConflictException("선택한 해상도 이상의 업스케일 결과가 이미 있습니다.");
+                Math.Max(x.ResultWidth, x.ResultHeight) > edge))
+                throw new ConflictException("더 높은 해상도의 업스케일 결과가 이미 있습니다.");
         }
         if (!processor.Supports(request.Operation))
             throw new ConfigurationException(request.Operation == ProcessingOperation.CharacterLayers
@@ -102,18 +107,153 @@ public sealed class ProjectProcessingService(
             job.SubjectMaskObjectKey = $"users/{userId:N}/projects/{projectId:N}/masks/{job.Id:N}{(selection ? ".selection" : "")}.png";
             await storageService.UploadAsync(normalized, job.SubjectMaskObjectKey, "image/png", cancellationToken);
         }
+        try
+        {
+            // S3 작업을 완료한 후에만 DB 잠금을 획득한다.
+            await using var projectLockTransaction =
+                dbContext.Database.IsRelational()
+                    ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+                    : null;
+
+            if (dbContext.Database.ProviderName ==
+                "Npgsql.EntityFrameworkCore.PostgreSQL")
+            {
+                await dbContext.LiveLayerProjects
+                    .FromSqlInterpolated($"""
+                        SELECT * FROM live_layer_projects
+                        WHERE "Id" = {projectId} AND "UserId" = {userId}
+                        FOR UPDATE
+                        """)
+                    .AsNoTracking()
+                    .ToListAsync(cancellationToken);
+            }
+
+            // S3 작업 도중 프로젝트나 작업 상태가 바뀌었을 수 있다.
+            // 잠금 획득 후 DB에서 최신 상태를 다시 조회한다.
+            var latestProject = await dbContext.LiveLayerProjects
+                .AsNoTracking()
+                .Include(x => x.Layers)
+                .Include(x => x.ProcessingJobs)
+                .SingleOrDefaultAsync(
+                    x => x.Id == projectId && x.UserId == userId,
+                    cancellationToken)
+                ?? throw new NotFoundException(
+                    "프로젝트를 찾을 수 없습니다.");
+
+            if (ProjectDraftState.IsDiscarded(
+                    latestProject.SavedEditJson))
+                throw new NotFoundException(
+                    "프로젝트를 찾을 수 없습니다.");
+
+            var currentJobs = latestProject.ProcessingJobs;
+
+            if (currentJobs.Any(x =>
+                    x.Status is ProcessingJobStatus.Queued
+                        or ProcessingJobStatus.Processing))
+                throw new ConflictException(
+                    "이미 처리 중인 프로젝트입니다.");
+
+            if (request.Operation == ProcessingOperation.Upscale &&
+                request.TargetLongEdge is int targetEdge &&
+                currentJobs.Any(x =>
+                    x.Operation == ProcessingOperation.Upscale &&
+                    x.Status == ProcessingJobStatus.Completed &&
+                    x.ResultObjectKey != null &&
+                    Math.Max(x.ResultWidth, x.ResultHeight) > targetEdge))
+                throw new ConflictException(
+                    "더 높은 해상도의 업스케일 결과가 이미 있습니다.");
+
+            if (await dbContext.GalleryPosts.AnyAsync(
+                    x => x.ProjectId == projectId && x.IsPublic,
+                    cancellationToken) ||
+                await dbContext.WallpaperAssets.AnyAsync(
+                    x => x.SourceProjectId == projectId &&
+                         x.IsPublic && !x.IsArchived,
+                    cancellationToken))
+                throw new ConflictException(
+                    "업로드를 해제한 뒤 이미지를 변경해 주세요.");
+
+            if (mask != null)
+            {
+                // 준비한 마스크의 기준 레이어가 변경되었는지 확인한다.
+                var originalLayers = project.Layers
+                    .Select(x => (x.Id, x.ObjectKey, x.LayerType))
+                    .OrderBy(x => x.Id)
+                    .ToArray();
+
+                var currentLayers = latestProject.Layers
+                    .Select(x => (x.Id, x.ObjectKey, x.LayerType))
+                    .OrderBy(x => x.Id)
+                    .ToArray();
+
+                if (!originalLayers.SequenceEqual(currentLayers))
+                    throw new ConflictException(
+                        "분리 결과가 변경되었습니다. 다시 시도해 주세요.");
+
+                var previousSource = project.ProcessingJobs
+                    .Where(x => x.Status == ProcessingJobStatus.Completed &&
+                                x.ResultObjectKey != null)
+                    .OrderByDescending(x => x.CreatedAt)
+                    .FirstOrDefault()?.ResultObjectKey;
+
+                var currentSource = currentJobs
+                    .Where(x => x.Status == ProcessingJobStatus.Completed &&
+                                x.ResultObjectKey != null)
+                    .OrderByDescending(x => x.CreatedAt)
+                    .FirstOrDefault()?.ResultObjectKey;
+
+                if (previousSource != currentSource)
+                    throw new ConflictException(
+                        "이미지 처리 결과가 변경되었습니다. 다시 시도해 주세요.");
+            }
+
+        // 작업별 최초 실행 / 재수정 토큰 계산
+        int? billingEdge = request.TargetLongEdge;
+
+        if (request.Operation == ProcessingOperation.Upscale &&
+            billingEdge is null)
+        {
+            var originalEdge = Math.Max(
+                project.OriginalImage.OriginalWidth,
+                project.OriginalImage.OriginalHeight);
+
+            var requestedEdge = (long)originalEdge * request.UpscaleFactor;
+
+            billingEdge = requestedEdge <= 1920 ? 1920
+                : requestedEdge <= 2560 ? 2560
+                : requestedEdge <= 3840 ? 3840
+                : throw new ValidationException(
+                    "지원하지 않는 업스케일 해상도입니다.");
+        }
+
+        var cost = CalculateTokenCost(
+            request.Operation,
+            billingEdge,
+            currentJobs);
+
         project.Status = ProjectStatus.Processing;
         project.FailureReason = null;
         dbContext.ProcessingJobs.Add(job);
-        try
-        {
+
+            // 프로젝트 잠금, 작업 생성, 토큰 예약을 원자적으로 처리한다.
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            await tokenService.ReserveCostAsync(
+                userId, job.Id, cost, cancellationToken);
+
+            if (projectLockTransaction is not null)
+                await projectLockTransaction.CommitAsync(cancellationToken);
         }
         catch
         {
-            if (job.SubjectMaskObjectKey is { } key) await TryDeleteAsync(key);
+            dbContext.ChangeTracker.Clear();
+
+            if (job.SubjectMaskObjectKey is { } key)
+                await TryDeleteAsync(key);
+
             throw;
         }
+
         await queue.EnqueueAsync(job.Id, cancellationToken);
         return MapStatus(job);
     }
@@ -183,7 +323,19 @@ public sealed class ProjectProcessingService(
         if (ProjectDraftState.IsDiscarded(job.Project.SavedEditJson))
         {
             job.Status = ProcessingJobStatus.Failed; job.CompletedAt = DateTime.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
+
+            await using (var transaction = dbContext.Database.IsRelational()
+                ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+                : null)
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+
+                await tokenService.RefundAsync(job.Id, cancellationToken);
+
+                if (transaction is not null)
+                    await transaction.CommitAsync(cancellationToken);
+            }
+
             await Projects.DraftProjectCleanup.DiscardAsync(dbContext, storageService, ownerId, job.ProjectId, false, cancellationToken);
             return;
         }
@@ -341,7 +493,19 @@ public sealed class ProjectProcessingService(
             job.ErrorMessage = null;
             job.Project.Status = ProjectStatus.Completed;
             job.Project.FailureReason = null;
-            await dbContext.SaveChangesAsync(cancellationToken);
+
+            // 작업 성공과 토큰 사용 확정을 원자적으로 처리한다.
+            await using (var transaction = dbContext.Database.IsRelational()
+                ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+                : null)
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+
+                await tokenService.CompleteAsync(job.Id, cancellationToken);
+
+                if (transaction is not null)
+                    await transaction.CommitAsync(cancellationToken);
+            }
 
             foreach (var oldKey in oldKeys)
             {
@@ -377,7 +541,19 @@ public sealed class ProjectProcessingService(
             job.CompletedAt = DateTime.UtcNow;
             job.Project.Status = ProjectStatus.Failed;
             job.Project.FailureReason = message;
-            await dbContext.SaveChangesAsync(CancellationToken.None);
+
+            // 작업 실패와 예약 토큰 환불을 원자적으로 처리한다.
+            await using (var transaction = dbContext.Database.IsRelational()
+                ? await dbContext.Database.BeginTransactionAsync(CancellationToken.None)
+                : null)
+            {
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+
+                await tokenService.RefundAsync(job.Id, CancellationToken.None);
+
+                if (transaction is not null)
+                    await transaction.CommitAsync(CancellationToken.None);
+            }
         }
         finally
         {
@@ -401,6 +577,39 @@ public sealed class ProjectProcessingService(
                 logger.LogWarning(exception, "Failed to clean processing workspace {Workspace}", workspace);
             }
         }
+    }
+
+    private static int CalculateTokenCost(
+        ProcessingOperation operation,
+        int? targetLongEdge,
+        IEnumerable<ProcessingJob> previousJobs)
+    {
+        var completed = previousJobs
+            .Where(x => x.Status == ProcessingJobStatus.Completed)
+            .ToList();
+
+        return operation switch
+        {
+            ProcessingOperation.Upscale when targetLongEdge is int edge =>
+                completed.Any(x =>
+                    x.Operation == ProcessingOperation.Upscale &&
+                    x.TargetLongEdge == edge)
+                    ? TokenPolicy.UpscaleRevisionCost(edge)
+                    : TokenPolicy.UpscaleCost(edge),
+
+            ProcessingOperation.Layers =>
+                TokenPolicy.LayerCost(
+                    completed.Count(x =>
+                        x.Operation == ProcessingOperation.Layers)),
+
+            ProcessingOperation.CharacterLayers =>
+                TokenPolicy.CharacterLayerCost(
+                    completed.Count(x =>
+                        x.Operation == ProcessingOperation.CharacterLayers)),
+
+            _ => throw new InvalidOperationException(
+                "토큰 비용을 계산할 수 없는 작업입니다.")
+        };
     }
 
     public static ProcessingStatusResponse MapStatus(ProcessingJob job) => new(
