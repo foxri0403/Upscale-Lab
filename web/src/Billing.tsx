@@ -759,7 +759,7 @@ export function Billing() {
                 </tbody>
               </table>
             </div>
-            <p className="billing-usage-note">같은 프로젝트의 성공한 작업을 기준으로 계산합니다. FHD 재수정은 지원하지 않으며, 처리 실패 시 예약한 토큰을 환불합니다.</p>
+            <p className="billing-usage-note">같은 프로젝트의 성공한 작업을 기준으로 계산합니다. FHD 재수정은 1토큰이며, 처리 실패 시 예약한 토큰을 환불합니다.</p>
           </section>
 
           <p style={{ marginTop: 28, opacity: 0.7, fontSize: 13 }}>

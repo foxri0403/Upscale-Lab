@@ -12,7 +12,7 @@ internal sealed class ParallaxView : Grid, IDisposable
     private readonly WallpaperManifest manifest;
     private readonly MonitorInfo monitor;
     private readonly Canvas canvas = new();
-    private readonly List<(WallpaperFile Meta, TranslateTransform Translation)> planes = new();
+    private readonly List<(WallpaperFile Meta, TranslateTransform Translation, RotateTransform Rotation)> planes = new();
     private readonly ScaleTransform cover = new();
     private readonly TranslateTransform offset = new();
     private readonly Stopwatch clock = Stopwatch.StartNew();
@@ -44,8 +44,16 @@ internal sealed class ParallaxView : Grid, IDisposable
             var transforms = new TransformGroup();
             transforms.Children.Add(new ScaleTransform(file.Scale, file.Scale, manifest.Width / 2.0, manifest.Height / 2.0));
             transforms.Children.Add(new RotateTransform(file.Rotation, manifest.Width / 2.0, manifest.Height / 2.0));
+            var rotation = new RotateTransform(0, manifest.Width / 2.0, manifest.Height / 2.0);
+            if (manifest.Rig is { Enabled: true } rig)
+            {
+                var part = RigMotion.Part(file, rig);
+                rotation.CenterX = manifest.Width * rig.PivotX / 100.0;
+                rotation.CenterY = manifest.Height * RigMotion.PivotY(part, rig) / 100.0;
+            }
+            transforms.Children.Add(rotation);
             var translation = new TranslateTransform(file.X, file.Y); transforms.Children.Add(translation);
-            plane.RenderTransform = transforms; canvas.Children.Add(plane); planes.Add((file, translation));
+            plane.RenderTransform = transforms; canvas.Children.Add(plane); planes.Add((file, translation, rotation));
         }
         SizeChanged += (_, _) => Fit();
         Loaded += (_, _) => { lastTime = clock.Elapsed.TotalSeconds; CompositionTarget.Rendering -= Render;
@@ -74,11 +82,13 @@ internal sealed class ParallaxView : Grid, IDisposable
         var targetX = Math.Clamp(2.0 * (pointer.X - monitor.OffsetX) / monitor.Width - 1, -1, 1);
         var targetY = Math.Clamp(2.0 * (pointer.Y - monitor.OffsetY) / monitor.Height - 1, -1, 1);
         x += (targetX - x) * smoothing; y += (targetY - y) * smoothing;
-        foreach (var (meta, translation) in planes)
+        foreach (var (meta, translation, rotation) in planes)
         {
             var moving = meta.Role != "Background";
             translation.X = meta.X + (moving ? x * meta.MovementX : 0);
             translation.Y = meta.Y + (moving ? y * meta.MovementY : 0);
+            rotation.Angle = manifest.Rig is { Enabled: true } rig && moving
+                ? RigMotion.AngleDegrees(RigMotion.Part(meta, rig), rig, x) : 0;
         }
     }
 

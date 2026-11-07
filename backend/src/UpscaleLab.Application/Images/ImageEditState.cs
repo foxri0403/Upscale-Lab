@@ -7,16 +7,26 @@ namespace UpscaleLab.Application.Images;
 public sealed record SaveImageEditRequest(int Strength, string Filter, string Crop, int Scale, bool Foreground,
     string? Title = null, string[]? Tags = null, bool LiveEnabled = false, bool? MouseEnabled = null, bool? GyroEnabled = null, ImageCropRegion? CropRegion = null, HeadRigSettings? Rig = null);
 
-// The web rig controls are stored in SavedEditJson; native wallpaper rendering does not
-// interpret these settings until the Android/Windows renderer adds character-part motion.
+// The same motion settings are stored with the project and copied into wallpaper manifests.
+// Optional parameters preserve compatibility with previously saved head-only rigs.
 public sealed record HeadRigSettings(bool Enabled, int HeadTilt, int EyeMove, int HairSway,
-    int PivotX, int PivotY, bool Idle)
+    int PivotX, int PivotY, bool Idle, string BodyMode = "fixed", int UpperBody = 40,
+    int LowerBody = 20, int Torso = 50, int LeftArm = 35, int RightArm = 35,
+    int LeftHand = 25, int RightHand = 25, int LeftLeg = 20, int RightLeg = 20,
+    int TorsoPivotY = 40, int LowerPivotY = 68, Dictionary<string, string>? PartAssignments = null)
 {
+    private static readonly HashSet<string> Parts = new(StringComparer.Ordinal)
+    { "fixed", "head", "eye", "frontHair", "backHair", "torso", "leftArm", "rightArm",
+      "leftHand", "rightHand", "lowerBody", "leftLeg", "rightLeg" };
     public void Validate()
     {
-        if (HeadTilt is < 0 or > 100 || EyeMove is < 0 or > 100 || HairSway is < 0 or > 100 ||
-            PivotX is < 0 or > 100 || PivotY is < 0 or > 100)
-            throw new ValidationException("캐릭터 움직임 설정은 0~100 사이여야 합니다.");
+        if (new[] { HeadTilt, EyeMove, HairSway, PivotX, PivotY, UpperBody, LowerBody,
+            Torso, LeftArm, RightArm, LeftHand, RightHand, LeftLeg, RightLeg,
+            TorsoPivotY, LowerPivotY }.Any(x => x is < 0 or > 100) ||
+            BodyMode is not ("fixed" or "follow") ||
+            PartAssignments is { Count: > 128 } ||
+            PartAssignments?.Any(kv => kv.Key.Length > 100 || !Parts.Contains(kv.Value)) == true)
+            throw new ValidationException("캐릭터 움직임 또는 파츠 지정 설정이 올바르지 않습니다.");
     }
 }
 

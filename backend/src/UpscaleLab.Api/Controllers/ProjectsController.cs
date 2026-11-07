@@ -144,6 +144,11 @@ public sealed class ProjectsController(
     public async Task<ActionResult<DownloadUrlResponse>> ResultUrl(Guid projectId, Guid jobId, CancellationToken ct) =>
         Ok(await processingService.GetResultUrlAsync(User.GetRequiredUserId(), projectId, jobId, ct));
 
+    [HttpPost("{projectId:guid}/processing/{jobId:guid}/cancel")]
+    public async Task<ActionResult<ProcessingStatusResponse>> CancelProcessing(
+        Guid projectId, Guid jobId, CancellationToken cancellationToken) =>
+        Ok(await processingService.CancelAsync(User.GetRequiredUserId(), projectId, jobId, cancellationToken));
+
     [HttpGet("{projectId:guid}/processing-status")]
     public async Task<ActionResult<ProcessingStatusResponse>> GetProcessingStatus(
         Guid projectId,

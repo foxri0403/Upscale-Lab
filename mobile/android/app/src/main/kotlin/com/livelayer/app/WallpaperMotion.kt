@@ -12,4 +12,5 @@ internal object WallpaperMotion {
         .put("motionEnabled", remote.optBoolean("motionEnabled", true))
         .put("mouseEnabled", remote.opt("mouseEnabled") ?: JSONObject.NULL)
         .put("gyroEnabled", remote.opt("gyroEnabled") ?: JSONObject.NULL)
+        .put("rig", remote.opt("rig") ?: JSONObject.NULL)
 }

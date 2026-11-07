@@ -18,9 +18,14 @@ internal record DisplayState(Guid Id, string NativeId, bool IsConnected, Assignm
 internal record AgentState(long InventoryRevision, DisplayState[] Displays);
 internal record DeviceCommand(Guid Id, Guid DisplayId, Guid? AssetId, string Target, long Sequence, string Status, DateTime ExpiresAt, string Action = "Apply");
 internal record WallpaperFile(string Source, string ContentType, int Order, string Role, double X = 0, double Y = 0,
-    double Rotation = 0, double Scale = 1, double MovementX = 0, double MovementY = 0);
+    double Rotation = 0, double Scale = 1, double MovementX = 0, double MovementY = 0, string? LayerId = null);
+internal record CharacterRig(bool Enabled = false, int HeadTilt = 60, int EyeMove = 35, int HairSway = 55,
+    int PivotX = 50, int PivotY = 16, bool Idle = true, string BodyMode = "fixed", int UpperBody = 40,
+    int LowerBody = 20, int Torso = 50, int LeftArm = 35, int RightArm = 35,
+    int LeftHand = 25, int RightHand = 25, int LeftLeg = 20, int RightLeg = 20,
+    int TorsoPivotY = 40, int LowerPivotY = 68, Dictionary<string, string>? PartAssignments = null);
 internal record WallpaperManifest(int SchemaVersion, Guid AssetId, string Mode, int Width, int Height, WallpaperFile[] Files,
-    bool MotionEnabled = true, bool? MouseEnabled = null, bool? GyroEnabled = null)
+    bool MotionEnabled = true, bool? MouseEnabled = null, bool? GyroEnabled = null, CharacterRig? Rig = null)
 {
     public bool UsesMouse => MotionEnabled && (MouseEnabled ?? (GyroEnabled.HasValue ? false : true));
 }

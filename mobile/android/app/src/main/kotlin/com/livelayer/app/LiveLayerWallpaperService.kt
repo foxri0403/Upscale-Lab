@@ -33,7 +33,8 @@ class LiveLayerWallpaperService : WallpaperService() {
         LiveLayerEngine(description.content.getString("manifest_path"))
 
     private data class Layer(val bitmap: Bitmap, val order: Int, val positionX: Float,
-        val positionY: Float, val rotation: Float, val scale: Float, val movementX: Float, val movementY: Float, val background: Boolean = false)
+        val positionY: Float, val rotation: Float, val scale: Float, val movementX: Float, val movementY: Float, val background: Boolean = false,
+        val role: String = "Other", val layerId: String = "")
 
     private inner class LiveLayerEngine(private val describedManifest: String? = null) : Engine(), SharedPreferences.OnSharedPreferenceChangeListener {
         private val handler = Handler(Looper.getMainLooper())
@@ -50,6 +51,7 @@ class LiveLayerWallpaperService : WallpaperService() {
         private val choreographer = Choreographer.getInstance()
         private var sensitivity = 1f
         private var live2D = false
+        private var rig = JSONObject()
         private var agent = false
         private var owner = ""
         private var canvasWidth = 1f
@@ -186,6 +188,7 @@ class LiveLayerWallpaperService : WallpaperService() {
                 canvasWidth = manifest.optInt("width", 1).toFloat().coerceAtLeast(1f)
                 canvasHeight = manifest.optInt("height", 1).toFloat().coerceAtLeast(1f)
                 live2D = manifest.optString("renderer") == "live2d"
+                rig = manifest.optJSONObject("rig") ?: JSONObject()
                 motionEnabled = live2D && WallpaperMotion.usesGyro(manifest)
                 targetTiltX = 0f; targetTiltY = 0f; tiltX = 0f; tiltY = 0f
                 if (!motionEnabled) sensor.stop() else if (lifecycle.visible && authorized()) sensor.start()
@@ -200,7 +203,8 @@ class LiveLayerWallpaperService : WallpaperService() {
                     loaded.add(Layer(bitmap, item.optInt("layerOrder", index),
                         item.optDouble("positionX", 0.0).toFloat(), item.optDouble("positionY", 0.0).toFloat(),
                         item.optDouble("rotation", 0.0).toFloat(), item.optDouble("scale", 1.0).toFloat(),
-                        item.optDouble("movementX", 0.0).toFloat(), item.optDouble("movementY", 0.0).toFloat(), item.optString("role") == "Background"))
+                        item.optDouble("movementX", 0.0).toFloat(), item.optDouble("movementY", 0.0).toFloat(),
+                        item.optString("role") == "Background", item.optString("role", "Other"), item.optString("layerId")))
                 }
                 layers = loaded.sortedBy { it.order }
             } catch (error: OutOfMemoryError) {
@@ -225,6 +229,61 @@ class LiveLayerWallpaperService : WallpaperService() {
             if (lifecycle.visible && lifecycle.surfaceReady && !frameScheduled) { frameScheduled = true; choreographer.postFrameCallback(frame) }
         }
 
+        // The server and web editor use identical rig group names. Separate PNG files are
+        // required: a combined body PNG cannot independently bend an arm or hand.
+        private fun rigPart(layer: Layer): String {
+            val manual = rig.optJSONObject("partAssignments")?.optString(layer.layerId, "") ?: ""
+            if (manual in setOf("fixed", "head", "eye", "frontHair", "backHair", "torso",
+                    "leftArm", "rightArm", "leftHand", "rightHand", "lowerBody", "leftLeg", "rightLeg")) return manual
+            return when (layer.role) {
+                "Face", "Eyebrow", "Mouth", "Nose" -> "head"
+                "Eye" -> "eye"
+                "BackHair" -> "backHair"
+                "FrontHair", "Hair" -> "frontHair"
+                "Body", "Clothes" -> "torso"
+                else -> "fixed"
+            }
+        }
+
+        private fun rigAngle(layer: Layer): Float {
+            if (!live2D || !motionEnabled || !rig.optBoolean("enabled", false)) return 0f
+            val part = rigPart(layer)
+            val head = tiltX.coerceIn(-1f, 1f) * rig.optInt("headTilt", 60) / 100f * .115f
+            val follow = rig.optString("bodyMode", "fixed") == "follow"
+            val upper = if (follow) head * rig.optInt("upperBody", 40) / 100f else 0f
+            val lower = if (follow) head * rig.optInt("lowerBody", 20) / 100f else 0f
+            val torso = upper * rig.optInt("torso", 50) / 100f * .60f
+            val leftArm = torso + upper * rig.optInt("leftArm", 35) / 100f * .42f
+            val rightArm = torso + upper * rig.optInt("rightArm", 35) / 100f * .42f
+            val lowerBody = lower * .32f
+            val angle = when (part) {
+                "head", "eye" -> head
+                "frontHair" -> head * (1f - .55f * rig.optInt("hairSway", 55) / 100f)
+                "backHair" -> head * (1f - .28f * rig.optInt("hairSway", 55) / 100f)
+                "torso" -> torso
+                "leftArm" -> leftArm
+                "rightArm" -> rightArm
+                "leftHand" -> leftArm + upper * rig.optInt("leftHand", 25) / 100f * .24f
+                "rightHand" -> rightArm + upper * rig.optInt("rightHand", 25) / 100f * .24f
+                "lowerBody" -> lowerBody
+                "leftLeg" -> lowerBody + lower * rig.optInt("leftLeg", 20) / 100f * .18f
+                "rightLeg" -> lowerBody + lower * rig.optInt("rightLeg", 20) / 100f * .18f
+                else -> 0f
+            }
+            return Math.toDegrees(angle.toDouble()).toFloat()
+        }
+
+        private fun rigPivot(layer: Layer, width: Float, height: Float): Pair<Float, Float> {
+            val part = rigPart(layer)
+            val pivotY = when (part) {
+                "torso", "leftArm", "rightArm", "leftHand", "rightHand" -> rig.optInt("torsoPivotY", 40)
+                "lowerBody", "leftLeg", "rightLeg" -> rig.optInt("lowerPivotY", 68)
+                else -> rig.optInt("pivotY", 16)
+            }
+            return Pair((rig.optInt("pivotX", 50).coerceIn(0, 100) / 100f - .5f) * width,
+                (pivotY.coerceIn(0, 100) / 100f - .5f) * height)
+        }
+
         private fun draw() {
             if (!lifecycle.surfaceReady || !surfaceHolder.surface.isValid) return
             val drawingSurface = surfaceHolder.surface
@@ -244,6 +303,10 @@ class LiveLayerWallpaperService : WallpaperService() {
                             canvas.translate(canvas.width / 2f + (layer.positionX + x) * cover, canvas.height / 2f + (layer.positionY + y) * cover)
                             canvas.rotate(layer.rotation)
                             canvas.scale(cover * layer.scale, cover * layer.scale)
+                            val (px, py) = rigPivot(layer, canvasWidth, canvasHeight)
+                            canvas.translate(px, py)
+                            canvas.rotate(rigAngle(layer))
+                            canvas.translate(-px, -py)
                             canvas.drawBitmap(layer.bitmap, null, android.graphics.RectF(-canvasWidth / 2, -canvasHeight / 2, canvasWidth / 2, canvasHeight / 2), paint)
                             canvas.restore()
                             continue
@@ -255,7 +318,8 @@ class LiveLayerWallpaperService : WallpaperService() {
                         drawBitmap(canvas, layer.bitmap,
                             layer.positionX + if (moving) -tiltX * amplitudeX * sensitivity else 0f,
                             layer.positionY + if (moving) tiltY * amplitudeY * sensitivity else 0f,
-                            layer.rotation, layer.scale * if (live2D) 1.08f else 1f)
+                            layer.rotation, layer.scale * if (live2D) 1.08f else 1f,
+                            rigAngle(layer), rigPivot(layer, layer.bitmap.width.toFloat(), layer.bitmap.height.toFloat()))
                     }
                 },
                 post = { if (Build.VERSION.SDK_INT >= 26) surfaceHolder.unlockCanvasAndPost(it)
@@ -267,11 +331,15 @@ class LiveLayerWallpaperService : WallpaperService() {
             }
         }
 
-        private fun drawBitmap(canvas: Canvas, bitmap: Bitmap, x: Float, y: Float, rotation: Float, layerScale: Float) {
+        private fun drawBitmap(canvas: Canvas, bitmap: Bitmap, x: Float, y: Float, rotation: Float, layerScale: Float,
+                               rigRotation: Float = 0f, rigPivot: Pair<Float, Float> = Pair(0f, 0f)) {
             val scale = max(canvas.width.toFloat() / bitmap.width, canvas.height.toFloat() / bitmap.height) * layerScale
             canvas.save()
             canvas.translate(canvas.width / 2f + x, canvas.height / 2f + y)
             canvas.rotate(rotation); canvas.scale(scale, scale)
+            canvas.translate(rigPivot.first, rigPivot.second)
+            canvas.rotate(rigRotation)
+            canvas.translate(-rigPivot.first, -rigPivot.second)
             canvas.drawBitmap(bitmap, -bitmap.width / 2f, -bitmap.height / 2f, paint)
             canvas.restore()
         }

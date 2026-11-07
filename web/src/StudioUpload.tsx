@@ -3,7 +3,7 @@ import { ImagePlus, Upload } from "lucide-react";
 import { useDemo } from "./Workspace";
 import { uploadImage } from "./model";
 import { cloud } from "./api";
-import { discardDraft, uploadProject } from "./cloud-store";
+import { discardDraft, uploadProject, prepareEditableProject } from "./cloud-store";
 import { Busy, navigate } from "./ui";
 import { imageAccept, imageUploadDescription } from "./image-upload";
 
@@ -33,6 +33,21 @@ export function StudioUpload() {
       setBusy(false);
       if (input.current) input.current.value = "";
     }
+  }
+  async function openSaved(picture: (typeof savedImages)[number]) {
+    if (busy) return;
+    if (!cloud || !picture.assetId || picture.projectId) {
+      navigate(`/app/studio?id=${encodeURIComponent(picture.id)}`);
+      return;
+    }
+    setBusy(true);
+    try {
+      const editable = await prepareEditableProject(picture);
+      if (!mounted.current) return;
+      update(value => ({ ...value, images: [editable, ...value.images] }));
+      navigate(`/app/studio?id=${encodeURIComponent(editable.id)}`);
+    } catch (error) { toast((error as Error).message); }
+    finally { setBusy(false); }
   }
   return (
     <section className="studio-upload" aria-busy={busy}>
@@ -74,7 +89,8 @@ export function StudioUpload() {
             {savedImages.slice(0, 8).map((picture) => (
               <button key={picture.id} title={picture.name}
                 aria-label={`${picture.name} 작업실에서 열기`}
-                onClick={() => navigate(`/app/studio?id=${encodeURIComponent(picture.id)}`)}>
+                disabled={busy}
+                onClick={() => void openSaved(picture)}>
                 <img src={picture.src} alt={picture.name} />
               </button>
             ))}

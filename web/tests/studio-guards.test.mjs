@@ -33,7 +33,10 @@ test("processing blocks navigation and unload without discarding; unlocking rest
   try {
     hooks.render(() => useUnsavedWarning(true, () => discarded++, { active: true, blocked: () => blocked++ }));
     assert.equal(guard("/app/billing"), false); assert.equal(blocked, 1); assert.equal(confirmations, 0);
-    const unload = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(unload);
+    const unload = new Event("beforeunload", { cancelable: true });
+    // Node Event does not provide a writable returnValue like browser BeforeUnloadEvent.
+    Object.defineProperty(unload, "returnValue", { value: undefined, writable: true, configurable: true });
+    window.dispatchEvent(unload);
     assert.equal(unload.defaultPrevented, true);
     window.dispatchEvent(new Event("pagehide")); assert.equal(discarded, 0);
     hooks.render(() => useUnsavedWarning(true, () => discarded++, { active: false, blocked: () => blocked++ }));

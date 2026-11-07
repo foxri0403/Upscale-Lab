@@ -80,6 +80,7 @@ internal class CompanionCache(private val context: Context) {
                 check(temporary.renameTo(image)) { "이미지를 보관하지 못했습니다." }
             } finally { connection.disconnect(); temporary.delete() }
             val item = JSONObject().put("fileName", image.name).put("layerOrder", order).put("role", file.getString("role"))
+                .put("layerId", file.optString("layerId"))
             for ((source, target, default) in listOf(Triple("x", "positionX", 0.0), Triple("y", "positionY", 0.0),
                 Triple("rotation", "rotation", 0.0), Triple("scale", "scale", 1.0), Triple("movementX", "movementX", 0.0), Triple("movementY", "movementY", 0.0))) {
                 val number = file.optDouble(source, default); require(number.isFinite() && (source != "scale" || number in .01..10.0)) { "레이어 설정이 올바르지 않습니다." }; item.put(target, number)
@@ -87,11 +88,12 @@ internal class CompanionCache(private val context: Context) {
             layers.put(item)
         }
         if (mode == "Static") require(layers.length() == 1) { "정적 배경화면 파일이 올바르지 않습니다." }
-        else require((0 until layers.length()).any { layers.getJSONObject(it).getString("role") == "Background" }) { "배경 레이어가 없습니다." }
+        else require(layers.length() >= 2) { "라이브 배경화면에는 2개 이상의 레이어가 필요합니다." }
         val saved = JSONObject().put("protocol", "agent-v1").put("renderer", if (mode == "Live2D") "live2d" else "static")
             .put("motionEnabled", manifest.optBoolean("motionEnabled", true))
             .put("mouseEnabled", manifest.opt("mouseEnabled") ?: JSONObject.NULL)
             .put("gyroEnabled", manifest.opt("gyroEnabled") ?: JSONObject.NULL)
+            .put("rig", manifest.opt("rig") ?: JSONObject.NULL)
             .put("width", width).put("height", height).put("ownerId", owner).put("assetId", asset).put("mode", mode)
             .put("selectionRevision", System.currentTimeMillis()).put("layers", layers)
         File(directory, "manifest.part").writeText(saved.toString()); check(File(directory, "manifest.part").renameTo(local))

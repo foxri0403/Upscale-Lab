@@ -223,7 +223,7 @@ public sealed class ProjectProcessingServiceTests
     [InlineData(ProcessingOperation.Layers, false, 3)]
     [InlineData(ProcessingOperation.Layers, true, 1)]
     [InlineData(ProcessingOperation.CharacterLayers, false, 7)]
-    [InlineData(ProcessingOperation.CharacterLayers, true, 4)]
+    [InlineData(ProcessingOperation.CharacterLayers, true, 3)]
     public async Task LayerOperations_ReserveExpectedTokenCost(
         ProcessingOperation operation,
         bool isRevision,
@@ -269,6 +269,8 @@ public sealed class ProjectProcessingServiceTests
     }
 
     [Theory]
+    [InlineData(1920, 1, true)]
+    [InlineData(1920, 1, false)]
     [InlineData(2560, 2, true)]
     [InlineData(2560, 2, false)]
     [InlineData(3840, 3, true)]
@@ -326,7 +328,7 @@ public sealed class ProjectProcessingServiceTests
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(false, false)]
-    public async Task FhdRevision_DoesNotCreateOrChargeAnotherJob(bool recordedTarget, bool resolutionRequest)
+    public async Task FhdRevision_ReservesOneToken(bool recordedTarget, bool resolutionRequest)
     {
         await using var db = WorkflowData.Db();
         var project = WorkflowData.Project(Guid.NewGuid());
@@ -343,13 +345,12 @@ public sealed class ProjectProcessingServiceTests
         var service = new ProjectProcessingService(db, new WorkflowStore(), new TestProcessor(),
             new ProcessingJobQueue(), NullLogger<ProjectProcessingService>.Instance, tokens);
 
-        var error = await Assert.ThrowsAsync<ConflictException>(() => service.StartAsync(
-            project.UserId, project.Id, new(ProcessingOperation.Upscale, TargetLongEdge: resolutionRequest ? 1920 : null), Ct));
+        await service.StartAsync(
+            project.UserId, project.Id, new(ProcessingOperation.Upscale, TargetLongEdge: resolutionRequest ? 1920 : null), Ct);
 
-        Assert.Contains("FHD", error.Message);
-        Assert.Empty(tokens.ReservedCosts);
-        Assert.Equal(prior.Id, (await db.ProcessingJobs.SingleAsync()).Id);
-        Assert.Equal(ProjectStatus.Uploaded, (await db.LiveLayerProjects.SingleAsync()).Status);
+        Assert.Equal(1, Assert.Single(tokens.ReservedCosts));
+        Assert.Equal(2, await db.ProcessingJobs.CountAsync());
+        Assert.Equal(ProjectStatus.Processing, (await db.LiveLayerProjects.SingleAsync()).Status);
     }
 
     [Theory]

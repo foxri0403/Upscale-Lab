@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Check, Layers3, RotateCcw, Save, Undo2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Eye, Layers3, RotateCcw, Save, Undo2 } from "lucide-react";
 import { request, type ApiLayer } from "./api";
 import { Modal, Busy } from "./ui";
 import {
@@ -8,6 +8,7 @@ import {
 } from "./layer-stack";
 import "./layer-stack-editor.css";
 import { layerLabel } from "./layer-label";
+import { selectedLivePartId } from "./live-layer-preview";
 
 export function LayerStackEditor({ projectId, close, onSaved }: {
   projectId: string;
@@ -23,6 +24,7 @@ export function LayerStackEditor({ projectId, close, onSaved }: {
   const [error, setError] = useState("");
   const [stageRatio, setStageRatio] = useState("1 / 1");
   const [stageBackground, setStageBackground] = useState<"checker" | "light">("checker");
+  const [requestedPreviewPartId, setRequestedPreviewPartId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -41,6 +43,7 @@ export function LayerStackEditor({ projectId, close, onSaved }: {
   }, [projectId]);
 
   const indexed = useMemo(() => new Map(layers.map(layer => [layer.id, layer])), [layers]);
+  const previewPartId = selectedLivePartId(layers, requestedPreviewPartId);
   const pending = layers.filter(layer => !stack.ids.includes(layer.id));
   const backgroundLayer = layers.find(layer => layer.layerType === "Background");
   const backgroundCorrect = !backgroundLayer || stack.ids[0] === backgroundLayer.id;
@@ -48,6 +51,7 @@ export function LayerStackEditor({ projectId, close, onSaved }: {
   const changed = stack.ids.join(",") !== initial.join(",");
 
   function changeStack(next: LayerStack) {
+    setRequestedPreviewPartId(null); // Editing the stack returns to the complete composition.
     setHistory(previous => [...previous.slice(-63), stack]);
     setStack(next);
     setError("");
@@ -94,33 +98,49 @@ export function LayerStackEditor({ projectId, close, onSaved }: {
         <div className="layer-stack-columns">
           <div className="layer-stack-preview">
             <div className="layer-stack-preview-heading">
-              <strong>실시간 합성 결과</strong>
+              <strong>{previewPartId ? "선택한 파츠 미리보기" : "실시간 합성 결과"}</strong>
               <button type="button" onClick={() => setStageBackground(p => p === "checker" ? "light" : "checker")}>배경 전환</button>
             </div>
-            <div className={`layer-stack-stage ${stageBackground}`} style={{ aspectRatio: stageRatio }} role="img" aria-label="레이어 합성 미리보기">
-              {stack.ids.map(id => {
+            <div className="layer-stack-view-modes" role="group" aria-label="레이어 미리보기 방식">
+              <button type="button" aria-pressed={previewPartId === null} className={previewPartId === null ? "active" : ""}
+                onClick={() => setRequestedPreviewPartId(null)}><Layers3 size={15} /> 전체 보기</button>
+              <button type="button" aria-pressed={previewPartId !== null} className={previewPartId !== null ? "active" : ""}
+                onClick={() => setRequestedPreviewPartId(previewPartId ?? stack.ids.at(-1) ?? layers[0]?.id ?? null)}>
+                <Eye size={15} /> 파츠별 보기</button>
+            </div>
+            <div className={`layer-stack-stage ${stageBackground}`} style={{ aspectRatio: stageRatio }} role="img"
+              aria-label={previewPartId ? `${layerLabel(indexed.get(previewPartId)?.layerType ?? "Other")} 파츠 단독 미리보기` : "레이어 합성 미리보기"}>
+              {(previewPartId ? [previewPartId] : stack.ids).map(id => {
                 const layer = indexed.get(id);
                 return layer && <img key={id} src={layer.imageUrl} alt="" draggable={false}
-                  onLoad={event => { if (id === stack.ids[0] && event.currentTarget.naturalHeight)
+                  onLoad={event => { if (id === (previewPartId ?? stack.ids[0]) && event.currentTarget.naturalHeight)
                     setStageRatio(`${event.currentTarget.naturalWidth} / ${event.currentTarget.naturalHeight}`); }} />;
               })}
-              {!stack.ids.length && <p>맨 아래에 놓을 파츠를 선택하세요.</p>}
+              {!stack.ids.length && !previewPartId && <p>맨 아래에 놓을 파츠를 선택하세요.</p>}
             </div>
-            <span className="layer-stack-count">{stack.ids.length}/{layers.length}개 쌓음 · 아래에서 위로 합성</span>
+            <span className="layer-stack-count">{previewPartId
+              ? `${layerLabel(indexed.get(previewPartId)?.layerType ?? "Other")} 파츠만 표시 중 · 순서 저장에는 영향 없음`
+              : `${stack.ids.length}/${layers.length}개 쌓음 · 아래에서 위로 합성`}</span>
           </div>
           <div className="layer-stack-lists">
             <section className="layer-stack-list-section">
               <h3>추가할 파츠 <small>({pending.length}개)</small></h3>
               <div className="layer-stack-items" aria-label="추가할 파츠 목록">
                 {!pending.length && <p className="layer-stack-empty">모든 파츠를 추가했어요.</p>}
-                {pending.map((layer) => <button className="layer-stack-item pending" type="button" key={layer.id}
-                  disabled={!!backgroundLayer && !stack.ids.length && layer.id !== backgroundLayer.id}
-                  onClick={() => changeStack({ mode: "manual", ids: addLayerToTop(stack.ids, layer.id, layers) })}>
-                  <span className="layer-stack-thumb"><img src={layer.imageUrl} alt="" /></span>
-                  <span>{layerLabel(layer.layerType)} · {layer.automaticOrder ?? layer.layerOrder}</span>
-                  <ArrowUp size={15} aria-hidden="true" />
-                  <span className="sr-only">맨 위에 추가</span>
-                </button>)}
+                {pending.map((layer) => <div className={`layer-stack-pending-row ${previewPartId === layer.id ? "selected" : ""}`} key={layer.id}>
+                  <button className="layer-stack-item pending" type="button"
+                    disabled={!!backgroundLayer && !stack.ids.length && layer.id !== backgroundLayer.id}
+                    title="조합 맨 위에 추가"
+                    onClick={() => changeStack({ mode: "manual", ids: addLayerToTop(stack.ids, layer.id, layers) })}>
+                    <span className="layer-stack-thumb"><img src={layer.imageUrl} alt="" /></span>
+                    <span>{layerLabel(layer.layerType)} · {layer.automaticOrder ?? layer.layerOrder}</span>
+                    <ArrowUp size={15} aria-hidden="true" />
+                    <span className="sr-only">맨 위에 추가</span>
+                  </button>
+                  <button className="layer-stack-preview-only" type="button" aria-pressed={previewPartId === layer.id}
+                    title="이 파츠만 보기" aria-label={`${layerLabel(layer.layerType)} 파츠만 보기`}
+                    onClick={() => setRequestedPreviewPartId(layer.id)}><Eye size={17} /></button>
+                </div>)}
               </div>
             </section>
             <section className="layer-stack-list-section">
@@ -130,10 +150,14 @@ export function LayerStackEditor({ projectId, close, onSaved }: {
                   const layer = indexed.get(id);
                   if (!layer) return null;
                   const index = stack.ids.length - 1 - reversedIndex;
-                  return <div className="layer-stack-item stacked" key={id}>
+                  return <div className={`layer-stack-item stacked ${previewPartId === id ? "selected" : ""}`} key={id}>
                     <span className="layer-stack-num">{index + 1}</span>
                     <span className="layer-stack-thumb"><img src={layer.imageUrl} alt="" /></span>
-                    <span className="layer-stack-item-name">{layerLabel(layer.layerType)} · {layer.automaticOrder ?? layer.layerOrder}</span>
+                    <button type="button" className="layer-stack-item-name layer-stack-select-part"
+                      title="이 파츠만 보기" aria-pressed={previewPartId === id}
+                      onClick={() => setRequestedPreviewPartId(id)}>
+                      {layerLabel(layer.layerType)} · {layer.automaticOrder ?? layer.layerOrder}
+                    </button>
                     <button type="button" title="앞쪽으로 한 칸" aria-label={`${layerLabel(layer.layerType)} 앞쪽으로 한 칸`}
                       disabled={index === stack.ids.length - 1 || layer.layerType === "Background"}
                       onClick={() => changeStack({ mode: "manual", ids: moveLayer(stack.ids, id, 1) })}><ArrowUp size={15} /></button>
@@ -154,6 +178,7 @@ export function LayerStackEditor({ projectId, close, onSaved }: {
             <button type="button" disabled={!history.length || saving}
               onClick={() => {
                 setStack(history[history.length - 1]);
+                setRequestedPreviewPartId(null);
                 setHistory(h => h.slice(0, -1));
               }}><Undo2 size={16} /> 되돌리기</button>
             <button type="button" disabled={saving}

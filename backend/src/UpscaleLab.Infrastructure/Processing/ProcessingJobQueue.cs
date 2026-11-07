@@ -7,7 +7,7 @@ public sealed class ProcessingJobQueue : IProcessingJobQueue
 {
     private readonly Channel<Guid> channel = Channel.CreateUnbounded<Guid>(new UnboundedChannelOptions
     {
-        SingleReader = true,
+        SingleReader = false, // Multiple LiveLayerProcessingWorker consumers read concurrently.
         SingleWriter = false
     });
 

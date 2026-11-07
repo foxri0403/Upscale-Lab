@@ -1,6 +1,7 @@
 import { selectableTags, unspecifiedTag } from "./image-tags";
 import { validateImageUpload } from "./image-upload";
 import { requestBlob } from "./api";
+import { assetCharacterLayers } from "./shared-editing";
 import { pixelCrop, type CropRegion } from "./crop-geometry";
 import { defaultMotionStrength } from "./editor-defaults";
 export type Genre = (typeof selectableTags)[number] | typeof unspecifiedTag;
@@ -13,10 +14,28 @@ export type HeadRig = {
   pivotX: number;
   pivotY: number;
   idle: boolean;
+  /** Body reaction mode. Existing saved rigs without this field remain fixed. */
+  bodyMode: "fixed" | "follow";
+  upperBody: number;
+  lowerBody: number;
+  torso: number;
+  leftArm: number;
+  rightArm: number;
+  leftHand: number;
+  rightHand: number;
+  leftLeg: number;
+  rightLeg: number;
+  torsoPivotY: number;
+  lowerPivotY: number;
+  /** Optional manual assignment of actual PNG layer IDs to independently moving groups. */
+  partAssignments: Record<string, import("./character-rig").RigPart>;
 };
 export const defaultHeadRig: HeadRig = {
   enabled: false, headTilt: 60, eyeMove: 35, hairSway: 55,
-  pivotX: 50, pivotY: 16, idle: true,
+  pivotX: 50, pivotY: 16, idle: true, bodyMode: "fixed",
+  upperBody: 40, lowerBody: 20, torso: 50, leftArm: 35, rightArm: 35,
+  leftHand: 25, rightHand: 25, leftLeg: 20, rightLeg: 20,
+  torsoPivotY: 40, lowerPivotY: 68, partAssignments: {},
 };
 export type Edit = {
   strength: number;
@@ -291,6 +310,9 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
   try {
   const characterLayers = !picture.background && (picture.layers?.length || 0) >= 2
     ? picture.layers!.slice().sort((a, b) => a.layerOrder - b.layerOrder) : null;
+  // A shared/imported Live2D wallpaper is immutable and has manifest PNG files,
+  // not project layer rows. Compose ALL parts, not just the first manifest file.
+  const assetLayers = assetCharacterLayers(picture);
   const img = await load(picture.background || picture.src, picture.background ? picture.exportSources?.background : picture.exportSources?.image);
   let source: CanvasImageSource = img;
   if (characterLayers && edit.foreground) {
@@ -306,6 +328,17 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
         picture.projectId ? `/api/projects/${picture.projectId}/content?layerId=${layer.id}` : undefined), 0, 0, composite.width, composite.height);
     source = composite;
   }
+  if (assetLayers.length && edit.foreground) {
+    const first = await load(assetLayers[0].source, assetLayers[0].endpoint);
+    const composite = document.createElement("canvas");
+    composite.width = first.width;
+    composite.height = first.height;
+    const context = composite.getContext("2d")!;
+    context.drawImage(first, 0, 0);
+    for (const layer of assetLayers.slice(1))
+      context.drawImage(await load(layer.source, layer.endpoint), 0, 0, composite.width, composite.height);
+    source = composite;
+  }
   if (picture.background && picture.foregrounds?.length) {
     const composite = document.createElement("canvas");
     composite.width = img.width;
@@ -317,8 +350,8 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
         context.drawImage(await load(src, picture.exportSources?.foregrounds?.[index]), 0, 0, img.width, img.height);
     source = composite;
   }
-  const selected = pixelCrop(characterLayers && edit.foreground ? (source as HTMLCanvasElement).width : img.width,
-    characterLayers && edit.foreground ? (source as HTMLCanvasElement).height : img.height, edit);
+  const sourceSize = source as HTMLImageElement | HTMLCanvasElement;
+  const selected = pixelCrop(sourceSize.width, sourceSize.height, edit);
   const sw = selected.width, sh = selected.height;
   const scale = Math.min(edit.scale, 4096 / Math.max(sw, sh));
   const canvas = document.createElement("canvas");

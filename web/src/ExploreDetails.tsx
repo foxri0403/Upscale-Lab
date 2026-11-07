@@ -68,10 +68,12 @@ export function ExploreDetails({ picture, importing, own, local, close, save, op
           {!own && <button className="button primary full" disabled={importing} onClick={save}>
             {importing ? <Busy /> : <Plus size={18} />} 내 이미지에 저장
           </button>}
-          <button className="button secondary full" disabled={importing} onClick={own ? openStudio : apply}>
-            {own ? <SquarePen size={18} /> : <Monitor size={18} />}
-            {own ? "작업실에서 열기" : "연결된 기기에 적용"}
+          <button className="button secondary full" disabled={importing} onClick={openStudio}>
+            <SquarePen size={18} /> {own ? "작업실에서 열기" : "복사하여 편집·레이어 분리"}
           </button>
+          {!own && <button className="button secondary full" disabled={importing} onClick={apply}>
+            <Monitor size={18} /> 연결된 기기에 적용
+          </button>}
         </div>
     </aside>
   );

@@ -49,6 +49,7 @@ import { Billing } from "./Billing";
 import { cloud, request, post, type Asset } from "./api";
 import {
   fetchLibrary,
+  prepareEditableProject,
   fetchDevices,
   assetPicture,
   createAsset,
@@ -676,6 +677,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const [applyingPicture, setApplyingPicture] = useState<Picture | null>(null);
   const applying = useRef(false);
   const importedPictures = useRef(new Map<string, Promise<Picture>>());
+  const editableCopies = useRef(new Map<string, Promise<Picture>>());
   const [renaming, setRenaming] = useState(false);
   const all = explore
     ? cloud
@@ -719,6 +721,30 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     try { return await pending; }
     catch (error) { importedPictures.current.delete(picture.id); throw error; }
   }
+  async function editablePicture(picture: Picture): Promise<Picture> {
+    if (!cloud || !picture.assetId || picture.projectId) return picture;
+    const key = picture.assetId;
+    const existing = editableCopies.current.get(key);
+    if (existing) return existing;
+    const pending = prepareEditableProject(picture);
+    editableCopies.current.set(key, pending);
+    try { return await pending; }
+    catch (error) { editableCopies.current.delete(key); throw error; }
+  }
+  async function openOwnPicture(picture: Picture) {
+    if (importing) return;
+    if (!cloud || !picture.assetId || picture.projectId) {
+      navigate(`/app/studio?id=${encodeURIComponent(picture.id)}`);
+      return;
+    }
+    setImporting(true);
+    try {
+      const copy = await editablePicture(picture);
+      await refresh();
+      navigate(`/app/studio?id=${encodeURIComponent(copy.id)}`);
+    } catch (error) { toast((error as Error).message); }
+    finally { setImporting(false); }
+  }
   const images = all
     .filter(
       (p) =>
@@ -737,8 +763,12 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     setImporting(true);
     try {
       const saved = await ensureOwnPicture(p);
+      const editable = open ? await editablePicture(saved) : saved;
+      // Refresh after making a new working project, so the Studio route can
+      // resolve that project's ID as soon as navigation occurs.
+      if (open && editable.id !== saved.id) await refresh();
       setPreview(current => current?.id === p.id ? null : current);
-      if (open) navigate(`/app/studio?id=${encodeURIComponent(saved.id)}`);
+      if (open) navigate(`/app/studio?id=${encodeURIComponent(editable.id)}`);
       else toast("내 이미지에 저장했습니다.");
     } catch (error) { toast((error as Error).message); }
     finally { setImporting(false); }
@@ -880,7 +910,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
               selected={explore && detailsOpen && preview?.id === p.id}
               open={() => {
                 if (explore) openDetails(p);
-                else navigate(`/app/studio?id=${p.id}`);
+                else void openOwnPicture(p);
               }}
               rename={() => {
                 if (isImageShared(p)) return;

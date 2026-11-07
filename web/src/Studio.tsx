@@ -16,6 +16,8 @@ import {
   RotateCcw,
   Info,
   Image as ImageIcon,
+  MousePointer2,
+  Smartphone,
 } from "lucide-react";
 import { useDemo } from "./Workspace";
 import {
@@ -30,7 +32,7 @@ import {
 } from "./model";
 import { Modal, Notice, Busy, Empty, Link } from "./ui";
 import { ApiError, cloud, request, post, type Job } from "./api";
-import { detailPicture, discardDraft, loadProjectPicture, processProject, refineSubject, resetProjectEffects, saveImageEdit } from "./cloud-store";
+import { createCroppedLive2dProject, detailPicture, discardDraft, loadProjectPicture, prepareEditableProject, processProject, refineSubject, resetProjectEffects, saveImageEdit } from "./cloud-store";
 import { processingStatus } from "./processing-status";
 import { useUnsavedWarning } from "./use-unsaved-warning";
 import { LayerPreviewSelector } from "./LayerPreviewSelector";
@@ -41,7 +43,7 @@ import { StudioUpload } from "./StudioUpload";
 import { isImageShared } from "./image-sharing";
 import { ImageInformation } from "./ImageInformation";
 import { StudioCanvas } from "./StudioCanvas";
-import { upscaleDimensions, upscaleResolutions } from "./upscale-resolution";
+import { canSelectUpscaleResolution, upscaleDimensions, upscaleResolutions } from "./upscale-resolution";
 import { allTagsSelected, imageTags, selectableTags, unspecifiedTag } from "./image-tags";
 import { imageFeatures } from "./image-features";
 import { copyGeneratedLink } from "./share-clipboard";
@@ -51,12 +53,14 @@ import { useMediaQuery } from "./use-media-query";
 import { useSubjectSeparation, SubjectSeparationControls } from "./SubjectSeparation";
 import { useCropAutosave } from "./use-crop-autosave";
 import { sameCrop } from "./crop-geometry";
+import { live2dCropRequired } from "./live2d-crop-input";
 import { motionStrength } from "./editor-defaults";
 
 import { LayerStackEditor } from "./LayerStackEditor";
 import { separationAvailable } from "./character-processing";
 import { CharacterMotionControls } from "./CharacterMotionControls";
 import { layerLabel } from "./layer-label";
+import { defaultLivePartId, selectedLivePartId } from "./live-layer-preview";
 import { useCharacterRig } from "./use-character-rig";
 
 const tools: {
@@ -106,8 +110,10 @@ export function Studio({ route }: { route: string }) {
   const id = parameters.get("id");
   const picture = parameters.get("new") !== "1" && id
     ? [...library.images, ...(library.assets || [])].find((p) => p.id === id) : undefined;
-  const [tool, setTool] = useState<Tool>("upscale");
+  const requestedTool: Tool = parameters.get("tool") === "live" ? "live" : "upscale";
+  const [tool, setTool] = useState<Tool>(requestedTool);
   const [selectedLayer, setSelectedLayer] = useState<LayerPreview>("all");
+  const [requestedLivePartId, setRequestedLivePartId] = useState<string | null>(null);
   const [lookupFinished, setLookupFinished] = useState<string | null>(null);
   const discarding = useRef(false);
   const [edit, setEdit] = useState<Edit>(normalizedEdit(picture?.edit));
@@ -137,6 +143,8 @@ export function Studio({ route }: { route: string }) {
   const [cancelPrompt, setCancelPrompt] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [checkingJob, setCheckingJob] = useState(cloud && !!picture?.projectId);
+  const [copyingAsset, setCopyingAsset] = useState(false);
+  const [createdLive2dProjectId, setCreatedLive2dProjectId] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const saving = useRef(false);
   const [target, setTarget] = useState("pc/monitor1");
@@ -162,7 +170,7 @@ export function Studio({ route }: { route: string }) {
   useEffect(() => {
     setJob(null); setBusy(false); setStartingProcessing(false); setCancelPrompt(false); setCancelling(false);
     setCheckingJob(cloud && !!picture?.projectId);
-    setTool("upscale"); setShareFeedback(null); setSelectedLayer("all"); discarding.current = false;
+    setTool(requestedTool); setCreatedLive2dProjectId(null); setShareFeedback(null); setSelectedLayer("all"); setRequestedLivePartId(null); discarding.current = false;
     subjectJob.current = null;
   }, [picture?.id]);
   useEffect(() => {
@@ -205,7 +213,8 @@ export function Studio({ route }: { route: string }) {
     !picture?.separationDisabled && (!!(picture?.background && picture.foregrounds?.length) ||
     (!cloud && !!picture?.src.endsWith("/fox.png")));
   const isCharacterProject = !!picture?.layers?.length && !picture.layers.some(layer => layer.layerType === "Background");
-  const characterRig = useCharacterRig(tool === "live" && isCharacterProject, edit.rig,
+  const activeLivePartId = selectedLivePartId(picture?.layers ?? [], requestedLivePartId);
+  const characterRig = useCharacterRig(tool === "live" && isCharacterProject && activeLivePartId === null, edit.rig,
     picture ? `${picture.id}:${picture.layers?.map(layer => layer.id).join(",") || "none"}` : undefined);
   const backgroundSrc = picture?.background || (cloud ? "" : "/images/fox-background.png");
   const foregroundSrcs = picture?.foregrounds?.length
@@ -219,6 +228,13 @@ export function Studio({ route }: { route: string }) {
     JSON.stringify(normalizedEdit(edit)) !== JSON.stringify(normalizedEdit(picture?.edit)) ||
     name.trim() !== picture?.name || JSON.stringify(tags) !== JSON.stringify(picture ? imageTags(picture) : []);
   const saved = !!picture && !picture.isDraft;
+  useEffect(() => {
+    if (!createdLive2dProjectId || busy || cropAutosave.pending || dirty || !saved) return;
+    // Saving before the switch prevents the draft cleanup from deleting the source.
+    discarding.current = true;
+    navigate(`/app/studio?id=${encodeURIComponent(createdLive2dProjectId)}&tool=live`);
+    setCreatedLive2dProjectId(null);
+  }, [createdLive2dProjectId, busy, cropAutosave.pending, dirty, saved]);
   useUnsavedWarning(!!picture && (!saved || dirty), () => {
     if (!picture || discarding.current) return;
     discarding.current = true;
@@ -350,6 +366,31 @@ export function Studio({ route }: { route: string }) {
     } catch (error) { showShareFeedback((error as Error).message); }
     finally { sharePending.current = false; setBusy(false); }
   }
+  async function createLive2dFromCrop() {
+    if (!picture?.projectId || published || !cloud || busy || processing || checkingJob ||
+        cropAutosave.pending || separation.dirty || !live2dCropRequired(edit)) return;
+    // Keep the original as a saved project; only the COPY bakes in the crop.
+    if (!await save(true)) return;
+    setBusy(true);
+    try {
+      const copy = await createCroppedLive2dProject(picture, edit);
+      if (!update(value => ({ ...value, images: [copy, ...value.images.filter(p => p.id !== copy.id)] })))
+        throw new Error("새 Live2D 프로젝트를 보관함에 표시하지 못했습니다. 보관함을 새로고침해 주세요.");
+      setCreatedLive2dProjectId(copy.id);
+      toast("선택한 비율을 실제 이미지에 적용한 새 프로젝트를 만들었습니다. Live2D 탭에서 파츠 분리를 실행해 주세요.");
+    } catch (error) { toast((error as Error).message); }
+    finally { setBusy(false); }
+  }
+  async function makeEditableCopy() {
+    if (!picture?.assetId || picture.projectId || copyingAsset || busy) return;
+    setCopyingAsset(true);
+    try {
+      const copy = await prepareEditableProject(picture);
+      if (update(value => ({ ...value, images: [copy, ...value.images] })))
+        navigate(`/app/studio?id=${encodeURIComponent(copy.id)}`, true);
+    } catch (error) { toast((error as Error).message); }
+    finally { setCopyingAsset(false); }
+  }
   async function startProcessing() {
     if (!picture || published || busy || processing || checkingJob || cropAutosave.pending || separation.tracing || separation.drawing || separation.polygonPoints) return;
     if (tool === "layers") {
@@ -436,6 +477,7 @@ export function Studio({ route }: { route: string }) {
           setJob(status);
           if (status.status === "Failed")
             toast(status.errorMessage || "이미지 처리에 실패했습니다.");
+          if (status.status === "Cancelled") toast("이미지 처리 작업이 취소됐습니다.");
           if (["Failed", "Cancelled"].includes(status.status)) { setCancelPrompt(false); window.dispatchEvent(new Event("tokens-updated")); }
         }
       } catch (e) {
@@ -503,6 +545,11 @@ export function Studio({ route }: { route: string }) {
   return (
     <div className="studio-layout studio-editor">
       <h1 className="visually-hidden">{picture.name} 작업실</h1>
+      {cloud && picture.assetId && !picture.projectId && <div className="studio-asset-copy-notice" role="status">
+        <p>보관함에 저장된 완성 이미지입니다. 업스케일·배경 분리·Live2D 파츠 분리에는 편집용 프로젝트가 필요합니다. 원본을 유지하고 편집본을 만들어 주세요.</p>
+        <button type="button" className="button secondary" disabled={copyingAsset || busy}
+          onClick={() => void makeEditableCopy()}>{copyingAsset ? <Busy /> : "편집용 복사본 만들기"}</button>
+      </div>}
       <div className="studio-document-bar">
         <div className="studio-document-name"><ImageIcon size={20} />
           <input aria-label="사진 이름" title="사진 이름 변경" maxLength={160} value={name}
@@ -539,7 +586,7 @@ export function Studio({ route }: { route: string }) {
       <StudioCanvas picture={draft || picture} edit={edit} tool={tool} layered={isFox || isCharacterProject} motion={motion} characterRig={characterRig}
         separation={separation} published={published}
         onEdit={changeCrop} readOnly={published || busy || processing}
-        selectedLayer={selectedLayer}
+        selectedLayer={selectedLayer} selectedCharacterLayerId={activeLivePartId}
         background={backgroundSrc} foregrounds={foregroundSrcs} onDimensions={setImageDimensions}
         unsaved={dirty || !saved} saveState={published ? "업로드됨 · 편집 잠금" : dirty ? "저장하지 않은 변경" : saved ? "저장됨" : "보관함에 저장 전"} />
       <aside className="feature-panel studio-inspector" aria-label="이미지 설정">
@@ -554,7 +601,7 @@ export function Studio({ route }: { route: string }) {
                 const size = upscaleDimensions(sourceWidth, sourceHeight, edge);
                 return <button key={edge} aria-pressed={resolution === edge}
                   className={resolution === edge ? "active" : ""}
-                  disabled={!longest || edge <= longest} onClick={() => setResolution(edge)}>
+                  disabled={!canSelectUpscaleResolution(edge, longest, !!picture.jobId)} onClick={() => setResolution(edge)}>
                   <strong>{name}</strong><span>{size ? `${size.width.toLocaleString()} × ${size.height.toLocaleString()}` : `${edge.toLocaleString()}px`}</span>
                 </button>;
               })}
@@ -563,12 +610,18 @@ export function Studio({ route }: { route: string }) {
               <div><dt>현재</dt><dd>{sourceWidth && sourceHeight ? `${sourceWidth.toLocaleString()} × ${sourceHeight.toLocaleString()} px` : "확인 중…"}</dd></div>
               <div><dt>결과</dt><dd>{targetDimensions ? `${targetDimensions.width.toLocaleString()} × ${targetDimensions.height.toLocaleString()} px` : "—"}</dd></div>
             </dl>
+            {cloud && picture.projectId && !!picture.jobId && <div className="studio-followup-action">
+              <p>완료된 업스케일 결과를 그대로 Live2D 파츠 분리의 입력으로 사용할 수 있습니다. 먼저 비율을 자르고 싶다면 ‘자르기’ 탭에서 새 Live2D 프로젝트를 만드세요.</p>
+              <button type="button" className="button secondary full" disabled={busy || processing || checkingJob || cropAutosave.pending}
+                onClick={() => setTool("live")}><Layers3 size={16} /> 이 업스케일 결과로 Live2D 진행</button>
+            </div>}
           </>
         )}
         {tool === "live" && <section className="studio-live-intro">
           <h3>캐릭터 파츠 분리</h3>
           <p>이미지 업로드 후 See-through로 머리·눈·의상을 자동 분리하고, 결과를 먼저 자동으로 합성합니다.</p>
           <p>16MB 이하 캐릭터 이미지를 지원하며 처리 시간이 걸릴 수 있습니다.</p>
+          <p>업스케일을 완료했다면 해당 결과를 사용합니다. 단, 자르기 설정만 저장한 경우 AI 입력 이미지에는 잘림이 반영되지 않습니다. 원하는 비율로 먼저 분리하려면 ‘자르기’ 탭에서 새 프로젝트를 만드세요.</p>
         </section>}
         {(tool === "upscale" || tool === "layers" || tool === "live") && (
           <div className="cloud-processing">
@@ -585,7 +638,7 @@ export function Studio({ route }: { route: string }) {
                 (tool === "layers" && capabilities?.layers === false) ||
                 (tool === "live" && !separationAvailable("character", capabilities)) ||
                 (tool === "upscale" && capabilities?.upscale === false) ||
-                (tool === "upscale" && (!longest || resolution <= longest))
+                (tool === "upscale" && !canSelectUpscaleResolution(resolution, longest, !!picture.jobId))
               }
               onClick={() => void startProcessing()}
             >
@@ -611,9 +664,11 @@ export function Studio({ route }: { route: string }) {
             {tool === "live" && capabilities?.characterLayers === true &&
               <p className="studio-separation-help">캐릭터용 분리는 완료까지 시간이 걸릴 수 있습니다. 기존 배경 분리와 다른 AI 서비스로 처리합니다.</p>}
             {job && job.status !== "Completed" && (
-              <p className="job-state">
-                {processingStatus(job)}
-              </p>
+              <div className="job-state" role="status" aria-live="polite">
+                <p>{processingStatus(job)}</p>
+                {processing && job.operation === "CharacterLayers" &&
+                  <p className="studio-separation-help">표시되는 퍼센트는 처리 단계의 표시입니다. GPU 모델 내부의 정확한 연산 완료율은 제공되지 않습니다.</p>}
+              </div>
             )}
           </div>
         )}
@@ -637,13 +692,29 @@ export function Studio({ route }: { route: string }) {
         {tool === "live" && <div className="studio-live-controls">
           {isCharacterProject && <section className="studio-live-layer-list">
             <h3>분리된 레이어 <span>{picture.layers?.length ?? 0}개</span></h3>
-            <p>현재 합성 순서 · 맨 위 레이어부터 표시</p>
-            <div className="studio-live-layer-items" role="list" aria-label="캐릭터 레이어 목록">
+            <div className="studio-live-preview-mode" role="group" aria-label="Live2D 레이어 미리보기 방식">
+              <button type="button" className={activeLivePartId === null ? "active" : ""}
+                aria-pressed={activeLivePartId === null} onClick={() => setRequestedLivePartId(null)}>
+                <Layers3 size={15} /> 전체 합성 보기
+              </button>
+              <button type="button" className={activeLivePartId !== null ? "active" : ""}
+                aria-pressed={activeLivePartId !== null}
+                onClick={() => setRequestedLivePartId(activeLivePartId ?? defaultLivePartId(picture.layers ?? []))}>
+                <ImageIcon size={15} /> 파츠별 보기
+              </button>
+            </div>
+            <p role="status" aria-live="polite">{activeLivePartId
+              ? `선택한 ${layerLabel(picture.layers?.find(layer => layer.id === activeLivePartId)?.layerType ?? "Other")} 파츠만 표시 중`
+              : "전체 합성 중 · 아래 레이어를 누르면 해당 파츠만 볼 수 있어요."}</p>
+            <div className="studio-live-layer-items" role="group" aria-label="캐릭터 레이어 선택">
               {[...(picture.layers || [])].sort((a, b) => b.layerOrder - a.layerOrder).map(layer =>
-                <div className="studio-live-layer-item" role="listitem" key={layer.id}>
+                <button type="button" className={`studio-live-layer-item ${activeLivePartId === layer.id ? "active" : ""}`}
+                  aria-pressed={activeLivePartId === layer.id} key={layer.id}
+                  onClick={() => setRequestedLivePartId(layer.id)} title={`${layerLabel(layer.layerType)} 파츠만 보기`}>
                   <img src={layer.imageUrl} alt="" loading="lazy" />
                   <span>{layerLabel(layer.layerType)}</span><small>{layer.layerOrder + 1}</small>
-                </div>)}
+                  {activeLivePartId === layer.id && <Check size={15} aria-hidden="true" />}
+                </button>)}
             </div>
           </section>}
           {cloud && picture.projectId && (isFox || isCharacterProject) && <section className="studio-layer-stack-entry">
@@ -652,15 +723,39 @@ export function Studio({ route }: { route: string }) {
             <button type="button" className="button secondary full" disabled={busy || processing || published}
               onClick={() => setDialog("layerStack")}><Layers3 size={17} /> 수동 레이어 조합</button>
           </section>}
+          {isCharacterProject && <section className="studio-rig-controls" aria-label="기기별 Live2D 움직임 입력">
+            <h3>배경화면 움직임 입력</h3>
+            <p className="studio-rig-helper">PC에서는 마우스로, Android 앱에서는 기울기 센서로 각 PNG 파츠를 움직입니다. 적용 전에 원하는 기기 입력을 켜고 보관함에 저장하세요.</p>
+            <div className="motion-input-options" role="group" aria-label="Live2D 기기별 움직임">
+              <button type="button" aria-pressed={!!edit.mouseEnabled} disabled={published || busy || processing}
+                onClick={() => change("mouseEnabled", !edit.mouseEnabled)}><MousePointer2 size={19} aria-hidden="true" /> PC 마우스</button>
+              <button type="button" aria-pressed={!!edit.gyroEnabled} disabled={published || busy || processing}
+                onClick={() => change("gyroEnabled", !edit.gyroEnabled)}><Smartphone size={19} aria-hidden="true" /> Android 기울기 센서</button>
+            </div>
+            <p className="studio-rig-helper">휴대폰에서 움직이려면 ‘Android 기울기 센서’와 아래 ‘PNG 파츠 움직임 사용’을 모두 켜야 합니다. 센서가 없는 기기는 정지 화면으로 표시됩니다.</p>
+          </section>}
           {isCharacterProject ? <CharacterMotionControls rig={edit.rig} onChange={next => change("rig", next)}
-            disabled={published || busy || processing} stage={characterRig} />
+            disabled={published || busy || processing} stage={characterRig} layers={picture.layers} />
             : <Notice>분리된 캐릭터가 나타나면 고개·눈·머리카락 움직임을 설정할 수 있습니다. 기존 배경 분리는 왼쪽 배경 분리 탭에서 사용하세요.</Notice>}
-          {isCharacterProject && <p className="studio-live-limitation">현재 움직임은 웹에서 확인하는 PNG 파츠 기반 미리보기입니다. 실제 모바일 라이브 배경화면 적용은 별도 렌더러 연동이 필요합니다.</p>}
+          {isCharacterProject && <p className="studio-live-limitation">비율은 ‘자르기’ 탭의 16:9 PC / 9:16 모바일 / 사용자 비율 설정을 따르며, 배경화면 생성 시 모든 PNG 파츠에 동일하게 적용됩니다. 실제 기기에는 업데이트된 연결 앱이 필요합니다.</p>}
         </div>}
         <fieldset className="photo-settings" disabled={published || busy || processing}>
         {tool === "crop" && (
+          <>
           <CropControls edit={edit} width={sourceWidth} height={sourceHeight} change={changeCrop}
             saving={cropAutosave.pending} error={cropAutosave.error} />
+          {cloud && picture.projectId && <section className="studio-followup-action" aria-label="자른 이미지로 Live2D 진행">
+            <h3>선택한 비율로 Live2D 분리</h3>
+            <p>현재 이미지(업스케일 완료본 포함)에서 지정한 영역을 실제로 잘라 새 프로젝트로 만듭니다. 원본과 업스케일 결과는 남고, 새 프로젝트에서는 자르기가 중복 적용되지 않습니다.</p>
+            <button type="button" className="button secondary full"
+              disabled={published || busy || checkingJob || processing || cropAutosave.pending || separation.dirty || !live2dCropRequired(edit) || !name.trim()}
+              onClick={() => void createLive2dFromCrop()}>
+              {busy ? <Busy /> : <Layers3 size={16} />}
+              자른 이미지로 Live2D 시작
+            </button>
+            <p>{!live2dCropRequired(edit) ? "먼저 16:9 PC, 9:16 모바일 또는 사용자 비율을 선택해 주세요." : "새 프로젝트에서 분리를 실행하면 Live2D 최초 실행 토큰(7개)이 사용됩니다."}</p>
+          </section>}
+          </>
         )}
         {tool === "filter" && (
           <>

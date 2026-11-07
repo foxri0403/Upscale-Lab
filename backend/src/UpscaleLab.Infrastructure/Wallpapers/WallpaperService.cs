@@ -39,7 +39,8 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             with { Strength = request.Strength, LiveEnabled = independentMotion ? edit?.LiveEnabled == true : request.MotionEnabled,
                 MouseEnabled = request.MouseEnabled ?? edit?.MouseEnabled ?? false,
                 GyroEnabled = request.GyroEnabled ?? edit?.GyroEnabled ?? false, SavedAt = DateTime.UtcNow };
-        if (presentation != null) state = state with { Filter = "original", Crop = "original", Scale = 1, Foreground = true, CropRegion = null };
+        if (presentation != null) state = state with { Filter = "original", Crop = "original", Scale = 1,
+            Foreground = true, CropRegion = null, Rig = presentation.TransformRig(state.Rig ?? manifest.Rig) };
         var asset = new WallpaperAsset { UserId = userId, Title = source.Title, Mode = source.Mode,
             SourceProjectId = source.SourceProjectId, SavedEditJson = state.ToJson() };
         var copied = new List<string>();
@@ -54,7 +55,8 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             var stored = JsonSerializer.SerializeToNode(manifest with { AssetId = asset.Id, Files = files,
                 UrlsExpireAt = null, MotionEnabled = request.MotionEnabled,
                 Width = presentation?.Width ?? manifest.Width, Height = presentation?.Height ?? manifest.Height,
-                MouseEnabled = request.MouseEnabled ?? manifest.MouseEnabled, GyroEnabled = request.GyroEnabled ?? manifest.GyroEnabled })!.AsObject();
+                MouseEnabled = request.MouseEnabled ?? manifest.MouseEnabled, GyroEnabled = request.GyroEnabled ?? manifest.GyroEnabled,
+                Rig = presentation?.TransformRig(manifest.Rig ?? edit?.Rig) ?? manifest.Rig ?? edit?.Rig })!.AsObject();
             var features = Features(source).Where(feature => independentMotion || feature != "Live 2D").ToList();
             if (!independentMotion && request.MotionEnabled) features.Add("Live 2D");
             stored["_features"] = JsonSerializer.SerializeToNode(features);
@@ -180,14 +182,16 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         {
             if (request.ProcessingJobId.HasValue)
                 throw new ValidationException("Live 2D는 현재 레이어를 고정합니다. processingJobId는 정적 결과에만 사용하세요.");
-            if (project.Layers.Count < 2 || !project.Layers.Any(x => x.LayerType == LayerType.Background))
-                throw new ConflictException("배경과 전경 레이어가 먼저 필요합니다.");
-            var latest = project.ProcessingJobs.Where(x => x.Status == ProcessingJobStatus.Completed)
+            if (project.Layers.Count < 2)
+                throw new ConflictException("분리된 레이어가 2개 이상 필요합니다.");
+            var latest = project.ProcessingJobs.Where(x => x.Status == ProcessingJobStatus.Completed &&
+                (x.Operation == ProcessingOperation.Layers || x.Operation == ProcessingOperation.CharacterLayers ||
+                 x.Operation == ProcessingOperation.UpscaleAndLayers))
                 .OrderByDescending(x => x.CompletedAt).FirstOrDefault();
             if (latest is { ResultWidth: > 0, ResultHeight: > 0 }) { width = latest.ResultWidth; height = latest.ResultHeight; }
             sources.AddRange(project.Layers.OrderBy(x => x.LayerOrder).Select(x => new WallpaperFile(x.ObjectKey,
                 "image/png", x.LayerOrder, x.LayerType.ToString(), x.Depth, x.PositionX, x.PositionY,
-                x.Rotation, x.Scale, x.MovementX, x.MovementY)));
+                x.Rotation, x.Scale, x.MovementX, x.MovementY, x.Id.ToString())));
         }
         var origin = request.OriginProjectId ?? project.Id;
         var metadataProject = origin == project.Id ? project : await db.LiveLayerProjects
@@ -202,7 +206,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             independentMotion || request.MotionEnabled || feature != "Live 2D").ToArray();
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new {
             Project = project.Id, Origin = origin, Title = request.Title.Trim(), request.Mode, request.MotionEnabled, width, height, sources,
-            Tags = metadata?.Tags, Features = features, request.MouseEnabled, request.GyroEnabled, request.Render
+            Tags = metadata?.Tags, Features = features, request.MouseEnabled, request.GyroEnabled, request.Render, Rig = metadata?.Rig
         }))));
         if (request.ReuseExisting)
         {
@@ -220,7 +224,8 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             Title = request.Title.Trim(), Mode = request.Mode };
         asset.SavedEditJson = new ImageEditState(request.Render?.Strength ?? metadata?.Strength ?? ImageEditState.DefaultMotionStrength, "original", "original", 1, true,
             DateTime.UtcNow, metadata?.Tags, independentMotion ? metadata?.LiveEnabled == true : request.Mode == WallpaperMode.Live2D && request.MotionEnabled,
-            request.MouseEnabled ?? metadata?.MouseEnabled ?? false, request.GyroEnabled ?? metadata?.GyroEnabled ?? false, MotionDefaultsVersion: 1).ToJson();
+            request.MouseEnabled ?? metadata?.MouseEnabled ?? false, request.GyroEnabled ?? metadata?.GyroEnabled ?? false,
+            MotionDefaultsVersion: 1, Rig: presentation?.TransformRig(metadata?.Rig) ?? metadata?.Rig).ToJson();
         var copied = new List<string>();
         try
         {
@@ -235,7 +240,8 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             var stored = JsonSerializer.SerializeToNode(new WallpaperManifest(1, asset.Id, asset.Mode,
                 presentation?.Width ?? width, presentation?.Height ?? height, files, MotionEnabled: request.MotionEnabled,
                 MouseEnabled: independentMotion ? request.MouseEnabled ?? metadata?.MouseEnabled ?? false : null,
-                GyroEnabled: independentMotion ? request.GyroEnabled ?? metadata?.GyroEnabled ?? false : null))!.AsObject();
+                GyroEnabled: independentMotion ? request.GyroEnabled ?? metadata?.GyroEnabled ?? false : null,
+                Rig: presentation?.TransformRig(metadata?.Rig) ?? metadata?.Rig))!.AsObject();
             stored["_sourceFingerprint"] = fingerprint;
             stored["_features"] = JsonSerializer.SerializeToNode(features);
             asset.ManifestJson = stored.ToJsonString();
@@ -316,6 +322,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         var manifest = JsonSerializer.Deserialize<WallpaperManifest>(asset.ManifestJson)
             ?? throw new InvalidOperationException("저장된 manifest가 올바르지 않습니다.");
         var edit = ImageEditState.FromJson(asset.SavedEditJson);
+        if (manifest.Rig is null && edit?.Rig is { } rig) manifest = manifest with { Rig = rig };
         return manifest.MouseEnabled is null && manifest.GyroEnabled is null && edit is { } && (edit.MouseEnabled || edit.GyroEnabled)
             ? manifest with { MouseEnabled = edit.MouseEnabled, GyroEnabled = edit.GyroEnabled } : manifest;
     }

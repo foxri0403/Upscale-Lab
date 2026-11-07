@@ -21,10 +21,10 @@ public sealed record LinkedWallpaper(string Title, WallpaperManifest Manifest, I
 // Stored manifests use object keys; network manifests replace keys with fresh URLs.
 public sealed record WallpaperFile(string Source, string ContentType, int Order, string Role,
     double Depth = 0, double X = 0, double Y = 0, double Rotation = 0, double Scale = 1,
-    double MovementX = 0, double MovementY = 0);
+    double MovementX = 0, double MovementY = 0, string? LayerId = null);
 public sealed record WallpaperManifest(int SchemaVersion, Guid AssetId, WallpaperMode Mode, int Width, int Height,
     IReadOnlyList<WallpaperFile> Files, DateTime? UrlsExpireAt = null, bool MotionEnabled = true,
-    bool? MouseEnabled = null, bool? GyroEnabled = null);
+    bool? MouseEnabled = null, bool? GyroEnabled = null, HeadRigSettings? Rig = null);
 
 public interface IWallpaperService
 {

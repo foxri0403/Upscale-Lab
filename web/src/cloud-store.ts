@@ -15,6 +15,7 @@ import {
   defaultEdit,
   read,
   renderImage,
+  type Edit,
   type Picture,
   type Library,
 } from "./model";
@@ -25,6 +26,8 @@ import {
 } from "./explore-feed";
 import { unspecifiedTag } from "./image-tags";
 import { subjectPreview } from "./subject-preview";
+import { wallpaperExportPolicy } from "./wallpaper-export-policy";
+import { needsEditableCopy } from "./shared-editing";
 
 export async function previewSubject(picture: Picture, signal: AbortSignal, changed: (job: Job) => void) {
   const image = picture.exportSources?.image ? await requestBlob(picture.exportSources.image, signal)
@@ -36,6 +39,7 @@ import { isImageShared, projectSharing } from "./image-sharing";
 import { mapDeviceLibrary } from "./device-state";
 import { galleryImages } from "./gallery-library";
 import { validateImageUpload } from "./image-upload";
+import { croppedLive2dFileName, live2dCropRequired, maxLive2dInputBytes } from "./live2d-crop-input";
 
 const manifests = new Map<string, { picture: Picture; until: number }>();
 export const preferencesKey = (userId: string) =>
@@ -229,6 +233,78 @@ export async function uploadProject(file: File, isDraft = true): Promise<Picture
       await request<Project>("/api/projects", { method: "POST", body: form, signal: AbortSignal.timeout(180000) }),
     );
 }
+
+/** Create an independent, authorized editable project from a saved wallpaper.
+ * Neither the original author's project nor the imported immutable asset is modified.
+ * The current *visible composite* is copied as a PNG, then it can be processed
+ * with the same upscale / background / character-layer APIs as a new upload.
+ */
+export async function prepareEditableProject(picture: Picture): Promise<Picture> {
+  if (!needsEditableCopy(picture)) return picture;
+  // Source already represents saved pixels. Do not double-apply an old crop or
+  // filter; always include every visible PNG layer when flattening the copy.
+  const image = await renderImage(picture, {
+    ...defaultEdit,
+    crop: "original", cropRegion: undefined,
+    filter: "original", scale: 1, foreground: true,
+  });
+  const title = picture.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 130) || "공유 이미지";
+  const project = await uploadProject(new File([image], `${title} (편집본).png`, {
+    type: "image/png",
+  }), false);
+  // The new project has its own ID and processing quota/ownership.
+  // The original shared asset remains in the library for direct application.
+  return project;
+}
+
+/**
+ * Bake the current visible crop into a NEW editable project, without mutating
+ * the original image or feeding an un-cropped source to See-through.
+ * If an upscale result is present, renderImage reads that latest processed image.
+ * Keep filters, zoom and animation out of the inference input.
+ */
+export async function createCroppedLive2dProject(picture: Picture, edit: Edit): Promise<Picture> {
+  if (!picture.projectId) throw new Error("편집 가능한 프로젝트에서만 Live2D 분리를 시작할 수 있습니다.");
+  if (!live2dCropRequired(edit)) throw new Error("자르기 탭에서 16:9, 9:16 또는 사용자 영역을 먼저 선택해 주세요.");
+
+  let image = await renderImage(picture, {
+    ...defaultEdit,
+    crop: edit.crop,
+    cropRegion: edit.cropRegion,
+    filter: "original",
+    scale: 1,
+    foreground: true,
+  });
+  let extension: "png" | "jpg" = "png";
+  let mime = "image/png";
+  // See-through accepts at most 16MiB. A 4K PNG can exceed the limit;
+  // when necessary encode a high-quality JPEG WITHOUT changing its dimensions.
+  if (image.size > maxLive2dInputBytes) {
+    const bitmap = await createImageBitmap(image);
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("이미지 변환 기능을 사용할 수 없습니다.");
+      context.fillStyle = "#fff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(bitmap, 0, 0);
+      const compressed = await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("JPEG 변환에 실패했습니다.")), "image/jpeg", 0.93));
+      image = compressed;
+      extension = "jpg";
+      mime = "image/jpeg";
+    } finally {
+      bitmap.close();
+    }
+  }
+  if (image.size > maxLive2dInputBytes) {
+    throw new Error("Live2D 모델 입력 제한(16MB)을 초과했습니다. 더 작은 영역을 선택해 주세요.");
+  }
+  return uploadProject(new File([image], croppedLive2dFileName(picture.name, edit.crop, extension), { type: mime }), false);
+}
+
 export async function loadProjectPicture(id: string): Promise<Picture> {
   return projectPicture(await request<Project>(`/api/projects/${encodeURIComponent(id)}`));
 }
@@ -272,18 +348,9 @@ export async function detailPicture(p: Picture): Promise<Picture> {
 export async function createAsset(picture: Picture): Promise<Asset> {
   const edit = picture.edit || defaultEdit;
   let projectId = picture.projectId;
-  const layered = !!picture.background && !!picture.foregrounds?.length && edit.foreground;
-  // Character-only layers do not have a Background role. Until the Android Live2D
-  // pipeline supports those manifests, publish their current ordered composite as
-  // a static PNG instead of silently publishing the original uploaded photo.
-  const characterParts = !picture.background && (picture.layers?.length || 0) >= 2;
-  // Bake actual crop/filter settings into a new source before freezing a static version.
-  const rendered =
-    edit.filter !== "original" ||
-    edit.crop !== "original" ||
-    edit.scale !== 1 ||
-    characterParts ||
-    (!!picture.background && !edit.foreground);
+  // Preserve actual character PNG parts: publishing a flattened static PNG loses
+  // the gyroscope and independent rig motion on Android (and mouse on Windows).
+  const { layered, rendered, mode } = wallpaperExportPolicy(picture, edit);
   if (picture.assetId && layered && !picture.projectId)
     return post<Asset>(`/api/wallpapers/${picture.assetId}/snapshot`, {
       motionEnabled: !!edit.mouseEnabled || !!edit.gyroEnabled, strength: edit.strength,
@@ -299,10 +366,6 @@ export async function createAsset(picture: Picture): Promise<Asset> {
     projectId = created.projectId;
     temporaryProjectId = created.projectId;
   }
-  const mode =
-    layered
-      ? "Live2D"
-      : "Static";
   try {
     return await post<Asset>("/api/wallpapers", {
     projectId,

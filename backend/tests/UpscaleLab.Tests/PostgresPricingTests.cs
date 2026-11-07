@@ -16,11 +16,11 @@ public sealed class PostgresPricingTests
 {
     [Theory]
     [Trait("Category", "PostgreSQLIntegration")]
-    [InlineData(ProcessingOperation.Upscale, 1920, 2, null)]
+    [InlineData(ProcessingOperation.Upscale, 1920, 2, 1)]
     [InlineData(ProcessingOperation.Upscale, 2560, 4, 2)]
     [InlineData(ProcessingOperation.Upscale, 3840, 6, 3)]
     [InlineData(ProcessingOperation.Layers, null, 3, 1)]
-    [InlineData(ProcessingOperation.CharacterLayers, null, 7, 4)]
+    [InlineData(ProcessingOperation.CharacterLayers, null, 7, 3)]
     public async Task ApprovedRates_ReserveAndRefundRealWalletBalances(
         ProcessingOperation operation, int? edge, int firstCost, int? revisionCost)
     {

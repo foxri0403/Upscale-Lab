@@ -632,7 +632,7 @@ public sealed class ProjectProcessingService(
                     x.Operation == ProcessingOperation.Upscale &&
                     UpscaleBillingEdge(x) == edge)
                     ? TokenPolicy.UpscaleRevisionCost(edge)
-                        ?? throw new ConflictException("FHD 업스케일링은 재수정을 지원하지 않습니다.")
+                        ?? throw new InvalidOperationException("재수정 토큰 비용을 계산할 수 없습니다.")
                     : TokenPolicy.UpscaleCost(edge),
 
             ProcessingOperation.Layers =>

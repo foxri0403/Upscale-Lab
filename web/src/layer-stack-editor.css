@@ -49,3 +49,14 @@
   .layer-stack-lists { max-height: min(38dvh, 290px); }
   .layer-stack-tabs button { font-size: .8rem; }
 }
+
+/* Layer inspection is preview-only: part selection never mutates the stack. */
+.layer-stack-view-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.layer-stack-view-modes button { display: flex; gap: 5px; align-items: center; justify-content: center; padding: 8px 6px; border: 1px solid var(--line, #dce2eb); border-radius: 7px; background: transparent; color: inherit; }
+.layer-stack-view-modes button.active { background: var(--tint, #eaf0ff); border-color: var(--primary, #4c69c8); color: var(--primary, #4c69c8); font-weight: 700; }
+.layer-stack-pending-row { display: flex; align-items: stretch; gap: 4px; border-radius: 7px; }
+.layer-stack-pending-row .layer-stack-item { flex: 1; width: auto; }
+.layer-stack-preview-only { display: grid; place-items: center; flex: 0 0 36px; color: var(--ink, #2d3b52); border: 1px solid var(--line, #dce2eb); border-radius: 6px; background: var(--surface, #fff); }
+.layer-stack-pending-row.selected, .layer-stack-item.stacked.selected { outline: 1px solid var(--primary, #4c69c8); outline-offset: -1px; background: var(--tint, #eaf0ff); }
+.layer-stack-item.stacked .layer-stack-select-part { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: transparent; color: inherit; padding: 5px 2px; }
+.layer-stack-select-part:hover, .layer-stack-preview-only:hover { color: var(--primary, #4c69c8); }

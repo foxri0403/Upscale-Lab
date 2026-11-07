@@ -30,17 +30,12 @@ public sealed class TokenCompatibilityTests
     }
 
     [Theory]
+    [InlineData(1920, 1)]
     [InlineData(2560, 2)]
     [InlineData(3840, 3)]
     public void UpscaleRevisionCost_MatchesPolicy(int edge, int expected)
     {
         Assert.Equal(expected, TokenPolicy.UpscaleRevisionCost(edge));
-    }
-
-    [Fact]
-    public void FhdRevision_IsNotSupported()
-    {
-        Assert.Null(TokenPolicy.UpscaleRevisionCost(1920));
     }
 
     [Theory]
@@ -54,8 +49,8 @@ public sealed class TokenCompatibilityTests
 
     [Theory]
     [InlineData(0, 7)]
-    [InlineData(1, 4)]
-    [InlineData(2, 4)]
+    [InlineData(1, 3)]
+    [InlineData(2, 3)]
     public void CharacterLayerCost_MatchesPolicy(int previousJobs, int expected)
     {
         Assert.Equal(expected, TokenPolicy.CharacterLayerCost(previousJobs));

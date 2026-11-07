@@ -7,31 +7,36 @@ import { stripTypeScriptTypes } from "node:module";
 // the constant defaults used by the actual editor.
 const raw = fs.readFileSync(new URL("../src/character-rig.ts", import.meta.url), "utf8")
   .replace(/^import \{ defaultHeadRig, type HeadRig \} from "\.\/model";/m, `const defaultHeadRig = {
-    enabled: false, headTilt: 60, eyeMove: 35, hairSway: 55, pivotX: 50, pivotY: 16, idle: true,
+    enabled: false, headTilt: 60, eyeMove: 35, hairSway: 55, pivotX: 50, pivotY: 16, idle: true, bodyMode: "fixed", upperBody: 40, lowerBody: 20, torso: 50, leftArm: 35, rightArm: 35, leftHand: 25, rightHand: 25, leftLeg: 20, rightLeg: 20, torsoPivotY: 40, lowerPivotY: 68, partAssignments: {},
   };`);
 const js = stripTypeScriptTypes(raw, { mode: "strip" });
 const { rigPart, rigTargets, normalizeRig } = await import(`data:text/javascript,${encodeURIComponent(js)}`);
 
-test("character rig moves only semantic face, eyes and hair parts", () => {
+test("semantic rig roles keep unmatched parts fixed and allow body assignments", () => {
   assert.equal(rigPart("Face"), "head");
   assert.equal(rigPart("Eye"), "eye");
   assert.equal(rigPart("Eyebrow"), "head");
   assert.equal(rigPart("FrontHair"), "frontHair");
   assert.equal(rigPart("BackHair"), "backHair");
-  for (const fixed of ["Body", "Clothes", "Accessory", "FrontPart", "BackPart", "Background"])
+  assert.equal(rigPart("Body"), "torso");
+  assert.equal(rigPart("Clothes"), "torso");
+  assert.equal(rigPart("Other", "layer-1", { "layer-1": "leftHand" }), "leftHand");
+  for (const fixed of ["Accessory", "FrontPart", "BackPart", "Background"])
     assert.equal(rigPart(fixed), "fixed", `${fixed} must not move`);
+});
+
+test("See-through demo: irides move alone, eyelash and eyewhite follow the head", () => {
+  assert.equal(rigPart("Eye", "irides"), "eye");
+  assert.equal(rigPart("Eye", "eyewhite"), "head");
+  assert.equal(rigPart("Eye", "eyelash"), "head");
+  assert.equal(rigPart("Eye"), "eye");
+  assert.equal(rigPart("Eye", "eye-layer", { "eye-layer": "leftHand" }, "eyewhite"), "leftHand", "explicit assignments take priority");
 });
 
 test("no head turn, eyes or hair when intensity is zero", () => {
   const s = normalizeRig({ enabled: true, headTilt: 0, eyeMove: 0, hairSway: 0, idle: false });
-  assert.deepEqual(rigTargets(1, 1, 1, 1, 0, s), { head: 0, eye: 0, shiftY: 0, eyeY: 0, front: 0, back: 0 });
-});
-
-test("See-through iris gaze moves independently while whites and lashes follow the face", () => {
-  assert.equal(rigPart("Eye", "irides"), "eye");
-  assert.equal(rigPart("Eye", "eyewhite"), "head");
-  assert.equal(rigPart("Eye", "eyelash"), "head");
-  assert.equal(rigPart("Eye"), "eye", "existing project records without source names retain their behavior");
+  const target = rigTargets(1, 1, 1, 1, 0, s);
+  assert(Object.values(target).every(value => value === 0));
 });
 
 test("head turns and eyes move only within the bounded inputs", () => {
@@ -56,4 +61,21 @@ test("character processing and rig options are isolated to the Live tab", () => 
   assert.match(source, /tool === "live" && <div className="studio-live-controls">/);
   assert.match(source, /tool === "layers" && <>/);
   assert.doesNotMatch(source, /setSeparationMode/);
+});
+
+test("body fixed vs follow and independent upper/lower strength", () => {
+  const locked = rigTargets(1, 0, 0, 0, 0, normalizeRig({ enabled: true, idle: false, bodyMode: "fixed", headTilt: 100 }));
+  assert(locked.head > 0); assert.equal(locked.torso, 0); assert.equal(locked.leftLeg, 0);
+  const following = rigTargets(1, 0, 0, 0, 0, normalizeRig({ enabled: true, idle: false, bodyMode: "follow", headTilt: 100 }));
+  assert(following.torso > 0); assert(following.leftHand > following.torso); assert(following.leftLeg > 0);
+  const upperOnly = rigTargets(1, 0, 0, 0, 0, normalizeRig({ enabled: true, idle: false, bodyMode: "follow", upperBody: 0 }));
+  assert.equal(upperOnly.torso, 0); assert(upperOnly.leftLeg > 0);
+});
+
+test("legacy rig saved without body properties defaults to fixed and sanitized assignments", () => {
+  const old = normalizeRig({ enabled: true, headTilt: 60, partAssignments: { "id": "leftArm", "other": "notValid" } });
+  assert.equal(old.bodyMode, "fixed");
+  assert.equal(old.partAssignments.id, "leftArm");
+  assert.equal(old.partAssignments.other, undefined);
+  assert.equal(rigPart("Background", "bg", old.partAssignments), "fixed");
 });

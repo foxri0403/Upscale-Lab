@@ -1,4 +1,4 @@
-import type { HeadRig } from "./model";
+import { defaultHeadRig, type HeadRig } from "./model";
 import { rigPart, type RigPart } from "./character-rig";
 import data from "./showcase-character-data.json";
 
@@ -17,6 +17,7 @@ export const showcaseCharacter: { width: number; height: number; layers: Showcas
 };
 
 export const showcaseRig: HeadRig = {
+  ...defaultHeadRig,
   enabled: true, headTilt: 60, eyeMove: 45, hairSway: 65,
   pivotX: 50, pivotY: 44, idle: true,
 };

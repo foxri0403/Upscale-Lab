@@ -67,7 +67,9 @@ internal sealed class WallpaperCache(HttpClient downloads, Guid account, string 
     }
     internal static void Validate(WallpaperManifest m)
     {
-        if (m.Mode == "Static" && m.Files?.Length != 1 || m.Mode == "Live2D" && m.Files?.Any(f => f.Role == "Background") != true)
+        // Transparent character projects do not have a Background PNG. Two or more
+        // independent layers are sufficient for Live2D; legacy foreground/background remains valid.
+        if (m.Mode == "Static" && m.Files?.Length != 1 || m.Mode == "Live2D" && (m.Files?.Length ?? 0) < 2)
             throw new InvalidDataException("배경화면 레이어 구성이 올바르지 않습니다.");
         if (m.SchemaVersion != 1 || m.AssetId == Guid.Empty || m.Width is < 1 or > 32768 || m.Height is < 1 or > 32768 ||
             m.Mode is not ("Static" or "Live2D") || m.Files is null || m.Files.Length is < 1 or > 32 ||

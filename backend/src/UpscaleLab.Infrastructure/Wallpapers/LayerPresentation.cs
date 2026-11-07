@@ -25,6 +25,19 @@ internal sealed class LayerPresentation
     public WallpaperFile Transform(WallpaperFile file) => file with { X=file.X*factor,Y=file.Y*factor,
         MovementX=file.Role=="Background"?0:Width*.035*Settings.Strength/100,
         MovementY=file.Role=="Background"?0:Height*.035*Settings.Strength/100 };
+
+    // Rig pivot values are percentages of the ORIGINAL shared image canvas.
+    // Baking a crop into every layer changes the canvas, so map all pivots into
+    // the cropped coordinate system as well. Without this, the head can rotate
+    // around the wrong place on 9:16 phone wallpapers.
+    public HeadRigSettings? TransformRig(HeadRigSettings? rig)
+    {
+        if (rig is null) return null;
+        int X(int value) => (int)Math.Clamp(Math.Round(((value / 100.0 * originalWidth - cropX) / cropWidth) * 100), 0, 100);
+        int Y(int value) => (int)Math.Clamp(Math.Round(((value / 100.0 * originalHeight - cropY) / cropHeight) * 100), 0, 100);
+        return rig with { PivotX = X(rig.PivotX), PivotY = Y(rig.PivotY),
+            TorsoPivotY = Y(rig.TorsoPivotY), LowerPivotY = Y(rig.LowerPivotY) };
+    }
     public byte[] Render(byte[] bytes)
     {
         using var image=new MagickImage(bytes);

@@ -10,12 +10,13 @@ import { previewStageStyle, PreviewPaletteButton } from "./StudioPreview";
 import { SubjectSeparationCanvas, type SubjectSeparation } from "./SubjectSeparation";
 import { usePreviewPan } from "./use-preview-pan";
 import { rigPart } from "./character-rig";
+import { livePreviewLayers } from "./live-layer-preview";
 import type { CharacterRigController } from "./use-character-rig";
 
-export function StudioCanvas({ picture, edit, tool, layered, background, foregrounds, selectedLayer = "all", saveState, unsaved, onDimensions, motion, characterRig, onEdit, readOnly = false, separation, published }: {
+export function StudioCanvas({ picture, edit, tool, layered, background, foregrounds, selectedLayer = "all", selectedCharacterLayerId = null, saveState, unsaved, onDimensions, motion, characterRig, onEdit, readOnly = false, separation, published }: {
   picture: Picture; edit: Edit; tool: Tool; layered: boolean;
   background: string; foregrounds: string[];
-  selectedLayer?: LayerPreview;
+  selectedLayer?: LayerPreview; selectedCharacterLayerId?: string | null;
   saveState: string; unsaved: boolean;
   onDimensions: (value: { src: string; width: number; height: number }) => void;
   motion: { active: boolean; stage: RefObject<HTMLDivElement | null>; layers: RefObject<HTMLDivElement | null> };
@@ -34,6 +35,7 @@ export function StudioCanvas({ picture, edit, tool, layered, background, foregro
   const palette = { dark: darkPalette, toggle: () => setDarkPalette(value => !value) };
   const visible = visibleLayers(tool === "live" ? "all" : selectedLayer);
   const showingLayers = layered && (tool === "layers" || tool === "live");
+  const isSingleCharacterPart = tool === "live" && !!selectedCharacterLayerId;
   const usingCharacterRig = tool === "live" && !!picture.layers?.length && !picture.layers.some(layer => layer.layerType === "Background");
   const moving = motion.active;
   const dimensionsCallback = useRef(onDimensions);
@@ -75,11 +77,12 @@ export function StudioCanvas({ picture, edit, tool, layered, background, foregro
             <div className="studio-image-plane" style={selected.plane}>
             {inline ? <SubjectSeparationCanvas editor={separation} disabled={readOnly || !layered || hand || pan.canPan || separation.tracing} filter={filterStyle(edit.filter)} /> : showingLayers ? (
               <div className={`live-canvas ${moving ? "motion-active" : ""}`} ref={usingCharacterRig ? characterRig.layers : motion.layers} style={{ filter: filterStyle(edit.filter) }}>
-                {picture.layers?.length ? picture.layers
-                  .filter(layer => layer.layerType === "Background" ? visible.background : visible.subject)
+                {picture.layers?.length ? livePreviewLayers(
+                  picture.layers.filter(layer => layer.layerType === "Background" ? visible.background : visible.subject),
+                  tool === "live" ? selectedCharacterLayerId : null)
                   .map((layer, i) => <img key={layer.id} src={layer.imageUrl}
                     className={layer.layerType !== "Background" ? "subject-layer" : undefined}
-                    data-rig-part={usingCharacterRig ? rigPart(layer.layerType) : undefined}
+                    data-rig-part={usingCharacterRig ? rigPart(layer.layerType, layer.id, edit.rig?.partAssignments) : undefined}
                     alt={`${layer.layerType} 레이어 ${i + 1}`} />) : <>
                   {visible.background && <img src={background} alt="배경 레이어" />}
                   {visible.subject && foregrounds.map((src, i) => <img key={src}
