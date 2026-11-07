@@ -94,6 +94,6 @@ export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: s
     settings.torso, settings.leftArm, settings.rightArm, settings.leftHand, settings.rightHand,
     settings.leftLeg, settings.rightLeg, settings.torsoPivotY, settings.lowerPivotY,
     JSON.stringify(settings.partAssignments), mouse, tilt, tiltY, look, lookY, externalMotion]);
-  return { stage, layers, active: visible && settings.enabled, tilt, setTilt, tiltY, setTiltY, look, setLook, lookY, mouse, setMouse };
+  return { stage, layers, active: visible && settings.enabled, tilt, setTilt, tiltY, setTiltY, look, setLook, lookY, setLookY, mouse, setMouse };
 }
 export type CharacterRigController = ReturnType<typeof useCharacterRig>;

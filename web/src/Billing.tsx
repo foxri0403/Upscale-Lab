@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Coins, CreditCard, RefreshCw, ShieldCheck } from "lucide-react";
 import { cloud, cloudMe, post, request } from "./api";
-import { tokenPricing } from "./token-pricing";
+import { TokenUsageTable } from "./TokenUsageTable";
 import "./billing.css";
 
 type Wallet = {
@@ -743,23 +743,7 @@ export function Billing() {
 
           <section className="billing-usage" aria-labelledby="token-usage-heading">
             <h2 id="token-usage-heading">작업별 토큰 사용량</h2>
-            <div className="billing-usage-table">
-              <table aria-label="작업별 토큰 사용량">
-                <thead><tr><th scope="col">작업</th><th scope="col">최초 사용</th><th scope="col">재수정</th></tr></thead>
-                <tbody>
-                  {tokenPricing.map(rate => (
-                    <tr key={rate.label}>
-                      <th scope="row">{rate.label}</th>
-                      <td>{rate.firstUse}</td>
-                      <td>{rate.revision === null
-                        ? <span className="unsupported-revision" aria-label="재수정 미지원">-</span>
-                        : rate.revision}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="billing-usage-note">같은 프로젝트의 성공한 작업을 기준으로 계산합니다. FHD 재수정은 1토큰이며, 처리 실패 시 예약한 토큰을 환불합니다.</p>
+            <TokenUsageTable />
           </section>
 
           <p style={{ marginTop: 28, opacity: 0.7, fontSize: 13 }}>

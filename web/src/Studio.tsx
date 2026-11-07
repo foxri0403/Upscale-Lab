@@ -30,10 +30,11 @@ import {
   type Edit,
   type Tool,
 } from "./model";
-import { Modal, Notice, Busy, Empty, Link } from "./ui";
+import { Modal, Notice, Busy, Empty, Link, navigate } from "./ui";
 import { ApiError, cloud, request, post, type Job } from "./api";
 import { createCroppedLive2dProject, detailPicture, discardDraft, loadProjectPicture, prepareEditableProject, processProject, refineSubject, resetProjectEffects, saveImageEdit } from "./cloud-store";
 import { processingStatus } from "./processing-status";
+import { TokenUsageHelp } from "./TokenUsageHelp";
 import { useUnsavedWarning } from "./use-unsaved-warning";
 import { LayerPreviewSelector } from "./LayerPreviewSelector";
 import { LayerMotionControls } from "./LayerMotionControls";
@@ -652,6 +653,7 @@ export function Studio({ route }: { route: string }) {
                 ? "업스케일"
                 : tool === "live" ? "캐릭터 파츠 분리 시작" : isFox ? "피사체 다시 분리" : "피사체 자동 분리"}
             </button>
+            <TokenUsageHelp />
             {tool === "layers" && separation.error && <p className="mask-error" role="alert">{separation.error}</p>}
             {tool === "upscale" && <button className="button secondary full effect-cancel" type="button"
               disabled={busy || processing || !picture.projectId || !picture.jobId}

@@ -28,7 +28,7 @@ public sealed class ParallaxRenderingTests
                 form.Show();var elapsed=Stopwatch.StartNew();while(elapsed.ElapsedMilliseconds<900){Application.DoEvents();Thread.Sleep(2);}
                 var canvas=(System.Windows.Controls.Canvas)view.Children[0];
                 var plane=(System.Windows.Controls.Image)canvas.Children[1];
-                var shift=(TranslateTransform)((TransformGroup)plane.RenderTransform).Children[2];
+                var shift=((TransformGroup)plane.RenderTransform).Children.OfType<TranslateTransform>().Single();
                 Assert.True(view.IsLoaded,$"WPF not loaded; desktopChild={desktopChild}");
                 Assert.True(reads>10,$"No sustained render frames: reads={reads}; desktopChild={desktopChild}");
                 Assert.True(shift.X>5,$"Movement must follow the mouse to the right: x={shift.X}; frames={reads}; desktopChild={desktopChild}");

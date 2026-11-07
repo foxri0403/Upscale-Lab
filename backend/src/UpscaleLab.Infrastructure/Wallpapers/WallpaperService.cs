@@ -185,8 +185,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             if (project.Layers.Count < 2)
                 throw new ConflictException("분리된 레이어가 2개 이상 필요합니다.");
             var latest = project.ProcessingJobs.Where(x => x.Status == ProcessingJobStatus.Completed &&
-                (x.Operation == ProcessingOperation.Layers || x.Operation == ProcessingOperation.CharacterLayers ||
-                 x.Operation == ProcessingOperation.UpscaleAndLayers))
+                x.ResultWidth > 0 && x.ResultHeight > 0)
                 .OrderByDescending(x => x.CompletedAt).FirstOrDefault();
             if (latest is { ResultWidth: > 0, ResultHeight: > 0 }) { width = latest.ResultWidth; height = latest.ResultHeight; }
             sources.AddRange(project.Layers.OrderBy(x => x.LayerOrder).Select(x => new WallpaperFile(x.ObjectKey,

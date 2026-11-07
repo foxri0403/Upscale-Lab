@@ -1,0 +1,57 @@
+.billing-usage-table {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+}
+.token-usage table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.token-usage th, .token-usage td { padding: 18px 24px; text-align: center; font-variant-numeric: tabular-nums; }
+.token-usage thead { color: var(--primary); background: var(--tint); }
+.token-usage tbody th { color: var(--ink); font-weight: 500; }
+.token-usage tr > :first-child { width: 56%; text-align: left; }
+.token-usage tbody tr + tr { border-top: 1px solid var(--line); }
+.token-usage tbody td { font-weight: 700; }
+.token-usage .billing-usage-note { margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.token-usage .unsupported-revision { color: var(--muted); font-weight: 500; }
+
+.token-usage-link {
+  display: block;
+  margin: 8px 0 0;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.token-usage-link:hover { color: #536078; }
+.token-usage-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: min(380px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  padding: 16px;
+  background: white;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 35px #17203315;
+}
+.token-usage-popover h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+.token-usage-compact table { font-size: 12px; }
+.token-usage-compact th, .token-usage-compact td { padding: 11px 10px; }
+.token-usage-compact .billing-usage-table { border-radius: 10px; }
+.token-usage-compact .billing-usage-note { font-size: 11px; margin-top: 10px; }
+
+@media (max-width: 600px) {
+  .token-usage th, .token-usage td { padding: 15px 10px; }
+  .token-usage table { font-size: 12px; }
+  .token-usage-compact th, .token-usage-compact td { padding: 10px 8px; }
+}
