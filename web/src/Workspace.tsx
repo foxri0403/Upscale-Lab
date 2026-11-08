@@ -29,6 +29,8 @@ import {
   write,
   sampleLibrary,
   community,
+  defaultEdit,
+  defaultHeadRig,
   uuid,
   type Library,
   type Picture,
@@ -84,7 +86,7 @@ type DemoContext = {
     picture: Picture,
     deviceId: string,
     displayId: string,
-    options?: { useExistingAsset?: boolean },
+    options?: { useExistingAsset?: boolean; enablePcLiveMotion?: boolean },
   ) => Promise<boolean>;
   refresh: () => Promise<void>;
   refreshDevices: () => Promise<void>;
@@ -439,7 +441,8 @@ export function Workspace({
       sharing.current = false;
     }
   }
-  async function apply(picture: Picture, deviceId: string, displayId: string, options?: { useExistingAsset?: boolean }) {
+  async function apply(picture: Picture, deviceId: string, displayId: string,
+    options?: { useExistingAsset?: boolean; enablePcLiveMotion?: boolean }) {
     const device = current.current.devices.find((d) => d.id === deviceId);
     if (!device) return false;
     const display = device.displays.find((d) => d.id === displayId);
@@ -450,11 +453,22 @@ export function Workspace({
     if (cloud) {
       let sent = false;
       try {
-        const asset: Asset = options?.useExistingAsset && picture.assetId ? {
-          id: picture.assetId, title: picture.name,
-          mode: picture.background && picture.foregrounds?.length ? "Live2D" : "Static",
-          isPublic: !!picture.sharedId, createdAt: picture.created,
-        } : await saveCloud(picture);
+        // Explicit PC motion opt-in creates a NEW private wallpaper snapshot.
+        // Do not reuse or modify a published/immutable asset or the author's project.
+        const movingPicture: Picture = options?.enablePcLiveMotion ? {
+          ...picture,
+          edit: { ...defaultEdit, ...picture.edit, foreground: true, liveEnabled: true,
+            mouseEnabled: true, gyroEnabled: picture.edit?.gyroEnabled ?? false,
+            rig: { ...defaultHeadRig, ...picture.edit?.rig, enabled: true, bodyMode: "follow" },
+          },
+        } : picture;
+        const asset: Asset = options?.enablePcLiveMotion
+          ? await createAsset(movingPicture)
+          : options?.useExistingAsset && picture.assetId ? {
+            id: picture.assetId, title: picture.name,
+            mode: picture.background && picture.foregrounds?.length ? "Live2D" : "Static",
+            isPublic: !!picture.sharedId, createdAt: picture.created,
+          } : await saveCloud(picture);
         await post(`/api/devices/${deviceId}/commands`, {
           requestId: uuid(),
           displayId: display.nativeId,

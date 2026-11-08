@@ -36,6 +36,77 @@ public sealed class WallpaperMotionDeliveryTests
         Assert.True((await service.GetManifestAsync(project.UserId,asset.Id,false,default)).MouseEnabled);
     }
     [Fact]
+    public async Task SharedCharacterWallpaperCanBeAppliedWithMouseAndRigWithoutChangingOriginal()
+    {
+        await using var db = WorkflowData.Db();
+        var store = new WorkflowStore();
+        var project = WorkflowData.Project(Guid.NewGuid());
+        project.OriginalImage.OriginalWidth = 10;
+        project.OriginalImage.OriginalHeight = 10;
+        foreach (var (type, key, color) in new[] {
+            (LayerType.Body, "body", MagickColors.Blue),
+            (LayerType.Clothes, "clothes", MagickColors.Red) })
+        {
+            using var image = new MagickImage(color, 10, 10);
+            store.Files[key] = image.ToByteArray(MagickFormat.Png);
+            project.Layers.Add(new() { ObjectKey = key, LayerType = type,
+                LayerOrder = type == LayerType.Body ? 0 : 1 });
+        }
+        db.Add(project);
+        await db.SaveChangesAsync();
+        var service = new WallpaperService(db, store, store);
+        var original = await service.CreateAsync(project.UserId,
+            new(project.Id, "Original", WallpaperMode.Live2D, MotionEnabled: false,
+                MouseEnabled: false, GyroEnabled: false,
+                Render: new(50, "original", "original", 1, true)), default);
+        await service.SetSharingAsync(project.UserId, original.Id, true, default);
+        var rig = new HeadRigSettings(true, 60, 35, 55, 50, 16, true, BodyMode: "follow");
+        var motionCopy = await service.SnapshotAsync(project.UserId, original.Id,
+            new(true, 50, MouseEnabled: true, GyroEnabled: false,
+                Render: new(50, "original", "original", 1, true), Rig: rig), default);
+        var originalManifest = await service.GetManifestAsync(project.UserId, original.Id, false, default);
+        var activeManifest = await service.GetManifestAsync(project.UserId, motionCopy.Id, false, default);
+        Assert.NotEqual(original.Id, motionCopy.Id);
+        Assert.False(originalManifest.MouseEnabled);
+        Assert.False(originalManifest.MotionEnabled);
+        Assert.True(activeManifest.MouseEnabled);
+        Assert.True(activeManifest.MotionEnabled);
+        Assert.True(activeManifest.Rig?.Enabled);
+        Assert.Equal("follow", activeManifest.Rig?.BodyMode);
+        Assert.Equal(2, activeManifest.Files.Count);
+        Assert.All(activeManifest.Files, file => Assert.True(file.MovementX > 0));
+        Assert.False(motionCopy.IsPublic);
+    }
+
+    [Fact]
+    public async Task ProjectCharacterWallpaperUsesExplicitRigFromApplyRequest()
+    {
+        await using var db = WorkflowData.Db();
+        var store = new WorkflowStore();
+        var project = WorkflowData.Project(Guid.NewGuid());
+        foreach (var (type, name) in new[] { (LayerType.Body, "body"), (LayerType.Clothes, "clothes") })
+        {
+            using var image = new MagickImage(MagickColors.Red, 10, 10);
+            store.Files[name] = image.ToByteArray(MagickFormat.Png);
+            project.Layers.Add(new() { ObjectKey = name, LayerType = type,
+                LayerOrder = type == LayerType.Body ? 0 : 1 });
+        }
+        db.Add(project); await db.SaveChangesAsync();
+        var service = new WallpaperService(db, store, store);
+        var rig = new HeadRigSettings(true, 60, 35, 55, 50, 16, true, BodyMode: "follow");
+        var applied = await service.CreateAsync(project.UserId,
+            new(project.Id, "Motion applied", WallpaperMode.Live2D, MotionEnabled: true,
+                MouseEnabled: true, GyroEnabled: false,
+                Render: new(50, "original", "original", 1, true), Rig: rig), default);
+        var manifest = await service.GetManifestAsync(project.UserId, applied.Id, false, default);
+        Assert.Equal(2, manifest.Files.Count);
+        Assert.True(manifest.MotionEnabled);
+        Assert.True(manifest.MouseEnabled);
+        Assert.True(manifest.Rig?.Enabled);
+        Assert.Equal("follow", manifest.Rig?.BodyMode);
+    }
+
+    [Fact]
     public async Task ExistingSavedMouseSelectionIsDeliveredWithoutRewritingItsImmutableManifest()
     {
         await using var db=WorkflowData.Db();var store=new WorkflowStore();

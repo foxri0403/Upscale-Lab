@@ -355,6 +355,7 @@ export async function createAsset(picture: Picture): Promise<Asset> {
     return post<Asset>(`/api/wallpapers/${picture.assetId}/snapshot`, {
       motionEnabled: !!edit.mouseEnabled || !!edit.gyroEnabled, strength: edit.strength,
       mouseEnabled: !!edit.mouseEnabled, gyroEnabled: !!edit.gyroEnabled,
+      rig: edit.rig,
       render: { strength: edit.strength, filter: edit.filter, crop: edit.crop, scale: edit.scale, foreground: edit.foreground, cropRegion: edit.cropRegion },
     });
   let temporaryProjectId: string | undefined;
@@ -374,6 +375,7 @@ export async function createAsset(picture: Picture): Promise<Asset> {
     motionEnabled: !!edit.mouseEnabled || !!edit.gyroEnabled,
     mouseEnabled: !!edit.mouseEnabled,
     gyroEnabled: !!edit.gyroEnabled,
+    rig: mode === "Live2D" ? edit.rig : undefined,
     render: mode === "Live2D" ? { strength: edit.strength, filter: edit.filter, crop: edit.crop, scale: edit.scale, foreground: edit.foreground, cropRegion: edit.cropRegion } : undefined,
     processingJobId: !rendered && mode === "Static" ? picture.jobId : undefined,
     originProjectId: picture.projectId,

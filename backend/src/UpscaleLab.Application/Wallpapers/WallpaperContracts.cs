@@ -7,9 +7,11 @@ namespace UpscaleLab.Application.Wallpapers;
 public sealed record CreateWallpaperRequest(Guid ProjectId,
     [param: Required, MaxLength(160)] string Title, WallpaperMode Mode, Guid? ProcessingJobId = null,
     Guid? OriginProjectId = null, bool ReuseExisting = false, bool MotionEnabled = true,
-    bool? MouseEnabled = null, bool? GyroEnabled = null, WallpaperRenderSettings? Render = null);
+    bool? MouseEnabled = null, bool? GyroEnabled = null, WallpaperRenderSettings? Render = null,
+    HeadRigSettings? Rig = null);
 public sealed record SnapshotWallpaperRequest(bool MotionEnabled, [param: Range(0, 100)] int Strength,
-    bool? MouseEnabled = null, bool? GyroEnabled = null, WallpaperRenderSettings? Render = null);
+    bool? MouseEnabled = null, bool? GyroEnabled = null, WallpaperRenderSettings? Render = null,
+    HeadRigSettings? Rig = null);
 public sealed record WallpaperRenderSettings(int Strength, string Filter, string Crop, int Scale, bool Foreground, ImageCropRegion? CropRegion = null);
 public sealed record RenameWallpaperRequest([param: Required, MaxLength(160)] string Title);
 public sealed record ShareWallpaperRequest(bool IsPublic);
