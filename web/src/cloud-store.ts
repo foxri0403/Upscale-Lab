@@ -126,6 +126,7 @@ export async function assetPicture(a: Asset, fresh = false, signal?: AbortSignal
     sourceProjectId: a.sourceProjectId ?? undefined,
     name: a.title,
     src: files[0]?.source || "",
+    wallpaperParts: a.mode === "Live2D" && !files.some(file => file.role === "Background") ? files : undefined,
     genre: unspecifiedTag,
     tags: a.edit?.tags || [],
     platformTags: a.edit?.platformTags || [],

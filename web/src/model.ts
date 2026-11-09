@@ -87,6 +87,7 @@ export type Picture = {
   jobId?: string;
   detailsUntil?: number;
   wallpaperFrame?: import("./wallpaper-frame").WallpaperFrame;
+  wallpaperParts?: { source: string; role: string; layerId?: string | null }[];
   isDeviceVariant?: boolean;
   legacyMotion?: boolean;
   width?: number;

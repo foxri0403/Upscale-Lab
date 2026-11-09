@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
-import { Monitor, RotateCcw } from "lucide-react";
-import type { Device, Display, Picture } from "./model";
+import { Images, Monitor, MousePointer2, RotateCcw, Smartphone } from "lucide-react";
+import { defaultEdit, defaultHeadRig, type Device, type Display, type Picture } from "./model";
 import { wallpaperTargets } from "./explore-actions";
 import { Busy, Empty, Link, Modal, Notice } from "./ui";
 import { cloud } from "./api";
 import { detailPicture } from "./cloud-store";
 import { FramedWallpaper } from "./FramedWallpaper";
+import { OptionPicker } from "./OptionPicker";
+import { useParallax } from "./use-parallax";
+import { defaultDemoInput } from "./demo-input";
+import { imageFeatures } from "./image-features";
+import { wallpaperExportPolicy } from "./wallpaper-export-policy";
 import { defaultFrame, displaySize, dragFrame, frameLayout, wallpaperCrop, type ScreenSize, type WallpaperFrame } from "./wallpaper-frame";
 
 type Target = ReturnType<typeof wallpaperTargets>[number] & { display: Display; platform: Device["platform"] };
@@ -31,16 +36,14 @@ export function ApplyWallpaperDialog({ picture, pictures, devices, fixedTarget, 
   const selected = target && device && display ? { ...target, display, platform: device.platform } : undefined;
   const selectedPicture = picture || pictures?.find(value => value.id === pictureId) || pictures?.[0];
   return <Modal title="배경화면 적용 미리보기" className="wallpaper-apply-dialog" wide close={() => { if (!busy) close(); }}>
-    {pictures && <label>이미지 선택
-      <select value={selectedPicture?.id || ""} disabled={busy} onChange={event => setPictureId(event.target.value)}>
-        {pictures.map(value => <option key={value.id} value={value.id}>{value.name}</option>)}
-      </select>
-    </label>}
-    {!fixedTarget && targets.length > 0 && <label>기기 및 화면
-      <select value={selected?.id || ""} disabled={busy} onChange={event => setTargetId(event.target.value)}>
-        {targets.map(target => <option key={target.id} value={target.id}>{target.name}</option>)}
-      </select>
-    </label>}
+    {pictures && <div className="wallpaper-picker"><span>이미지 선택</span>
+      <OptionPicker label="이미지 선택" value={selectedPicture?.id || ""} disabled={busy} change={setPictureId}
+        icon={<Images size={18} aria-hidden="true" />} options={pictures.map(value => ({ value: value.id, label: value.name }))} />
+    </div>}
+    {!fixedTarget && targets.length > 0 && <div className="wallpaper-picker"><span>기기 및 화면</span>
+      <OptionPicker label="기기 및 화면" value={selected?.id || ""} disabled={busy} change={setTargetId}
+        icon={<Monitor size={18} aria-hidden="true" />} options={targets.map(value => ({ value: value.id, label: value.name }))} />
+    </div>}
     {!selected ? <Empty text="적용할 수 있는 화면이 없어요">
       <p>연결 앱에 로그인한 뒤 적용할 화면을 확인해 주세요.</p>
       {!fixedTarget && <Link to="/app/devices" className="button secondary">기기 관리로 이동</Link>}
@@ -92,11 +95,50 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, pc
   const crop = wallpaperCrop(picture, size);
   const [frame, setFrame] = useState(() => defaultFrame(screen, crop));
   const [pcMotion, setPcMotion] = useState(true);
+  const [testing, setTesting] = useState(false);
+  const [testError, setTestError] = useState("");
+  const [testInput] = useState(() => defaultDemoInput(matchMedia("(pointer: coarse)").matches,
+    matchMedia("(any-pointer: fine)").matches, navigator.maxTouchPoints));
   const drag = useRef<{ id: number; x: number; y: number; frame: WallpaperFrame } | null>(null);
   const submitting = useRef(false);
   const layout = frameLayout(frame, crop);
-  const character = !picture.background && ((picture.layers?.length ?? 0) >= 2 || (picture.foregrounds?.length ?? 0) >= 2);
-  const showPcMotion = pcMotionAvailable && target.platform === "Windows" && character;
+  const edit = picture.edit ?? defaultEdit;
+  const { characterParts } = wallpaperExportPolicy(picture, edit);
+  const windows = target.platform === "Windows";
+  const showPcMotion = pcMotionAvailable && windows && characterParts;
+  const enablePcMotion = !!showPcMotion && pcMotion;
+  const { layered } = wallpaperExportPolicy(picture, enablePcMotion ? { ...edit, foreground: true } : edit);
+  const legacyMotion = picture.legacyMotion && !edit.mouseEnabled && !edit.gyroEnabled;
+  const appliedMotion = enablePcMotion || (windows ? edit.mouseEnabled : edit.gyroEnabled) || legacyMotion;
+  const motionLabel = appliedMotion ? (windows ? "마우스 움직임" : "자이로센서") : "움직임 꺼짐";
+  const wallpaperMode = layered ? `Live 2D · ${characterParts ? "캐릭터 파츠" : "배경·피사체 레이어"} · ${motionLabel}` : "정적 배경화면";
+  const techniques = imageFeatures(picture).filter(feature => !layered || feature !== "Live 2D");
+  const gyro = testInput === "gyro";
+  const motion = useParallax(layered && testing && !busy, edit.strength, !gyro, gyro);
+  const MotionIcon = gyro ? Smartphone : MousePointer2;
+  const rig = enablePcMotion ? { ...defaultHeadRig, ...edit.rig, enabled: true, bodyMode: "follow" as const } : edit.rig;
+
+  useEffect(() => {
+    if (!gyro || !motion.active) return;
+    const timer = window.setTimeout(() => setTestError("센서 입력을 받지 못했습니다. 브라우저의 모션 센서 설정을 확인해 주세요."), 2500);
+    function receive(event: DeviceOrientationEvent) {
+      if (event.gamma === null || event.beta === null || !Number.isFinite(event.gamma) || !Number.isFinite(event.beta)) return;
+      window.clearTimeout(timer);
+      setTestError("");
+      window.removeEventListener("deviceorientation", receive);
+    }
+    window.addEventListener("deviceorientation", receive);
+    return () => { window.clearTimeout(timer); window.removeEventListener("deviceorientation", receive); };
+  }, [gyro, motion.active]);
+
+  async function toggleMotionTest() {
+    setTestError("");
+    if (testing) { setTesting(false); return; }
+    try {
+      if (gyro) await motion.requestGyro();
+      setTesting(true);
+    } catch (error) { setTestError((error as Error).message); }
+  }
   function move(event: PointerEvent<HTMLDivElement>) {
     const value = drag.current;
     if (busy || !value || event.pointerId !== value.id) return;
@@ -108,19 +150,20 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, pc
     submitting.current = true;
     try {
       await confirm({ picture: { ...picture, ...size }, deviceId: target.deviceId, displayId: target.displayId,
-        frame, pcMotion: !!showPcMotion && pcMotion });
+        frame, pcMotion: enablePcMotion });
     } finally { submitting.current = false; }
   }
   return <>
     <div className="wallpaper-frame-heading"><strong>{target.name}</strong><span>{screen.width} × {screen.height} px</span></div>
-    <div className="wallpaper-screen-frame" aria-label="대상 화면 미리보기"
+    <div className={`wallpaper-screen-frame${windows ? " wallpaper-screen-frame-pc" : ""}`} aria-label="대상 화면 미리보기" ref={motion.stage}
       style={{ aspectRatio: `${layout.width} / ${layout.height}`, width: `min(100%, ${36 * layout.width / layout.height}dvh)` }}
       onPointerDown={event => {
         if (busy || !event.isPrimary || event.button !== 0) return;
         drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, frame };
         event.currentTarget.setPointerCapture(event.pointerId);
       }} onPointerMove={move} onLostPointerCapture={() => { drag.current = null; }}>
-      <FramedWallpaper picture={picture} size={size} frame={frame} />
+      <FramedWallpaper picture={enablePcMotion ? { ...picture, edit: { ...edit, foreground: true } } : picture}
+        size={size} frame={frame} motion={motion} rig={rig} />
     </div>
     <fieldset className="wallpaper-frame-settings" disabled={busy}>
       <legend>이미지 배치</legend>
@@ -131,26 +174,33 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, pc
           onClick={() => setFrame({ ...frame, contain: true, zoom: 1 })}>이미지 전체 표시</button>
         <button type="button" className="button secondary" onClick={() => setFrame(defaultFrame(screen, crop))}><RotateCcw size={16} /> 초기화</button>
       </div>
-      <p>미리보기에서 이미지를 끌거나 아래 조절 막대를 사용하세요.</p>
       <label>확대 {Math.round(frame.zoom * 100)}%
         <input type="range" min="1" max="3" step="0.01" value={frame.zoom}
           onChange={event => setFrame({ ...frame, zoom: event.target.valueAsNumber })} />
       </label>
-      {Math.abs(layout.travelX) >= 1 && <label>가로 위치
+      <label>가로 위치
         <input type="range" min="0" max="1" step="0.01" value={layout.travelX < 0 ? 1 - frame.x : frame.x}
+          disabled={Math.abs(layout.travelX) < 1}
           onChange={event => setFrame({ ...frame, x: layout.travelX < 0 ? 1 - event.target.valueAsNumber : event.target.valueAsNumber })} />
-      </label>}
-      {Math.abs(layout.travelY) >= 1 && <label>세로 위치
+      </label>
+      <label>세로 위치
         <input type="range" min="0" max="1" step="0.01" value={layout.travelY < 0 ? 1 - frame.y : frame.y}
+          disabled={Math.abs(layout.travelY) < 1}
           onChange={event => setFrame({ ...frame, y: layout.travelY < 0 ? 1 - event.target.valueAsNumber : event.target.valueAsNumber })} />
-      </label>}
+      </label>
       {showPcMotion && <label className="studio-rig-toggle">
         <input type="checkbox" checked={pcMotion} onChange={event => setPcMotion(event.target.checked)} />
         <span>PC에서 Live 2D 파츠 움직임 켜고 적용</span>
       </label>}
     </fieldset>
-    <Notice>{fromExplore ? "이미지를 내 이미지에 저장한 뒤 적용 요청을 전송합니다. " : ""}
-      {cloud ? "연결 앱이 처리한 뒤 기기 관리에서 적용 결과를 확인할 수 있습니다." : "샘플 기기 관리에서 동기화하면 적용 결과를 확인할 수 있습니다."}</Notice>
+    <button type="button" className="button secondary full wallpaper-motion-test" aria-pressed={testing}
+      aria-busy={motion.gyroPending} disabled={busy || !layered || motion.gyroPending} onClick={() => void toggleMotionTest()}>
+      <MotionIcon size={18} aria-hidden="true" />{gyro ? "자이로센서 움직임 테스트" : "마우스 움직임 테스트"}
+    </button>
+    {testError && <p className="wallpaper-motion-status" role="status">{testError}</p>}
+    <Notice><strong>적용 기술</strong> · {[...techniques, wallpaperMode].join(" · ")}
+      {fromExplore && <> <br />이미지를 내 이미지에 저장한 뒤 적용 요청을 전송합니다.</>}
+    </Notice>
     <button className="button primary full" disabled={busy} onClick={() => void submit()}>
       {busy ? <Busy /> : <Monitor size={18} />}{busy ? "적용 요청 전송 중…" : "이 배치로 적용"}
     </button>

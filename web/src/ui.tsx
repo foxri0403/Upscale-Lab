@@ -135,10 +135,12 @@ export function PictureView({
   picture,
   loaded,
   failed,
+  partForSource,
 }: {
   picture: Picture;
   loaded?: (image: HTMLImageElement) => void;
   failed?: () => void;
+  partForSource?: (source: string) => string | undefined;
 }) {
   const character = !picture.background && ((picture.layers?.length ?? 0) >= 2 ||
     (!!picture.assetId && (picture.foregrounds?.length ?? 0) >= 2));
@@ -153,11 +155,12 @@ export function PictureView({
         src={source}
         alt={picture.name}
         loading="lazy"
+        data-rig-part={partForSource?.(source)}
         onLoad={(event) => loaded?.(event.currentTarget)}
         onError={() => failed?.()}
       />
       {(picture.background ? stack : character ? stack.slice(1) : []).map((src, i) => (
-          <img key={i} src={src} alt="" loading="lazy" />
+          <img key={i} src={src} alt="" loading="lazy" data-rig-part={partForSource?.(src)} />
         ))}
     </span>
   );

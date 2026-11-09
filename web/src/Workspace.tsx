@@ -71,6 +71,7 @@ import { watchDeviceUpdates } from "./device-updates";
 import { ImageCard } from "./ImageCard";
 import { ExploreDetails } from "./ExploreDetails";
 import { ApplyWallpaperDialog, type WallpaperSelection } from "./ApplyWallpaperDialog";
+import { OptionPicker } from "./OptionPicker";
 import { isOwnExplorePicture, ownedExplorePicture, wallpaperTargets } from "./explore-actions";
 import { isImageShared, sharingTargets } from "./image-sharing";
 import { canNavigate } from "./navigation";
@@ -996,20 +997,13 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
         </label>
         <TagSelector selected={selectedTags} change={setSelectedTags}
           platforms={selectedPlatforms} changePlatforms={setSelectedPlatforms} />
-        <label className="select-field">
-          <ArrowDownUp size={18} />
-          <select
-            aria-label="정렬"
-            value={sort}
-            onChange={(e) => setSort(e.target.value)}
-          >
-            <option value="recent">
-              {explore ? "최신순" : "최근 등록순"}
-            </option>
-            <option value="name">이름순</option>
-            {explore && <><option value="likes">좋아요순</option><option value="downloads">다운로드순</option></>}
-          </select>
-        </label>
+        <OptionPicker className="select-field" label="정렬" value={sort} change={setSort}
+          icon={<ArrowDownUp size={18} aria-hidden="true" />}
+          options={[
+            { value: "recent", label: explore ? "최신순" : "최근 등록순" },
+            { value: "name", label: "이름순" },
+            ...(explore ? [{ value: "likes", label: "좋아요순" }, { value: "downloads", label: "다운로드순" }] : []),
+          ]} />
       </div>
       {remotePending || (explore && loading && !all.length) ? <p className="explore-result-status" role="status"><Busy /> 공유 이미지를 불러오는 중…</p>
         : remote?.error ? <Empty text="공유 이미지를 불러오지 못했어요"><p>{remote.error}</p>

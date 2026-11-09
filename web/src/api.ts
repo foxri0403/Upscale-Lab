@@ -286,7 +286,7 @@ export type Manifest = {
   mouseEnabled?: boolean | null;
   gyroEnabled?: boolean | null;
   rig?: Edit["rig"];
-  files: { source: string; role: string; order: number; contentType?: string }[];
+  files: { source: string; role: string; order: number; contentType?: string; layerId?: string | null }[];
 };
 export type CloudDevice = {
   id: string;
