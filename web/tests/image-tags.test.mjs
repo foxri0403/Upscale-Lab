@@ -39,7 +39,7 @@ test("five tags are displayed without an ellipsis", () => {
   );
 });
 test("no selection automatically filters unclassified images", () => {
-  assert.equal(tagSummary([]), "장르 없음");
+  assert.equal(tagSummary([]), "하위 태그 없음");
   assert.equal(allTagsSelected([]), false);
   assert.equal(
     matchesSelectedTags({ genre: unspecifiedTag, tags: [] }, []),

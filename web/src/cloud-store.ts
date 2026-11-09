@@ -40,6 +40,7 @@ import { mapDeviceLibrary } from "./device-state";
 import { galleryImages } from "./gallery-library";
 import { validateImageUpload } from "./image-upload";
 import { croppedLive2dFileName, live2dCropRequired, maxLive2dInputBytes } from "./live2d-crop-input";
+import type { WallpaperFrame } from "./wallpaper-frame";
 
 const manifests = new Map<string, { picture: Picture; until: number }>();
 export const preferencesKey = (userId: string) =>
@@ -63,6 +64,7 @@ export function projectPicture(p: Project): Picture {
     src: result?.imageUrl || p.originalImageUrl,
     genre: unspecifiedTag,
     tags: p.edit?.tags || [],
+    platformTags: p.edit?.platformTags || [],
     width: result?.width || p.originalWidth,
     height: result?.height || p.originalHeight,
     contentType: result ? "image/png" : p.originalContentType,
@@ -85,31 +87,37 @@ export function projectPicture(p: Project): Picture {
     features: p.features,
   };
 }
-export async function assetPicture(a: Asset, fresh = false): Promise<Picture> {
+export async function assetPicture(a: Asset, fresh = false, signal?: AbortSignal): Promise<Picture> {
   const cached = manifests.get(a.id);
   if (!fresh && cached && cached.until > Date.now())
     return {
       ...cached.picture,
       sourceProjectId: a.sourceProjectId ?? undefined,
+      isDeviceVariant: a.isDeviceVariant,
       name: a.title,
       edit: a.edit ? { strength: a.edit.strength, motionDefaultsVersion: a.edit.motionDefaultsVersion, filter: a.edit.filter, crop: a.edit.crop,
         cropRegion: a.edit.cropRegion || undefined,
         scale: a.edit.scale, foreground: a.edit.foreground, liveEnabled: a.edit.liveEnabled,
-        mouseEnabled: a.edit.mouseEnabled ?? false, gyroEnabled: a.edit.gyroEnabled ?? false, rig: a.edit.rig } : undefined,
-      tags: a.edit?.tags || [], features: a.features,
+        mouseEnabled: a.edit.mouseEnabled ?? false, gyroEnabled: a.edit.gyroEnabled ?? false, rig: a.edit.rig } : cached.picture.edit,
+      tags: a.edit?.tags || [], platformTags: a.edit?.platformTags || [], features: a.features,
+      likes: a.likeCount ?? 0, liked: a.isLikedByCurrentUser ?? false, downloads: a.downloadCount ?? 0,
       savedAt: a.edit?.savedAt,
       creator: a.username, creatorAvatar: a.profileImageUrl || undefined, ownerId: a.userId,
       sharedId: a.isPublic ? a.id : undefined,
     };
-  const m = await request<Manifest>(`/api/wallpapers/${a.id}/manifest`);
+  const m = await request<Manifest>(`/api/wallpapers/${a.id}/manifest`, { signal });
   const files = [...m.files].sort((a, b) => a.order - b.order);
   const picture: Picture = {
     id: `asset:${a.id}`,
     assetId: a.id,
+    isDeviceVariant: a.isDeviceVariant,
+    legacyMotion: !!m.motionEnabled && m.mouseEnabled == null && m.gyroEnabled == null,
     edit: a.edit ? { strength: a.edit.strength, motionDefaultsVersion: a.edit.motionDefaultsVersion, filter: a.edit.filter, crop: a.edit.crop,
       cropRegion: a.edit.cropRegion || undefined,
       scale: a.edit.scale, foreground: a.edit.foreground, liveEnabled: a.edit.liveEnabled,
-      mouseEnabled: a.edit.mouseEnabled ?? false, gyroEnabled: a.edit.gyroEnabled ?? false, rig: a.edit.rig } : undefined,
+      mouseEnabled: a.edit.mouseEnabled ?? false, gyroEnabled: a.edit.gyroEnabled ?? false, rig: a.edit.rig } :
+      a.mode === "Live2D" ? { ...defaultEdit, liveEnabled: m.motionEnabled, mouseEnabled: m.mouseEnabled ?? false,
+        gyroEnabled: m.gyroEnabled ?? false, rig: m.rig } : undefined,
     savedAt: a.edit?.savedAt,
     creator: a.username, creatorAvatar: a.profileImageUrl || undefined, ownerId: a.userId,
     sourceProjectId: a.sourceProjectId ?? undefined,
@@ -117,6 +125,10 @@ export async function assetPicture(a: Asset, fresh = false): Promise<Picture> {
     src: files[0]?.source || "",
     genre: unspecifiedTag,
     tags: a.edit?.tags || [],
+    platformTags: a.edit?.platformTags || [],
+    likes: a.likeCount ?? 0,
+    liked: a.isLikedByCurrentUser ?? false,
+    downloads: a.downloadCount ?? 0,
     features: a.features,
     exportSources: {
       image: `/api/wallpapers/${a.id}/content/${files[0]?.order ?? 0}`,
@@ -188,6 +200,7 @@ export async function fetchLibrary(
       ...picture,
       genre: metadata.genre,
       tags: metadata.tags,
+      platformTags: metadata.platformTags,
       galleryPostId: published.id,
       galleryPostIds: publications.map((post) => post.id),
       sharedId: published.id,
@@ -222,6 +235,15 @@ export async function importGalleryPicture(picture: Picture): Promise<Picture> {
     `/api/gallery/${encodeURIComponent(picture.galleryPostId)}/import`,
     { method: "POST", signal: AbortSignal.timeout(180000) },
   ));
+}
+export async function fetchExplore(query: URLSearchParams, signal: AbortSignal): Promise<Picture[]> {
+  const suffix = `?${query}`;
+  const [assets, gallery] = await Promise.all([
+    request<Asset[]>(`/api/wallpapers/shared${suffix}`, { signal }),
+    request<GalleryPost[]>(`/api/gallery${suffix}`, { signal }),
+  ]);
+  const pictures = await Promise.all(assets.map(asset => assetPicture(asset, false, signal)));
+  return mergeExploreFeed(pictures, gallery);
 }
 export async function uploadProject(file: File, isDraft = true): Promise<Picture> {
   const contentType = validateImageUpload(file);
@@ -310,7 +332,8 @@ export async function loadProjectPicture(id: string): Promise<Picture> {
 }
 export async function resetProjectEffects(picture: Picture, feature: "All" | "Upscale" | "Layers"): Promise<Picture> {
   const detail = await post<Project>(`/api/projects/${picture.projectId}/effects/reset`, { feature });
-  return { ...picture, ...projectPicture(detail), genre: picture.genre, tags: detail.edit?.tags ?? picture.tags };
+  return { ...picture, ...projectPicture(detail), genre: picture.genre, tags: detail.edit?.tags ?? picture.tags,
+    platformTags: detail.edit?.platformTags ?? picture.platformTags };
 }
 export function discardDraft(picture: Picture) {
   return picture.isDraft && picture.projectId
@@ -325,6 +348,7 @@ export async function detailPicture(p: Picture): Promise<Picture> {
     ...projectPicture(detail),
     genre: p.genre,
     tags: detail.edit?.tags ?? p.tags,
+    platformTags: p.galleryPostId ? p.platformTags : detail.edit?.platformTags ?? p.platformTags,
     detailsUntil: Date.now() + 5 * 60000,
   };
   if (
@@ -345,24 +369,27 @@ export async function detailPicture(p: Picture): Promise<Picture> {
   }
   return result;
 }
-export async function createAsset(picture: Picture): Promise<Asset> {
+export async function createAsset(picture: Picture, frame?: WallpaperFrame): Promise<Asset> {
   const edit = picture.edit || defaultEdit;
   let projectId = picture.projectId;
   // Preserve actual character PNG parts: publishing a flattened static PNG loses
   // the gyroscope and independent rig motion on Android (and mouse on Windows).
   const { layered, rendered, mode } = wallpaperExportPolicy(picture, edit);
-  if (picture.assetId && layered && !picture.projectId)
+  const legacyMotion = !!frame && !!picture.legacyMotion && !edit.mouseEnabled && !edit.gyroEnabled;
+  const render = { strength: edit.strength, filter: edit.filter, crop: edit.crop, scale: edit.scale,
+    foreground: edit.foreground, cropRegion: edit.cropRegion, frame };
+  if (picture.assetId && !picture.projectId && (layered || !picture.foregrounds?.length))
     return post<Asset>(`/api/wallpapers/${picture.assetId}/snapshot`, {
-      motionEnabled: !!edit.mouseEnabled || !!edit.gyroEnabled, strength: edit.strength,
-      mouseEnabled: !!edit.mouseEnabled, gyroEnabled: !!edit.gyroEnabled,
+      motionEnabled: legacyMotion || !!edit.mouseEnabled || !!edit.gyroEnabled, strength: edit.strength,
+      mouseEnabled: legacyMotion ? undefined : !!edit.mouseEnabled, gyroEnabled: legacyMotion ? undefined : !!edit.gyroEnabled,
       rig: edit.rig,
-      render: { strength: edit.strength, filter: edit.filter, crop: edit.crop, scale: edit.scale, foreground: edit.foreground, cropRegion: edit.cropRegion },
+      render,
     });
   let temporaryProjectId: string | undefined;
   if ((!layered && rendered) || !projectId) {
     const blob = await renderImage(picture, edit);
     const created = await uploadProject(
-      new File([blob], `${picture.name}.png`, { type: "image/png" }),
+      new File([blob], `${picture.name}.png`, { type: "image/png" }), !!picture.projectId,
     );
     projectId = created.projectId;
     temporaryProjectId = created.projectId;
@@ -376,7 +403,9 @@ export async function createAsset(picture: Picture): Promise<Asset> {
     mouseEnabled: !!edit.mouseEnabled,
     gyroEnabled: !!edit.gyroEnabled,
     rig: mode === "Live2D" ? edit.rig : undefined,
-    render: mode === "Live2D" ? { strength: edit.strength, filter: edit.filter, crop: edit.crop, scale: edit.scale, foreground: edit.foreground, cropRegion: edit.cropRegion } : undefined,
+    render: mode === "Live2D" ? render : frame ? {
+      strength: edit.strength, filter: "original", crop: "original", scale: 1, foreground: true, frame,
+    } : undefined,
     processingJobId: !rendered && mode === "Static" ? picture.jobId : undefined,
     originProjectId: picture.projectId,
     reuseExisting: true,
@@ -392,7 +421,9 @@ export async function saveImageEdit(picture: Picture, keepalive = false): Promis
     : picture.projectId ? `/api/projects/${picture.projectId}` : null;
   if (!path) throw new Error("저장할 이미지를 확인해 주세요.");
   return request<SavedEdit>(`${path}/edit`, {
-    method: "PUT", keepalive, body: JSON.stringify({ ...(picture.edit || defaultEdit), title: picture.name, tags: picture.tags || [] }),
+    method: "PUT", keepalive, body: JSON.stringify({
+      ...(picture.edit || defaultEdit), title: picture.name, tags: picture.tags || [], platformTags: picture.platformTags,
+    }),
   });
 }
 export async function processProject(

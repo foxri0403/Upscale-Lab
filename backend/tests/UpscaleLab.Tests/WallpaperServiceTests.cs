@@ -1,6 +1,9 @@
 using System.Text.Json;
+using ImageMagick;
 using Microsoft.EntityFrameworkCore;
 using UpscaleLab.Application.Common;
+using UpscaleLab.Application.Gallery;
+using UpscaleLab.Application.Images;
 using UpscaleLab.Application.Wallpapers;
 using UpscaleLab.Domain.Entities;
 using UpscaleLab.Domain.Enums;
@@ -101,14 +104,68 @@ public sealed class WallpaperServiceTests
         var other = Guid.NewGuid();
         await Assert.ThrowsAsync<NotFoundException>(() => service.ImportAsync(other, asset.Id, Ct));
         await service.SetSharingAsync(project.UserId, asset.Id, true, Ct);
-        Assert.Single(await service.ListAsync(null, true, Ct));
+        Assert.Equal(0, Assert.Single(await service.ListAsync(null, true, Ct)).DownloadCount);
+        await service.GetManifestAsync(other, asset.Id, false, Ct);
+        Assert.Equal(0, Assert.Single(await service.ListAsync(null, true, Ct)).DownloadCount);
+        Assert.Equal(new GalleryEngagement(1, true), await service.SetLikeAsync(other, asset.Id, true, Ct));
+        Assert.Equal(new GalleryEngagement(1, true), await service.SetLikeAsync(other, asset.Id, true, Ct));
+        store.FailCopyAfter = 0;
+        await Assert.ThrowsAsync<IOException>(() => service.ImportAsync(other, asset.Id, Ct));
+        Assert.Equal(0, Assert.Single(await service.ListAsync(other, true, Ct)).DownloadCount);
+        store.FailCopyAfter = null;
         var imported = await service.ImportAsync(other, asset.Id, Ct);
+        var shared = Assert.Single(await service.ListAsync(other, true, Ct, new ExploreQuery(Sort: "downloads")));
+        Assert.Equal(1, shared.DownloadCount);
+        Assert.Equal(1, shared.LikeCount);
+        Assert.True(shared.IsLikedByCurrentUser);
+        Assert.Equal(new GalleryEngagement(0, false), await service.SetLikeAsync(other, asset.Id, false, Ct));
         await service.ArchiveAsync(project.UserId, asset.Id, Ct);
         Assert.Empty(await service.ListAsync(null, true, Ct));
         await Assert.ThrowsAsync<NotFoundException>(() => service.GetManifestAsync(null, asset.Id, false, Ct));
         Assert.NotNull(await service.GetManifestAsync(other, imported.Id, false, Ct));
         Assert.NotNull(await service.GetManifestAsync(project.UserId, asset.Id, true, Ct));
         await Assert.ThrowsAsync<NotFoundException>(() => service.SetSharingAsync(other, asset.Id, true, Ct));
+    }
+
+    [Fact]
+    public async Task ScreenFramingSavesTargetRatioAndPositionWithoutChangingThePublishedAsset()
+    {
+        await using var db = WorkflowData.Db();
+        var store = new WorkflowStore();
+        var project = WorkflowData.Project(Guid.NewGuid());
+        project.OriginalImage.OriginalWidth = 90;
+        project.OriginalImage.OriginalHeight = 160;
+        using var source = new MagickImage(MagickColors.Red, 90, 160);
+        store.Files["source.png"] = source.ToByteArray(MagickFormat.Png);
+        db.Add(project);
+        await db.SaveChangesAsync();
+        var editor = new ProjectService(db, store);
+        await editor.SaveEditAsync(project.UserId, project.Id, new(50, "original", "original", 1, true,
+            Tags: ["풍경"], PlatformTags: ["mobile", "tablet"]), Ct);
+        var service = new WallpaperService(db, store, store);
+        var original = await service.CreateAsync(project.UserId, new(project.Id, "Portrait", WallpaperMode.Static), Ct);
+        await service.SetSharingAsync(project.UserId, original.Id, true, Ct);
+        var tagged = Assert.Single(await service.ListAsync(null, true, Ct,
+            new ExploreQuery("Portrait", Tags: ["풍경"], PlatformTags: ["tablet"])));
+        Assert.Equal(new[] { "mobile", "tablet" }, tagged.Edit!.PlatformTags);
+        Assert.Empty(await service.ListAsync(null, true, Ct, new ExploreQuery(PlatformTags: ["pc"])));
+
+        var frame = new WallpaperFrame(160, 90, true, 1, 1, .5);
+        var framed = await service.SnapshotAsync(project.UserId, original.Id, new(false, 50,
+            Render: new(50, "original", "original", 1, true, Frame: frame)), Ct);
+        Assert.True(framed.IsDeviceVariant);
+        Assert.False(framed.IsPublic);
+        var manifest = JsonSerializer.Deserialize<WallpaperManifest>(
+            (await db.WallpaperAssets.SingleAsync(x => x.Id == framed.Id)).ManifestJson)!;
+        Assert.Equal((160, 90), (manifest.Width, manifest.Height));
+        var file = manifest.Files.Single();
+        Assert.Equal("image/png", file.ContentType);
+        using var output = new MagickImage(store.Files[file.Source]);
+        using var pixels = output.GetPixels();
+        Assert.Equal(24, pixels.GetPixel(0, 45).ToColor()!.R);
+        Assert.Equal(255, pixels.GetPixel(159, 45).ToColor()!.R);
+        var untouched = await service.GetManifestAsync(null, original.Id, false, Ct);
+        Assert.Equal((90, 160), (untouched.Width, untouched.Height));
     }
 
     [Fact]

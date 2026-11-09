@@ -1,13 +1,19 @@
 import { useEffect, useRef } from "react";
 import { ChevronDown, Tag } from "lucide-react";
 import { allTagsSelected, selectableTags, tagSummary } from "./image-tags";
+import { PlatformTagOptions } from "./GalleryBadges";
+import type { PlatformTag } from "./platform-tags";
 
 export function TagSelector({
   selected,
   change,
+  platforms,
+  changePlatforms,
 }: {
   selected: string[];
   change: (tags: string[]) => void;
+  platforms?: PlatformTag[];
+  changePlatforms?: (value: PlatformTag[]) => void;
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
   const allRef = useRef<HTMLInputElement>(null);
@@ -36,14 +42,19 @@ export function TagSelector({
       }}
     >
       <summary
-        aria-label="장르 선택"
-        title={selected.join(" · ") || "장르 없음"}
+        aria-label="태그 선택"
+        title={selected.join(" · ") || "하위 태그 없음"}
       >
         <Tag size={18} />
-        <span>{all ? "전체 장르" : tagSummary(selected)}</span>
+        <span>{platforms?.length ? `상위 태그 ${platforms.length}개` : all ? "전체 태그" : tagSummary(selected)}</span>
         <ChevronDown size={17} />
       </summary>
-      <div className="tag-popover" role="group" aria-label="장르 필터">
+      <div className="tag-popover" role="group" aria-label="태그 필터">
+        {platforms && changePlatforms && <>
+          <strong className="tag-section-title">상위 태그</strong>
+          <PlatformTagOptions selected={platforms} change={changePlatforms} />
+        </>}
+        <strong className="tag-section-title">하위 태그</strong>
         <label className="tag-option tag-select-all">
           <span>전체 선택</span>
           <input
@@ -75,9 +86,9 @@ export function TagSelector({
         </div>
         <div className="tag-selection-footer">
           <span aria-live="polite">
-            {selected.length ? `${selected.length}개 선택` : "장르 없음"}
+            {selected.length ? `하위 태그 ${selected.length}개` : "하위 태그 없음"}
           </span>
-          <button className="text-button" onClick={() => change([])}>
+          <button className="text-button" onClick={() => { change([]); changePlatforms?.([]); }}>
             선택 해제
           </button>
           <button

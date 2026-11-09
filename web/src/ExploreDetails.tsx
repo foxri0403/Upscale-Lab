@@ -6,8 +6,9 @@ import { imageTags } from "./image-tags";
 import { imageFileFormat, imageResolution } from "./image-information";
 import { ImageFeatureBadges } from "./ImageFeatureBadges";
 import { Busy, Notice, PictureView } from "./ui";
+import { EngagementBadges, PlatformBadges } from "./GalleryBadges";
 
-export function ExploreDetails({ picture, importing, own, local, close, save, openStudio, apply }: {
+export function ExploreDetails({ picture, importing, own, local, close, save, openStudio, apply, toggleLike, liking }: {
   picture: Picture;
   importing: boolean;
   own: boolean;
@@ -16,6 +17,8 @@ export function ExploreDetails({ picture, importing, own, local, close, save, op
   save: () => void;
   openStudio: () => void;
   apply: () => void;
+  toggleLike?: () => void;
+  liking?: boolean;
 }) {
   const [measured, setMeasured] = useState<{ source: string; resolution: string | null } | null>(null);
   const source = picture.background || picture.src;
@@ -42,6 +45,8 @@ export function ExploreDetails({ picture, importing, own, local, close, save, op
                   setMeasured({ source, resolution: imageResolution(image.naturalWidth, image.naturalHeight) });
               }}
               failed={() => setMeasured({ source, resolution: null })} />
+            <PlatformBadges picture={picture} />
+            <EngagementBadges picture={picture} toggleLike={toggleLike} busy={liking} />
           </div>
           <h3>{picture.name}</h3>
           <div className="explore-details-creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} />{picture.creator || "작성자 정보 없음"}</div>
@@ -56,10 +61,10 @@ export function ExploreDetails({ picture, importing, own, local, close, save, op
               <div><dt>파일 형식</dt><dd>{imageFileFormat(picture.src, picture.contentType)}</dd></div>
             </dl>
           </section>
-          <section className="explore-details-section" aria-label="전체 태그">
-            <h4>태그</h4>
+          <section className="explore-details-section" aria-label="하위 태그">
+            <h4>하위 태그</h4>
             <div className="explore-details-tags">
-              {imageTags(picture).length ? imageTags(picture).map(tag => <span key={tag}>{tag}</span>) : <span>장르 없음</span>}
+              {imageTags(picture).length ? imageTags(picture).map(tag => <span key={tag}>{tag}</span>) : <span>하위 태그 없음</span>}
             </div>
           </section>
           {local && <Notice>로컬 샘플 갤러리입니다. 공개 범위는 현재 브라우저로 한정됩니다.</Notice>}

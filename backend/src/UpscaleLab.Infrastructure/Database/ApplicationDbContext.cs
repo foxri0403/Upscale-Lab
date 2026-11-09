@@ -28,6 +28,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<InpaintingJob> InpaintingJobs => Set<InpaintingJob>();
     public DbSet<DeviceDisplay> DeviceDisplays => Set<DeviceDisplay>();
     public DbSet<WallpaperAsset> WallpaperAssets => Set<WallpaperAsset>();
+    public DbSet<WallpaperLike> WallpaperLikes => Set<WallpaperLike>();
     public DbSet<WallpaperAssignment> WallpaperAssignments => Set<WallpaperAssignment>();
     public DbSet<DeviceCommand> DeviceCommands => Set<DeviceCommand>();
 
@@ -305,6 +306,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         post.Property(x => x.Tag).HasMaxLength(50).HasDefaultValue("장르 설정되지 않음").IsRequired();
         post.Property(x => x.Tags).HasColumnType("text[]").IsRequired();
         post.HasIndex(x => x.Tags).HasMethod("gin");
+        post.Property(x => x.PlatformTags).HasColumnType("text[]").HasDefaultValueSql("ARRAY[]::text[]").IsRequired();
+        post.HasIndex(x => x.PlatformTags).HasMethod("gin");
         post.Property(x => x.Description).HasMaxLength(2000);
         post.Property(x => x.IsPublic).HasDefaultValue(true);
         post.HasIndex(x => x.CreatedAt);
@@ -420,6 +423,12 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         asset.HasIndex(x => new { x.IsPublic, x.IsArchived, x.CreatedAt });
         asset.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         asset.HasOne(x => x.SourceProject).WithMany().HasForeignKey(x => x.SourceProjectId).OnDelete(DeleteBehavior.SetNull);
+
+        var like = builder.Entity<WallpaperLike>();
+        like.ToTable("wallpaper_likes");
+        like.HasIndex(x => new { x.WallpaperAssetId, x.UserId }).IsUnique();
+        like.HasOne<WallpaperAsset>().WithMany(x => x.Likes).HasForeignKey(x => x.WallpaperAssetId).OnDelete(DeleteBehavior.Cascade);
+        like.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
 
         var assignment = builder.Entity<WallpaperAssignment>();
         assignment.ToTable("wallpaper_assignments");

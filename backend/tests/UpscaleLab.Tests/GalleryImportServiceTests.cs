@@ -43,6 +43,9 @@ public sealed class GalleryImportServiceTests
         Assert.Equal("image/png", result.OriginalContentType);
         Assert.Equal(DateTimeKind.Utc, copy.CreatedAt.Kind);
         Assert.Equal(7, post.DownloadCount);
+        Assert.Equal(1, post.SaveCount);
+        Assert.Equal(new[] { "pc", "tablet" }, result.Edit!.PlatformTags);
+        Assert.Equal(1, (await new GalleryService(db, storage).GetAsync(post.Id, viewer, Ct)).Post.DownloadCount);
         Assert.Single(db.GalleryPosts);
         Assert.Empty(db.WallpaperAssets);
         Assert.Single(await projects.GetAllAsync(viewer, Ct));
@@ -86,10 +89,12 @@ public sealed class GalleryImportServiceTests
         Assert.Single(db.Images);
         Assert.Single(storage.Files);
         Assert.Equal(7, post.DownloadCount);
+        Assert.Equal(0, post.SaveCount);
 
         storage.FailRead = storage.FailUpload = false;
         var result = await service.ImportAsync(viewer, post.Id, Ct);
         Assert.Equal(result.Id, (await db.LiveLayerProjects.SingleAsync(x => x.UserId == viewer)).Id);
+        Assert.Equal(1, post.SaveCount);
     }
 
     private static ApplicationDbContext CreateDb() => new(new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -104,7 +109,8 @@ public sealed class GalleryImportServiceTests
         var project = new LiveLayerProject { User = author, UserId = author.Id, OriginalImage = image,
             OriginalImageId = image.Id, Title = "Author's private project" };
         return new GalleryPost { User = author, UserId = author.Id, Image = image, ImageId = image.Id,
-            Project = project, ProjectId = project.Id, Title = "공개 이미지 제목", IsPublic = true, DownloadCount = 7 };
+            Project = project, ProjectId = project.Id, Title = "공개 이미지 제목", IsPublic = true,
+            DownloadCount = 7, PlatformTags = ["pc", "tablet"] };
     }
 
     private sealed class Store : IStorageService

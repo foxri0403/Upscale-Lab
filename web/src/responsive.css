@@ -171,10 +171,21 @@
   .image-grid, .explore-page .image-grid { grid-template-columns: minmax(0, 1fr); }
   .devices-page .device-card-header { grid-template-columns: 36px minmax(0, 1fr) 36px 36px; gap: 4px; }
   .devices-page .device-card-header .icon-button, .devices-page .device-more > summary { min-width: 36px; width: 36px; }
-  .devices-page .device-icon { width: 36px; height: 44px; padding: 4px; }
-  .devices-page .device-card-header > div { grid-column: 1 / -1; grid-row: 2; }
   .devices-page .device-refresh { grid-column: 3; grid-row: 1; }
   .devices-page .device-more { grid-row: 1; }
+  .devices-page .device-card-header > div { grid-column: 1 / 3; grid-row: 1; min-width: 0; }
+  .devices-page .device-icon { display: none; }
+  .devices-page .device-card-header h2 { font-size: .95rem; }
+  .devices-page .display-card .display-label { flex-wrap: wrap; gap: 3px 6px; }
+  .devices-page .display-card .display-name { min-width: 0; }
+  .devices-page .display-card .display-name h3 { overflow-wrap: anywhere; }
+  .studio-editor .studio-document-actions { width: 100%; gap: 6px; }
+  .studio-editor .studio-document-actions button { flex: 1 1 95px; min-width: 0; justify-content: center; }
+  .studio-editor .studio-canvas-status .studio-zoom { justify-content: flex-start; }
+  .gallery-toolbar .tag-selector, .explore-page .gallery-toolbar .tag-selector,
+  .gallery-toolbar .select-field, .explore-page .gallery-toolbar .select-field { flex: 1 1 100%; }
+  .app-header .brand > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .app-header .header-token-summary > span:first-child { display: none; }
   .studio-tag-options { grid-template-columns: minmax(0, 1fr); }
   .image-information > div { grid-template-columns: minmax(70px, .7fr) minmax(0, 1fr); gap: 10px; }
 }

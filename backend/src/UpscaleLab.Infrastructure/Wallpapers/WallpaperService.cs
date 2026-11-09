@@ -3,7 +3,9 @@ using System.Text.Json.Nodes;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using UpscaleLab.Application.Common;
+using UpscaleLab.Application.Gallery;
 using UpscaleLab.Application.Images;
 using UpscaleLab.Application.Storage;
 using UpscaleLab.Application.Wallpapers;
@@ -26,7 +28,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         request.Rig?.Validate();
         var source = await Owned(userId, assetId, ct);
         var manifest = ReadManifest(source);
-        if (source.Mode != WallpaperMode.Live2D) return Map(source);
+        if (source.Mode != WallpaperMode.Live2D && request.Render is null) return Map(source);
         var presentation = request.Render is null ? null : new LayerPresentation(request.Render, manifest.Width, manifest.Height);
         var files = manifest.Files.Select(file => file.Role == "Background" ? file : file with {
             MovementX = manifest.Width * .035 * request.Strength / 100,
@@ -51,9 +53,12 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         {
             for (var i = 0; i < files.Length; i++)
             {
-                var key = $"users/{userId:N}/wallpapers/{asset.Id:N}/{files[i].Order:D3}.png";
-                await CopyLayer(files[i].Source, key, presentation, ct); copied.Add(key);
-                files[i] = (presentation?.Transform(files[i]) ?? files[i]) with { Source = key };
+                var extension = presentation?.ChangesPixels == true ? ".png" : Path.GetExtension(files[i].Source);
+                var key = $"users/{userId:N}/wallpapers/{asset.Id:N}/{files[i].Order:D3}{extension}";
+                var baseLayer = files[i].Role is "Background" or "image";
+                await CopyLayer(files[i].Source, key, presentation, ct, baseLayer); copied.Add(key);
+                files[i] = (presentation?.Transform(files[i]) ?? files[i]) with { Source = key,
+                    ContentType = presentation?.ChangesPixels == true ? "image/png" : files[i].ContentType };
             }
             var stored = JsonSerializer.SerializeToNode(manifest with { AssetId = asset.Id, Files = files,
                 UrlsExpireAt = null, MotionEnabled = request.MotionEnabled,
@@ -64,6 +69,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             var features = Features(source).Where(feature => independentMotion || feature != "Live 2D").ToList();
             if (!independentMotion && request.MotionEnabled) features.Add("Live 2D");
             stored["_features"] = JsonSerializer.SerializeToNode(features);
+            if (request.Render?.Frame is not null) stored["_deviceVariant"] = true;
             asset.ManifestJson = stored.ToJsonString(); db.WallpaperAssets.Add(asset); await db.SaveChangesAsync(ct);
             return Map(asset);
         }
@@ -129,11 +135,11 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
 
     public async Task<WallpaperSummary> ImportAsync(Guid userId, Guid assetId, CancellationToken ct)
     {
-        var source = await db.WallpaperAssets.AsNoTracking().SingleOrDefaultAsync(
-            x => x.Id == assetId && x.IsPublic && !x.IsArchived, ct)
+        var shared = db.WallpaperAssets.Where(x => x.Id == assetId && x.IsPublic && !x.IsArchived);
+        var source = await shared.SingleOrDefaultAsync(ct)
             ?? throw new NotFoundException("공유 배경화면을 찾을 수 없습니다.");
         var manifest = ReadManifest(source);
-        var asset = new WallpaperAsset { UserId = userId, Title = source.Title, Mode = source.Mode };
+        var asset = new WallpaperAsset { UserId = userId, Title = source.Title, Mode = source.Mode, SavedEditJson = source.SavedEditJson };
         var copied = new List<string>();
         try
         {
@@ -145,10 +151,25 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
                 copied.Add(key);
                 files.Add(item with { Source = key });
             }
-            asset.ManifestJson = JsonSerializer.Serialize(manifest with { AssetId = asset.Id, Files = files, UrlsExpireAt = null });
+            var stored = JsonSerializer.SerializeToNode(manifest with { AssetId = asset.Id, Files = files, UrlsExpireAt = null })!.AsObject();
+            stored["_features"] = JsonSerializer.SerializeToNode(Features(source));
+            asset.ManifestJson = stored.ToJsonString();
+            var countSave = source.UserId != userId;
+            await using var transaction = countSave && db.Database.IsRelational()
+                ? await db.Database.BeginTransactionAsync(ct) : null;
+            if (transaction is not null)
+            {
+                var changed = await shared.ExecuteUpdateAsync(update => update
+                    .SetProperty(x => x.SaveCount, x => x.SaveCount + 1)
+                    .SetProperty(x => x.UpdatedAt, DateTime.UtcNow), ct);
+                if (changed == 0) throw new NotFoundException("공유 배경화면을 찾을 수 없습니다.");
+            }
+            else if (countSave) source.SaveCount++;
             db.WallpaperAssets.Add(asset);
             await db.SaveChangesAsync(ct);
-            return Map(asset);
+            var result = Map(asset);
+            if (transaction is not null) await transaction.CommitAsync(ct);
+            return result;
         }
         catch
         {
@@ -202,7 +223,9 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         var metadata = ImageEditState.FromJson(metadataProject.SavedEditJson);
         request.Rig?.Validate();
         var selectedRig = request.Rig ?? metadata?.Rig;
-        var presentation = request.Mode == WallpaperMode.Live2D && request.Render != null ? new LayerPresentation(request.Render, width, height) : null;
+        var presentation = request.Render is not null &&
+            (request.Mode == WallpaperMode.Live2D || request.Render.Frame is not null)
+            ? new LayerPresentation(request.Render, width, height) : null;
         if (Application.Projects.ProjectDraftState.IsDraft(metadataProject.SavedEditJson))
             throw new ConflictException("이미지를 보관함에 저장한 뒤 공유하거나 적용해 주세요.");
         var independentMotion = request.MouseEnabled.HasValue || request.GyroEnabled.HasValue;
@@ -211,7 +234,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             independentMotion || request.MotionEnabled || feature != "Live 2D").ToArray();
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new {
             Project = project.Id, Origin = origin, Title = request.Title.Trim(), request.Mode, request.MotionEnabled, width, height, sources,
-            Tags = metadata?.Tags, Features = features, request.MouseEnabled, request.GyroEnabled, request.Render, Rig = selectedRig
+            Tags = metadata?.Tags, PlatformTags = metadata?.PlatformTags, Features = features, request.MouseEnabled, request.GyroEnabled, request.Render, Rig = selectedRig
         }))));
         if (request.ReuseExisting)
         {
@@ -230,17 +253,21 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         asset.SavedEditJson = new ImageEditState(request.Render?.Strength ?? metadata?.Strength ?? ImageEditState.DefaultMotionStrength, "original", "original", 1, true,
             DateTime.UtcNow, metadata?.Tags, independentMotion ? metadata?.LiveEnabled == true : request.Mode == WallpaperMode.Live2D && request.MotionEnabled,
             request.MouseEnabled ?? metadata?.MouseEnabled ?? false, request.GyroEnabled ?? metadata?.GyroEnabled ?? false,
-            MotionDefaultsVersion: 1, Rig: presentation?.TransformRig(selectedRig) ?? selectedRig).ToJson();
+            MotionDefaultsVersion: 1, Rig: presentation?.TransformRig(selectedRig) ?? selectedRig,
+            PlatformTags: metadata?.PlatformTags).ToJson();
         var copied = new List<string>();
         try
         {
             var files = new List<WallpaperFile>();
             foreach (var source in sources)
             {
-                var key = $"users/{userId:N}/wallpapers/{asset.Id:N}/{source.Order:D3}{Path.GetExtension(source.Source)}";
-                await CopyLayer(source.Source, key, presentation, ct);
+                var extension = presentation?.ChangesPixels == true ? ".png" : Path.GetExtension(source.Source);
+                var key = $"users/{userId:N}/wallpapers/{asset.Id:N}/{source.Order:D3}{extension}";
+                var baseLayer = source.Role is "Background" or "image";
+                await CopyLayer(source.Source, key, presentation, ct, baseLayer);
                 copied.Add(key);
-                files.Add((presentation?.Transform(source) ?? source) with { Source = key });
+                files.Add((presentation?.Transform(source) ?? source) with { Source = key,
+                    ContentType = presentation?.ChangesPixels == true ? "image/png" : source.ContentType });
             }
             var stored = JsonSerializer.SerializeToNode(new WallpaperManifest(1, asset.Id, asset.Mode,
                 presentation?.Width ?? width, presentation?.Height ?? height, files, MotionEnabled: request.MotionEnabled,
@@ -249,6 +276,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
                 Rig: presentation?.TransformRig(selectedRig) ?? selectedRig))!.AsObject();
             stored["_sourceFingerprint"] = fingerprint;
             stored["_features"] = JsonSerializer.SerializeToNode(features);
+            if (request.Render?.Frame is not null) stored["_deviceVariant"] = true;
             asset.ManifestJson = stored.ToJsonString();
             db.WallpaperAssets.Add(asset);
             await db.SaveChangesAsync(ct);
@@ -261,21 +289,59 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         }
     }
 
-    public async Task<IReadOnlyList<WallpaperSummary>> ListAsync(Guid? userId, bool shared, CancellationToken ct)
+    public async Task<IReadOnlyList<WallpaperSummary>> ListAsync(Guid? userId, bool shared, CancellationToken ct, ExploreQuery? explore = null)
     {
         if (!shared && !userId.HasValue) throw new UnauthorizedException("로그인이 필요합니다.");
-        var assets = await db.WallpaperAssets.AsNoTracking().Where(x => !x.IsArchived && (shared ? x.IsPublic : x.UserId == userId))
-            .OrderByDescending(x => x.CreatedAt).Take(100)
-            .ToListAsync(ct);
-        var authorIds = assets.Select(x => x.UserId).Distinct().ToArray();
+        var query = db.WallpaperAssets.AsNoTracking().Where(x => !x.IsArchived && (shared ? x.IsPublic : x.UserId == userId));
+        if (shared && explore is not null)
+            query = WallpaperExploreQuery.Filter(query, explore, db.Database.IsRelational());
+        var ordered = explore?.Sort switch
+        {
+            "likes" => query.OrderByDescending(x => x.Likes.Count),
+            "downloads" => query.OrderByDescending(x => x.SaveCount),
+            "name" => query.OrderBy(x => x.Title),
+            _ => query.OrderByDescending(x => x.CreatedAt)
+        };
+        var assets = await ordered.ThenByDescending(x => x.CreatedAt).ThenBy(x => x.Id)
+            .Take(Math.Clamp(explore?.Limit ?? 100, 1, 100))
+            .Select(asset => new { Asset = asset, Likes = shared ? asset.Likes.Count : 0,
+                Liked = shared && userId.HasValue && asset.Likes.Any(like => like.UserId == userId) }).ToListAsync(ct);
+        var authorIds = assets.Select(x => x.Asset.UserId).Distinct().ToArray();
         var authors = await db.Users.AsNoTracking().Where(x => authorIds.Contains(x.Id))
             .Select(x => new { x.Id, x.Username, x.ProfileImageObjectKey }).ToDictionaryAsync(x => x.Id, ct);
-        return assets.Select(x => {
+        return assets.Select(item => {
+            var x = item.Asset;
             var result = shared ? new WallpaperSummary(x.Id, x.Title, x.Mode, x.IsPublic, x.CreatedAt, Edit: ImageEditState.FromJson(x.SavedEditJson), Features: Features(x)) : Map(x);
             var author = authors.GetValueOrDefault(x.UserId);
             return result with { UserId = x.UserId, Username = author?.Username,
+                LikeCount = item.Likes, DownloadCount = x.SaveCount, IsLikedByCurrentUser = item.Liked,
                 ProfileImageUrl = author?.ProfileImageObjectKey is { } key ? storage.CreateDownloadUrl(key, UrlLifetime) : null };
         }).ToList();
+    }
+
+    public async Task<GalleryEngagement> SetLikeAsync(Guid userId, Guid assetId, bool liked, CancellationToken ct)
+    {
+        var asset = db.WallpaperAssets.Where(x => x.Id == assetId && x.IsPublic && !x.IsArchived && x.UserId != userId);
+        if (!await asset.AnyAsync(ct)) throw new NotFoundException("공유 배경화면을 찾을 수 없습니다.");
+        var likes = db.WallpaperLikes.Where(x => x.WallpaperAssetId == assetId && x.UserId == userId);
+        if (liked)
+        {
+            if (!await likes.AnyAsync(ct))
+            {
+                var entry = db.WallpaperLikes.Add(new WallpaperLike { WallpaperAssetId = assetId, UserId = userId });
+                try { await db.SaveChangesAsync(ct); }
+                catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+                { entry.State = EntityState.Detached; }
+            }
+        }
+        else if (db.Database.IsRelational()) await likes.ExecuteDeleteAsync(ct);
+        else if (await likes.SingleOrDefaultAsync(ct) is { } like)
+        {
+            db.WallpaperLikes.Remove(like);
+            await db.SaveChangesAsync(ct);
+        }
+        return await asset.Select(x => new GalleryEngagement(x.Likes.Count, x.Likes.Any(l => l.UserId == userId)))
+            .SingleOrDefaultAsync(ct) ?? throw new NotFoundException("공유 배경화면을 찾을 수 없습니다.");
     }
 
     public async Task<WallpaperManifest> GetManifestAsync(Guid? userId, Guid assetId, bool agentAccess, CancellationToken ct)
@@ -316,11 +382,11 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
     private async Task<WallpaperAsset> Owned(Guid userId, Guid assetId, CancellationToken ct) =>
         await db.WallpaperAssets.SingleOrDefaultAsync(x => x.Id == assetId && x.UserId == userId && !x.IsArchived, ct)
         ?? throw new NotFoundException("배경화면을 찾을 수 없습니다.");
-    private async Task CopyLayer(string source, string key, LayerPresentation? presentation, CancellationToken ct)
+    private async Task CopyLayer(string source, string key, LayerPresentation? presentation, CancellationToken ct, bool fillBackground)
     {
         if (presentation?.ChangesPixels != true) { await copier.CopyAsync(source, key, ct); return; }
         using var input = new MemoryStream(); await storage.DownloadAsync(source, input, ct);
-        using var output = new MemoryStream(presentation.Render(input.ToArray())); await storage.UploadAsync(output, key, "image/png", ct);
+        using var output = new MemoryStream(presentation.Render(input.ToArray(), fillBackground)); await storage.UploadAsync(output, key, "image/png", ct);
     }
     private static WallpaperManifest ReadManifest(WallpaperAsset asset)
     {
@@ -331,8 +397,13 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         return manifest.MouseEnabled is null && manifest.GyroEnabled is null && edit is { } && (edit.MouseEnabled || edit.GyroEnabled)
             ? manifest with { MouseEnabled = edit.MouseEnabled, GyroEnabled = edit.GyroEnabled } : manifest;
     }
-    private static WallpaperSummary Map(WallpaperAsset x) =>
-        new(x.Id, x.Title, x.Mode, x.IsPublic, x.CreatedAt, x.SourceProjectId, ImageEditState.FromJson(x.SavedEditJson), Features(x));
+    private static WallpaperSummary Map(WallpaperAsset x)
+    {
+        using var json = JsonDocument.Parse(x.ManifestJson);
+        var deviceVariant = json.RootElement.TryGetProperty("_deviceVariant", out var flag) && flag.ValueKind == JsonValueKind.True;
+        return new(x.Id, x.Title, x.Mode, x.IsPublic, x.CreatedAt, x.SourceProjectId,
+            ImageEditState.FromJson(x.SavedEditJson), Features(x), IsDeviceVariant: deviceVariant);
+    }
 
     private static IReadOnlyList<string> Features(WallpaperAsset asset)
     {

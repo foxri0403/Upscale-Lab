@@ -67,14 +67,21 @@ import { TagSelector } from "./TagSelector";
 import { watchDeviceUpdates } from "./device-updates";
 import { ImageCard } from "./ImageCard";
 import { ExploreDetails } from "./ExploreDetails";
-import { ApplyWallpaperDialog } from "./ApplyWallpaperDialog";
+import { ApplyWallpaperDialog, type WallpaperSelection } from "./ApplyWallpaperDialog";
 import { isOwnExplorePicture, ownedExplorePicture, wallpaperTargets } from "./explore-actions";
 import { isImageShared, sharingTargets } from "./image-sharing";
 import { canNavigate } from "./navigation";
 import { ToastBubble, type ToastMessage } from "./ToastBubble";
 import { AccountSettings, AccountAvatar, profileSession, type AccountProfile } from "./AccountSettings";
+import type { PlatformTag } from "./platform-tags";
+import { randomRecommendations, sortExplore } from "./explore-feed";
+import { ExploreRecommendations } from "./ExploreRecommendations";
+import { useExploreResults } from "./use-explore-results";
+import "./gallery-discovery.css";
+import { displaySize, type WallpaperFrame } from "./wallpaper-frame";
 
 type SharedPicture = Picture & { ownerId: string };
+type ApplyOptions = { useExistingAsset?: boolean; enablePcLiveMotion?: boolean; frame?: WallpaperFrame };
 type DemoContext = {
   session: Session;
   library: Library;
@@ -86,7 +93,7 @@ type DemoContext = {
     picture: Picture,
     deviceId: string,
     displayId: string,
-    options?: { useExistingAsset?: boolean; enablePcLiveMotion?: boolean },
+    options?: ApplyOptions,
   ) => Promise<boolean>;
   refresh: () => Promise<void>;
   refreshDevices: () => Promise<void>;
@@ -341,6 +348,7 @@ export function Workspace({
       picture.height,
       picture.edit,
       picture.tags,
+      picture.platformTags,
     ]);
     const existing = snapshots.current.get(signature);
     if (existing) return existing;
@@ -442,12 +450,18 @@ export function Workspace({
     }
   }
   async function apply(picture: Picture, deviceId: string, displayId: string,
-    options?: { useExistingAsset?: boolean; enablePcLiveMotion?: boolean }) {
+    options?: ApplyOptions) {
     const device = current.current.devices.find((d) => d.id === deviceId);
     if (!device) return false;
     const display = device.displays.find((d) => d.id === displayId);
-    if (!display || !display.connected || (options?.useExistingAsset && (!device.online || display.canApplyWallpaper === false))) {
+    if (!display || !display.connected || display.canApplyWallpaper === false || (options?.useExistingAsset && !device.online)) {
       toast("연결된 화면을 선택해 주세요.");
+      return false;
+    }
+    const frame = options?.frame;
+    const screen = displaySize(display);
+    if (frame && (!screen || frame.width !== screen.width || frame.height !== screen.height)) {
+      toast("화면 해상도가 변경되었습니다. 미리보기를 다시 확인해 주세요.");
       return false;
     }
     if (cloud) {
@@ -462,8 +476,8 @@ export function Workspace({
             rig: { ...defaultHeadRig, ...picture.edit?.rig, enabled: true, bodyMode: "follow" },
           },
         } : picture;
-        const asset: Asset = options?.enablePcLiveMotion
-          ? await createAsset(movingPicture)
+        const asset: Asset = frame || options?.enablePcLiveMotion
+          ? await createAsset(movingPicture, frame)
           : options?.useExistingAsset && picture.assetId ? {
             id: picture.assetId, title: picture.name,
             mode: picture.background && picture.foregrounds?.length ? "Live2D" : "Static",
@@ -490,7 +504,7 @@ export function Workspace({
         return sent;
       }
     }
-    const snapshot = { ...picture, id: uuid() };
+    const snapshot = { ...picture, id: uuid(), wallpaperFrame: frame };
     const applied = update((v) => ({
         ...v,
         assets: [...(v.assets || []), snapshot],
@@ -547,7 +561,7 @@ export function Workspace({
           <div className="header-right">
             {cloud && tokenWallet && (
               <details className="header-token-menu">
-                <summary className="header-token-summary">
+                <summary className="header-token-summary" aria-label={`현재 요금제 ${tokenWallet.plan ?? "-"}, 잔여 토큰 ${tokenWallet.totalBalance ?? 0}`}>
                   <span>{tokenWallet.plan ?? "-"}</span>
                   <Coins size={16} />
                   <span>{tokenWallet.totalBalance ?? 0}</span>
@@ -632,9 +646,9 @@ export function Workspace({
               <Busy /> 불러오는 중…
             </div>
           ) : page?.slug === "images" ? (
-            <Gallery />
+            <Gallery key="images" />
           ) : page?.slug === "explore" ? (
-            <Gallery explore />
+            <Gallery key="explore" explore />
           ) : page?.slug === "studio" ? (
             <Studio route={route} />
           ) : page?.slug === "devices" ? (
@@ -664,13 +678,19 @@ export function Workspace({
 }
 
 export function Gallery({ explore = false }: { explore?: boolean }) {
-  const { library, session, update, toast, shared, refresh, apply } =
+  const { library, session, update, toast, shared, refresh, apply, loading } =
     useDemo();
   const [query, setQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>(() => [
     ...selectableTags,
   ]);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformTag[]>([]);
   const [sort, setSort] = useState("recent");
+  const [recommendationSeed] = useState(() => Math.floor(Math.random() * 2 ** 32));
+  const [localEngagement, setLocalEngagement] = useState(() => read<Record<string, { users: string[]; downloads: number }>>("upscale.demo.engagement.v1", {}));
+  const [engagement, setEngagement] = useState<Record<string, Pick<Picture, "likes" | "liked">>>({});
+  const [liking, setLiking] = useState<string | null>(null);
+  const likeRequest = useRef(false);
   const [preview, setPreview] = useState<Picture | null>(null);
   const previewTrigger = useRef<HTMLElement | null>(null);
   function openDetails(picture: Picture) {
@@ -693,12 +713,45 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const importedPictures = useRef(new Map<string, Promise<Picture>>());
   const editableCopies = useRef(new Map<string, Promise<Picture>>());
   const [renaming, setRenaming] = useState(false);
+  const filtersActive = !!query.trim() || !allTagsSelected(selectedTags) || selectedPlatforms.length > 0;
+  const queryParams = new URLSearchParams();
+  if (query.trim()) queryParams.set("search", query.trim());
+  if (sort !== "recent") queryParams.set("sort", sort);
+  if (!allTagsSelected(selectedTags)) {
+    if (!selectedTags.length) queryParams.set("untagged", "true");
+    else selectedTags.forEach(tag => queryParams.append("tags", tag));
+  }
+  selectedPlatforms.forEach(tag => queryParams.append("platformTags", tag));
+  const remote = useExploreResults(queryParams.toString(), shared, explore && cloud);
+  const ranked = useExploreResults("sort=likes&limit=8", shared, explore && cloud);
+  function withEngagement(picture: Picture): Picture {
+    if (cloud) return { ...picture, ...engagement[picture.id] };
+    const entry = localEngagement[picture.id];
+    return entry ? { ...picture, likes: entry.users.length, liked: entry.users.includes(session.id),
+      downloads: (picture.downloads ?? 0) + entry.downloads } : picture;
+  }
+  function updateLocalEngagement(picture: Picture, change: (value: { users: string[]; downloads: number }) => { users: string[]; downloads: number }) {
+    const stored = read<typeof localEngagement>("upscale.demo.engagement.v1", {});
+    const next = { ...stored, [picture.id]: change(stored[picture.id] ?? { users: [], downloads: 0 }) };
+    write("upscale.demo.engagement.v1", next);
+    setLocalEngagement(next);
+  }
+  useEffect(() => {
+    if (cloud || !explore) return;
+    function synchronize(event: StorageEvent) {
+      if (event.key === "upscale.demo.engagement.v1")
+        setLocalEngagement(read("upscale.demo.engagement.v1", {}));
+    }
+    window.addEventListener("storage", synchronize);
+    return () => window.removeEventListener("storage", synchronize);
+  }, [explore]);
   const all = explore
     ? cloud
       ? shared
       : [...shared, ...community]
     : library.images.filter(p => !p.isDraft);
-  const selectedPicture = preview ? all.find(p => p.id === preview.id) || null : null;
+  const candidates = [...all, ...(remote?.pictures || []), ...(ranked?.pictures || [])];
+  const selectedPicture = preview ? withEngagement(candidates.find(p => p.id === preview.id) || preview) : null;
   useEffect(() => {
     if (!selectedPicture) return;
     const frame = requestAnimationFrame(() => {
@@ -710,6 +763,25 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   }, [selectedPicture?.id]);
   const detailsOpen = !!selectedPicture;
   const ownedPictures = [...library.images, ...(library.assets || [])];
+  async function toggleLike(picture: Picture) {
+    if (likeRequest.current || isOwnExplorePicture(picture, session.id, ownedPictures)) return;
+    likeRequest.current = true;
+    setLiking(picture.id);
+    try {
+      if (cloud) {
+        const path = picture.galleryPostId ? `/api/gallery/${picture.galleryPostId}` : `/api/wallpapers/${picture.assetId}`;
+        const result = await request<{ likeCount: number; isLikedByCurrentUser: boolean }>(`${path}/likes`,
+          { method: picture.liked ? "DELETE" : "POST" });
+        setEngagement(previous => ({ ...previous,
+          [picture.id]: { likes: result.likeCount, liked: result.isLikedByCurrentUser } }));
+        await refresh();
+      } else {
+        updateLocalEngagement(picture, value => ({ ...value,
+          users: picture.liked ? value.users.filter(id => id !== session.id) : [...new Set([...value.users, session.id])] }));
+      }
+    } catch (error) { toast((error as Error).message); }
+    finally { likeRequest.current = false; setLiking(null); }
+  }
   async function ensureOwnPicture(picture: Picture): Promise<Picture> {
     const owned = ownedExplorePicture(picture, session.id, ownedPictures);
     if (owned) return owned;
@@ -729,6 +801,8 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
         created: new Date().toISOString() };
       if (!update(value => ({ ...value, images: [copy, ...value.images] })))
         throw new Error("이미지를 저장하지 못했습니다. 브라우저 저장 공간을 확인해 주세요.");
+      if (!isOwnExplorePicture(picture, session.id, ownedPictures))
+        updateLocalEngagement(picture, value => ({ ...value, downloads: value.downloads + 1 }));
       return copy;
     })();
     importedPictures.current.set(picture.id, pending);
@@ -759,19 +833,18 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     } catch (error) { toast((error as Error).message); }
     finally { setImporting(false); }
   }
-  const images = all
-    .filter(
-      (p) =>
-        p.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()) &&
-        matchesSelectedTags(p, selectedTags),
-    )
-    .sort((a, b) =>
-      sort === "name"
-        ? a.name.localeCompare(b.name, "ko")
-        : sort === "popular"
-          ? (b.downloads || 0) - (a.downloads || 0)
-          : b.created.localeCompare(a.created),
-    );
+  const remotePending = explore && cloud && !!queryParams.toString() && !remote;
+  const images = sortExplore((remote?.pictures ?? all).filter(picture =>
+    picture.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) &&
+    matchesSelectedTags(picture, selectedTags) &&
+    (!selectedPlatforms.length || selectedPlatforms.some(tag => picture.platformTags?.includes(tag))),
+  ).map(withEngagement), sort);
+  const rankedRecommendations = sortExplore([...new Map(
+    [...all, ...(ranked?.pictures || [])].map(picture => [picture.id, picture]),
+  ).values()].map(withEngagement), "likes");
+  const hasLikedRecommendations = (rankedRecommendations[0]?.likes ?? 0) > 0;
+  const recommendations = hasLikedRecommendations ? rankedRecommendations.slice(0, 8)
+    : randomRecommendations(all.map(withEngagement), recommendationSeed);
   async function importPicture(p: Picture, open: boolean) {
     if (importing) return;
     setImporting(true);
@@ -781,13 +854,15 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       // Refresh after making a new working project, so the Studio route can
       // resolve that project's ID as soon as navigation occurs.
       if (open && editable.id !== saved.id) await refresh();
-      setPreview(current => current?.id === p.id ? null : current);
-      if (open) navigate(`/app/studio?id=${encodeURIComponent(editable.id)}`);
+      if (open) {
+        setPreview(current => current?.id === p.id ? null : current);
+        navigate(`/app/studio?id=${encodeURIComponent(editable.id)}`);
+      }
       else toast("내 이미지에 저장했습니다.");
     } catch (error) { toast((error as Error).message); }
     finally { setImporting(false); }
   }
-  async function applyExplorePicture(deviceId: string, displayId: string) {
+  async function applyExplorePicture({ deviceId, displayId, frame, picture }: WallpaperSelection) {
     if (!applyingPicture || applying.current) return;
     applying.current = true;
     setImporting(true);
@@ -795,7 +870,8 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       if (!wallpaperTargets(library.devices).some(target => target.deviceId === deviceId && target.displayId === displayId))
         throw new Error("연결된 화면을 선택해 주세요.");
       const saved = await ensureOwnPicture(applyingPicture);
-      if (await apply(saved, deviceId, displayId, { useExistingAsset: true })) setApplyingPicture(null);
+      if (await apply({ ...saved, width: picture.width, height: picture.height }, deviceId, displayId,
+        { useExistingAsset: true, frame })) setApplyingPicture(null);
     } catch (error) { toast((error as Error).message); }
     finally { applying.current = false; setImporting(false); }
   }
@@ -852,6 +928,8 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           </button>
         )}
       </div>
+      {explore && <ExploreRecommendations pictures={recommendations} open={openDetails} ranked={hasLikedRecommendations} />}
+      {explore && <h2 className="explore-list-title">공유 이미지</h2>}
       <div className="gallery-toolbar">
         <label className="search-field">
           <Search size={21} />
@@ -871,7 +949,8 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
             </button>
           )}
         </label>
-        <TagSelector selected={selectedTags} change={setSelectedTags} />
+        <TagSelector selected={selectedTags} change={setSelectedTags}
+          platforms={selectedPlatforms} changePlatforms={setSelectedPlatforms} />
         <label className="select-field">
           <ArrowDownUp size={18} />
           <select
@@ -880,39 +959,43 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
             onChange={(e) => setSort(e.target.value)}
           >
             <option value="recent">
-              {explore ? "최근 게시순" : "최근 등록순"}
+              {explore ? "최신순" : "최근 등록순"}
             </option>
             <option value="name">이름순</option>
-            {explore && <option value="popular">인기순</option>}
+            {explore && <><option value="likes">좋아요순</option><option value="downloads">다운로드순</option></>}
           </select>
         </label>
       </div>
-      {!images.length ? (
+      {remotePending || (explore && loading && !all.length) ? <p className="explore-result-status" role="status"><Busy /> 공유 이미지를 불러오는 중…</p>
+        : remote?.error ? <Empty text="공유 이미지를 불러오지 못했어요"><p>{remote.error}</p>
+          <button className="button secondary" onClick={() => void refresh()}>다시 시도</button></Empty>
+        : !images.length ? (
         <Empty
           text={
-            query || !allTagsSelected(selectedTags)
+            filtersActive
               ? "검색 결과가 없어요"
-              : "첫 이미지를 추가해 보세요"
+              : explore ? "아직 공유된 이미지가 없어요" : "첫 이미지를 추가해 보세요"
           }
         >
           <p className="muted">
-            {query || !allTagsSelected(selectedTags)
-              ? "다른 이름이나 장르로 검색해 보세요."
-              : "JPG, PNG, WebP 이미지를 추가할 수 있어요."}
+            {filtersActive ? "다른 이름이나 태그로 검색해 보세요."
+              : explore ? "사용자가 공유한 배경화면이 여기에 표시됩니다." : "JPG, PNG, WebP 이미지를 추가할 수 있어요."}
           </p>
-          <button
+          {(filtersActive || !explore) && <button
             className="button secondary"
             onClick={() => {
-              if (query || !allTagsSelected(selectedTags)) {
+              if (filtersActive) {
                 setQuery("");
                 setSelectedTags([...selectableTags]);
+                setSelectedPlatforms([]);
+                setSort("recent");
               } else navigate("/app/studio?new=1");
             }}
           >
-            {query || !allTagsSelected(selectedTags)
+            {filtersActive
               ? "필터 초기화"
               : "이미지 추가"}
-          </button>
+          </button>}
         </Empty>
       ) : (
         <div className="image-grid">
@@ -945,10 +1028,12 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
         save={() => { void importPicture(selectedPicture, false); }}
         openStudio={() => { void importPicture(selectedPicture, true); }}
         apply={() => setApplyingPicture(selectedPicture)}
+        toggleLike={isOwnExplorePicture(selectedPicture, session.id, ownedPictures) ? undefined : () => void toggleLike(selectedPicture)}
+        liking={liking === selectedPicture.id}
       />}
-      {applyingPicture && <ApplyWallpaperDialog picture={applyingPicture} devices={library.devices}
+      {applyingPicture && <ApplyWallpaperDialog picture={applyingPicture} devices={library.devices} fromExplore
         busy={importing} close={() => setApplyingPicture(null)}
-        confirm={(deviceId, displayId) => { void applyExplorePicture(deviceId, displayId); }} />}
+        confirm={applyExplorePicture} />}
       {editing && (
         <Modal title="이미지 이름 변경" close={() => setEditing(null)}>
           <form

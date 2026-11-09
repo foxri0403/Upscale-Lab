@@ -14,9 +14,9 @@ export function isOwnExplorePicture(picture: Picture, userId: string, pictures: 
   return picture.ownerId === userId || !!ownedExplorePicture(picture, userId, pictures);
 }
 
-export function wallpaperTargets(devices: Device[]) {
-  return devices.filter(device => device.online &&
-    (!("connection" in device) || device.connection === undefined || device.connection === "connected")).flatMap(device => device.displays
+export function wallpaperTargets(devices: Device[], requireOnline = true) {
+  return devices.filter(device => !requireOnline || (device.online &&
+    (!("connection" in device) || device.connection === undefined || device.connection === "connected"))).flatMap(device => device.displays
     .filter(display => display.connected && display.canApplyWallpaper !== false)
     .map(display => ({ id: `${device.id}/${display.id}`, deviceId: device.id, displayId: display.id,
       name: `${device.name} · ${display.name}` })));

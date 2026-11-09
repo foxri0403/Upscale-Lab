@@ -71,9 +71,12 @@ export type Picture = {
   sharedAssetIds?: string[];
   ownerId?: string;
   tags?: string[];
+  platformTags?: import("./platform-tags").PlatformTag[];
   creator?: string;
   creatorAvatar?: string;
   downloads?: number;
+  likes?: number;
+  liked?: boolean;
   projectId?: string;
   assetId?: string;
   sourceProjectId?: string;
@@ -82,6 +85,9 @@ export type Picture = {
   layers?: import("./api").ApiLayer[];
   jobId?: string;
   detailsUntil?: number;
+  wallpaperFrame?: import("./wallpaper-frame").WallpaperFrame;
+  isDeviceVariant?: boolean;
+  legacyMotion?: boolean;
   width?: number;
   height?: number;
   contentType?: string;
@@ -90,6 +96,8 @@ export type Display = {
   id: string;
   name: string;
   resolution: string;
+  width?: number;
+  height?: number;
   current: string;
   desired?: string;
   removing?: boolean;
@@ -355,8 +363,8 @@ export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
   const sw = selected.width, sh = selected.height;
   const scale = Math.min(edit.scale, 4096 / Math.max(sw, sh));
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(sw * scale);
-  canvas.height = Math.round(sh * scale);
+  canvas.width = Math.max(1, Math.round(sw * scale));
+  canvas.height = Math.max(1, Math.round(sh * scale));
   const ctx = canvas.getContext("2d")!;
   ctx.filter = filterStyle(edit.filter);
   ctx.imageSmoothingQuality = "high";

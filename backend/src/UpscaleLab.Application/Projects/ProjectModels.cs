@@ -14,7 +14,8 @@ public sealed record CreateProjectCommand(
     [param: Required, MaxLength(160)] string Title,
     [param: Range(1, 32768)] int OriginalWidth,
     [param: Range(1, 32768)] int OriginalHeight,
-    bool IsDraft = false);
+    bool IsDraft = false,
+    Guid? SourceGalleryPostId = null);
 
 public sealed record ProjectSummaryResponse(
     Guid Id,

@@ -14,6 +14,7 @@ import { isImageShared } from "./image-sharing";
 import { ImageSharingToggle } from "./ImageSharingToggle";
 import { ImageFeatureBadges } from "./ImageFeatureBadges";
 import { CreatorAvatar } from "./CreatorAvatar";
+import { EngagementBadges, PlatformBadges } from "./GalleryBadges";
 
 export function ImageCard({
   picture,
@@ -84,12 +85,14 @@ export function ImageCard({
               });
           }}
         />
+        <PlatformBadges picture={picture} />
+        {explore && <EngagementBadges picture={picture} />}
       </button>
       <div className="image-card-body">
         <button className="image-title" onClick={open} title={picture.name}>
           {picture.name}
         </button>
-        <div className="image-tags" title={tags.join(" · ") || "장르 없음"}>
+        <div className="image-tags" aria-label="하위 태그" title={tags.join(" · ") || "하위 태그 없음"}>
           <Tag size={14} />
           <span>{tagSummary(tags)}</span>
         </div>

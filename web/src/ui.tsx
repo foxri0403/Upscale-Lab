@@ -140,21 +140,23 @@ export function PictureView({
   loaded?: (image: HTMLImageElement) => void;
   failed?: () => void;
 }) {
+  const character = !picture.background && ((picture.layers?.length ?? 0) >= 2 ||
+    (!!picture.assetId && (picture.foregrounds?.length ?? 0) >= 2));
+  const stack = picture.edit?.foreground === false ? [] : picture.foregrounds ?? [];
+  const source = picture.background || (character && stack.length ? stack[0] : picture.src);
   return (
     <span
       className="picture-view"
       style={{ filter: filterStyle(picture.edit?.filter || "original") }}
     >
       <img
-        src={picture.background || picture.src}
+        src={source}
         alt={picture.name}
         loading="lazy"
         onLoad={(event) => loaded?.(event.currentTarget)}
         onError={() => failed?.()}
       />
-      {picture.background &&
-        picture.edit?.foreground !== false &&
-        picture.foregrounds?.map((src, i) => (
+      {(picture.background ? stack : character ? stack.slice(1) : []).map((src, i) => (
           <img key={i} src={src} alt="" loading="lazy" />
         ))}
     </span>

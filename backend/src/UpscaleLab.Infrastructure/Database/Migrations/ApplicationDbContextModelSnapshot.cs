@@ -440,8 +440,17 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .HasColumnType("boolean")
                         .HasDefaultValue(true);
 
+                    b.Property<string[]>("PlatformTags")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("ARRAY[]::text[]");
+
                     b.Property<Guid?>("ProjectId")
                         .HasColumnType("uuid");
+
+                    b.Property<long>("SaveCount")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("Tag")
                         .IsRequired()
@@ -470,6 +479,10 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.HasIndex("CreatedAt");
 
                     b.HasIndex("ImageId");
+
+                    b.HasIndex("PlatformTags");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("PlatformTags"), "gin");
 
                     b.HasIndex("ProjectId");
 
@@ -1239,6 +1252,9 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<long>("SaveCount")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("SavedEditJson")
                         .HasColumnType("jsonb");
 
@@ -1321,6 +1337,34 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .IsUnique();
 
                     b.ToTable("wallpaper_assignments", (string)null);
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.WallpaperLike", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("WallpaperAssetId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("WallpaperAssetId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("wallpaper_likes", (string)null);
                 });
 
             modelBuilder.Entity("UpscaleLab.Domain.Entities.AuthSession", b =>
@@ -1635,6 +1679,21 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.Navigation("DeviceDisplay");
                 });
 
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.WallpaperLike", b =>
+                {
+                    b.HasOne("UpscaleLab.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UpscaleLab.Domain.Entities.WallpaperAsset", null)
+                        .WithMany("Likes")
+                        .HasForeignKey("WallpaperAssetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("UpscaleLab.Domain.Entities.Device", b =>
                 {
                     b.Navigation("Displays");
@@ -1682,6 +1741,11 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                     b.Navigation("Projects");
 
                     b.Navigation("Setting");
+                });
+
+            modelBuilder.Entity("UpscaleLab.Domain.Entities.WallpaperAsset", b =>
+                {
+                    b.Navigation("Likes");
                 });
 #pragma warning restore 612, 618
         }

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using System.Linq.Expressions;
 using UpscaleLab.Application.Common;
 using UpscaleLab.Application.Gallery;
@@ -18,19 +19,37 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         string? search,
         string? tag,
         CancellationToken cancellationToken,
-        string[]? tags = null)
+        string[]? tags = null,
+        ExploreQuery? explore = null)
     {
         var query = dbContext.GalleryPosts
             .AsNoTracking()
             .Where(x => x.IsPublic);
 
+        search = explore?.Search ?? search;
+        tags = explore?.Tags ?? tags;
         if (!string.IsNullOrWhiteSpace(search))
         {
             var normalizedSearch = search.Trim().ToLower();
             query = query.Where(x => x.Title.ToLower().Contains(normalizedSearch));
         }
 
+        var platforms = GalleryPlatformTags.Normalize(explore?.PlatformTags);
+        if (platforms.Length > 0)
+        {
+            var pc = platforms.Contains("pc");
+            var mobile = platforms.Contains("mobile");
+            var tablet = platforms.Contains("tablet");
+            query = query.Where(x => (pc && x.PlatformTags.Contains("pc")) ||
+                (mobile && x.PlatformTags.Contains("mobile")) || (tablet && x.PlatformTags.Contains("tablet")));
+        }
+
         string[]? selected = null;
+        if (explore?.Untagged == true)
+        {
+            tag = GalleryTagCatalog.Unspecified;
+            tags = null;
+        }
         if (tags is { Length: > 0 } || !string.IsNullOrWhiteSpace(tag))
         {
             selected = tags is { Length: > 0 }
@@ -55,14 +74,20 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
             query = query.Where(Expression.Lambda<Func<GalleryPost, bool>>(matches, parameter));
         }
 
-        var posts = await query
-            .OrderByDescending(x => x.CreatedAt)
-            .Take(100)
+        var ordered = explore?.Sort switch
+        {
+            "likes" => query.OrderByDescending(x => x.Likes.Count),
+            "downloads" => query.OrderByDescending(x => x.SaveCount),
+            "name" => query.OrderBy(x => x.Title),
+            _ => query.OrderByDescending(x => x.CreatedAt)
+        };
+        var posts = await ordered.ThenByDescending(x => x.CreatedAt).ThenBy(x => x.Id)
+            .Take(Math.Clamp(explore?.Limit ?? 100, 1, 100))
             .Select(x => new GalleryPostResponse(
                 x.Id, x.ImageId, x.UserId, x.User.Username, x.Title, x.Description,
-                x.Image.OriginalObjectKey, x.Likes.Count, x.Comments.Count, x.DownloadCount,
+                x.Image.OriginalObjectKey, x.Likes.Count, x.Comments.Count, x.SaveCount,
                 x.CreatedAt, currentUserId.HasValue && x.Likes.Any(l => l.UserId == currentUserId),
-                x.ProjectId, x.IsPublic, x.Tag, x.Tags, null, x.User.ProfileImageObjectKey))
+                x.ProjectId, x.IsPublic, x.Tag, x.Tags, null, x.User.ProfileImageObjectKey, x.PlatformTags))
             .ToListAsync(cancellationToken);
 
         return posts.Select(x => x with {
@@ -120,6 +145,8 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
             ProjectId = project?.Id,
             Title = request.Title.Trim(),
             Tags = GalleryTagCatalog.NormalizeMany(request.Tags, request.Tag),
+            PlatformTags = GalleryPlatformTags.Normalize(request.PlatformTags ??
+                ImageEditState.FromJson(project?.SavedEditJson)?.PlatformTags),
             Description = request.Description?.Trim(),
             IsPublic = request.IsPublic
         };
@@ -148,6 +175,8 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         }
 
         post.Tags = GalleryTagCatalog.NormalizeMany(request.Tags, request.Tag);
+        if (request.PlatformTags is not null)
+            post.PlatformTags = GalleryPlatformTags.Normalize(request.PlatformTags);
         post.Tag = post.Tags[0];
         post.Description = GalleryTagCompatibility.WithoutMetadata(post.Description);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -171,6 +200,8 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         var tags = GalleryTagCatalog.NormalizeMany(request.Tags, null);
         post.Title = title;
         post.Tags = tags;
+        if (request.PlatformTags is not null)
+            post.PlatformTags = GalleryPlatformTags.Normalize(request.PlatformTags);
         post.Tag = tags[0];
         post.Description = GalleryTagCompatibility.WithoutMetadata(post.Description);
         post.UpdatedAt = DateTime.UtcNow;
@@ -237,37 +268,30 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task LikeAsync(Guid userId, Guid postId, CancellationToken cancellationToken)
+    public async Task<GalleryEngagement> SetLikeAsync(Guid userId, Guid postId, bool liked, CancellationToken cancellationToken)
     {
-        if (!await dbContext.GalleryPosts.AnyAsync(
-                x => x.Id == postId && (x.IsPublic || x.UserId == userId),
-                cancellationToken))
-        {
+        var post = dbContext.GalleryPosts.Where(x => x.Id == postId && x.IsPublic && x.UserId != userId);
+        if (!await post.AnyAsync(cancellationToken))
             throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
-        }
-
-        if (await dbContext.GalleryLikes.AnyAsync(x => x.GalleryPostId == postId && x.UserId == userId, cancellationToken))
+        var likes = dbContext.GalleryLikes.Where(x => x.GalleryPostId == postId && x.UserId == userId);
+        if (liked)
         {
-            return;
+            if (!await likes.AnyAsync(cancellationToken))
+            {
+                var entry = dbContext.GalleryLikes.Add(new GalleryLike { GalleryPostId = postId, UserId = userId });
+                try { await dbContext.SaveChangesAsync(cancellationToken); }
+                catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+                { entry.State = EntityState.Detached; }
+            }
         }
-
-        dbContext.GalleryLikes.Add(new GalleryLike { GalleryPostId = postId, UserId = userId });
-        await dbContext.SaveChangesAsync(cancellationToken);
-    }
-
-    public async Task UnlikeAsync(Guid userId, Guid postId, CancellationToken cancellationToken)
-    {
-        var like = await dbContext.GalleryLikes.SingleOrDefaultAsync(
-            x => x.GalleryPostId == postId && x.UserId == userId,
-            cancellationToken);
-
-        if (like is null)
+        else if (dbContext.Database.IsRelational()) await likes.ExecuteDeleteAsync(cancellationToken);
+        else if (await likes.SingleOrDefaultAsync(cancellationToken) is { } like)
         {
-            return;
+            dbContext.GalleryLikes.Remove(like);
+            await dbContext.SaveChangesAsync(cancellationToken);
         }
-
-        dbContext.GalleryLikes.Remove(like);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        return await post.Select(x => new GalleryEngagement(x.Likes.Count, x.Likes.Any(l => l.UserId == userId)))
+            .SingleOrDefaultAsync(cancellationToken) ?? throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
     }
 
     public async Task<DownloadUrlResponse> CreatePreviewUrlAsync(
@@ -293,51 +317,17 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         CancellationToken cancellationToken,
         bool countDownload = true)
     {
-        var post = await dbContext.GalleryPosts
-            .Include(x => x.Image)
-            .SingleOrDefaultAsync(x => x.Id == postId, cancellationToken)
-            ?? throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
-
-        EnsureAccessible(post, currentUserId);
-
-        var expiresAt = DateTime.UtcNow.Add(DownloadLifetime);
-        var url = storageService.CreateDownloadUrl(post.Image.OriginalObjectKey, DownloadLifetime);
-        // Old clients still count on URL issuance. Current clients opt out and
-        // report completion only after the file has been downloaded locally.
-        if (countDownload)
-            await IncrementDownloadCountAsync(postId, currentUserId, cancellationToken);
-
-        return new DownloadUrlResponse(url, expiresAt);
+        return await CreatePreviewUrlAsync(postId, currentUserId, cancellationToken);
     }
 
     public async Task<GalleryDownloadCountResponse> RecordDownloadAsync(
-        Guid postId, Guid? currentUserId, CancellationToken cancellationToken) =>
-        new(await IncrementDownloadCountAsync(postId, currentUserId, cancellationToken));
-
-    private async Task<long> IncrementDownloadCountAsync(
         Guid postId, Guid? currentUserId, CancellationToken cancellationToken)
     {
-        var query = dbContext.GalleryPosts.Where(x => x.Id == postId &&
-            (x.IsPublic || x.UserId == currentUserId));
-        var now = DateTime.UtcNow;
-        if (dbContext.Database.IsRelational())
-        {
-            // Increment in the database so concurrent downloads cannot overwrite
-            // each other's counters. No new column or migration is required.
-            var changed = await query.ExecuteUpdateAsync(update => update
-                .SetProperty(x => x.DownloadCount, x => x.DownloadCount + 1)
-                .SetProperty(x => x.UpdatedAt, now), cancellationToken);
-            if (changed == 0) throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
-            return await query.AsNoTracking().Select(x => x.DownloadCount).SingleAsync(cancellationToken);
-        }
-
-        // The existing service tests use EF's non-relational in-memory provider.
-        var post = await query.SingleOrDefaultAsync(cancellationToken)
+        // Older clients may still report a local file download. Only library imports count.
+        return await dbContext.GalleryPosts.AsNoTracking().Where(x => x.Id == postId &&
+            (x.IsPublic || x.UserId == currentUserId))
+            .Select(x => new GalleryDownloadCountResponse(x.SaveCount)).SingleOrDefaultAsync(cancellationToken)
             ?? throw new NotFoundException("갤러리 게시글을 찾을 수 없습니다.");
-        post.DownloadCount++;
-        post.UpdatedAt = now;
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return post.DownloadCount;
     }
 
     private IQueryable<GalleryPost> BaseQuery() => dbContext.GalleryPosts
@@ -357,7 +347,7 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         storageService.CreateDownloadUrl(post.Image.OriginalObjectKey, DownloadLifetime),
         post.Likes.Count,
         post.Comments.Count,
-        post.DownloadCount,
+        post.SaveCount,
         post.CreatedAt,
         currentUserId.HasValue && post.Likes.Any(x => x.UserId == currentUserId.Value),
         post.ProjectId,
@@ -365,7 +355,8 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         post.Tag,
         GalleryTagCompatibility.Resolve(post.Tag, post.Tags, post.Description),
         $"/api/gallery/{post.Id}/thumbnail",
-        post.User.ProfileImageObjectKey is { } key ? storageService.CreateDownloadUrl(key, DownloadLifetime) : null);
+        post.User.ProfileImageObjectKey is { } key ? storageService.CreateDownloadUrl(key, DownloadLifetime) : null,
+        post.PlatformTags);
 
     private static void EnsureAccessible(GalleryPost post, Guid? currentUserId)
     {

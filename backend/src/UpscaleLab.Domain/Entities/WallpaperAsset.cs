@@ -16,4 +16,6 @@ public sealed class WallpaperAsset : BaseEntity
     public string? ShareToken { get; set; }
     public bool IsPublic { get; set; }
     public bool IsArchived { get; set; }
+    public long SaveCount { get; set; }
+    public ICollection<WallpaperLike> Likes { get; set; } = new List<WallpaperLike>();
 }

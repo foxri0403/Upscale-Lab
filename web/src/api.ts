@@ -1,10 +1,10 @@
 import type { Session } from "./auth";
-import type { Edit } from "./model";
+import type { Edit, Picture } from "./model";
 import type { VerificationTiming } from "./signup-validation";
 import type { ConsentValues } from "./CopyrightConsent";
 export type RegistrationChallenge = { email: string; username: string; token: string; expiresAt: string; termsVersion: string };
 export type RegistrationResponse = VerificationTiming & { email: string; username: string; requiresEmailVerification: boolean; cancellationToken: string; registration?: RegistrationChallenge };
-export type SavedEdit = Edit & { savedAt: string; tags?: string[] };
+export type SavedEdit = Edit & { savedAt: string; tags?: string[]; platformTags?: Picture["platformTags"] };
 declare global {
   interface Window {
     __UPSCALE_CONFIG__?: { apiBaseUrl?: string; mode?: "cloud" | "demo" };
@@ -261,6 +261,10 @@ export type Job = {
   resultHeight?: number;
 };
 export type Asset = {
+  isDeviceVariant?: boolean;
+  likeCount?: number;
+  downloadCount?: number;
+  isLikedByCurrentUser?: boolean;
   userId?: string;
   username?: string;
   profileImageUrl?: string | null;
@@ -278,6 +282,10 @@ export type Manifest = {
   mode: string;
   width: number;
   height: number;
+  motionEnabled?: boolean;
+  mouseEnabled?: boolean | null;
+  gyroEnabled?: boolean | null;
+  rig?: Edit["rig"];
   files: { source: string; role: string; order: number; contentType?: string }[];
 };
 export type CloudDevice = {

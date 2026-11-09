@@ -23,6 +23,6 @@ public sealed class GalleryImportService(ApplicationDbContext db, IStorageServic
         content.Position = 0;
         return await projects.CreateAsync(userId, new CreateProjectCommand(
             content, post.Image.FileName, post.Image.ContentType, post.Title,
-            post.Image.OriginalWidth, post.Image.OriginalHeight, IsDraft: false), cancellationToken);
+            post.Image.OriginalWidth, post.Image.OriginalHeight, SourceGalleryPostId: post.Id), cancellationToken);
     }
 }

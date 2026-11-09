@@ -12,6 +12,8 @@ import {
 import { useDemo } from "./Workspace";
 import { sampleImages, uuid, type Device, type Picture } from "./model";
 import { Modal, Notice, Empty, PictureView } from "./ui";
+import { ApplyWallpaperDialog } from "./ApplyWallpaperDialog";
+import { FramedWallpaper } from "./FramedWallpaper";
 import { cloud, post, request } from "./api";
 import { deviceDisplays, registeredDevices } from "./device-layout";
 
@@ -21,7 +23,6 @@ export function Devices() {
     device: Device;
     displayId: string;
   } | null>(null);
-  const [selected, setSelected] = useState("");
   const [removing, setRemoving] = useState<Device | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState<string | null>(null);
@@ -84,7 +85,6 @@ export function Devices() {
   }
   function choose(device: Device, displayId: string) {
     setTarget({ device, displayId });
-    setSelected(library.images[0]?.id || "");
   }
   async function clearWallpaper() {
     if (!clearing || busy) return;
@@ -211,7 +211,10 @@ export function Devices() {
                               }
                             >
                               {current ? (
-                                <PictureView picture={current} />
+                                current.wallpaperFrame && current.width && current.height
+                                  ? <FramedWallpaper picture={current} size={{ width: current.width, height: current.height }}
+                                      frame={current.wallpaperFrame} />
+                                  : <PictureView picture={current} />
                               ) : (
                                 <div className="unknown-wallpaper">
                                   {mobile && display.canApplyWallpaper !== false ? <DeviceIcon size={30} /> : <Monitor size={30} />}
@@ -260,60 +263,14 @@ export function Devices() {
           })}
         </div>
       )}
-      {target && (
-        <Modal
-          title={`${target.device.name} 배경화면 변경`}
-          close={() => setTarget(null)}
-        >
-          {library.images.length ? (
-            <>
-              <label>
-                이미지 선택
-                <select
-                  value={selected}
-                  onChange={(e) => setSelected(e.target.value)}
-                >
-                  {library.images.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <img
-                className="share-preview"
-                src={findPicture(selected)?.src}
-                alt={findPicture(selected)?.name}
-              />
-              <Notice>
-                {cloud
-                  ? "연결 앱에 적용 요청을 전송합니다. 기기가 보고하기 전까지 적용 대기로 표시됩니다."
-                  : "샘플 적용 요청을 저장합니다. 샘플 동기화 후 현재 배경화면에 반영됩니다."}
-              </Notice>
-              <button
-                className="button primary full"
-                disabled={busy}
-                onClick={async () => {
-                  const p = library.images.find((p) => p.id === selected);
-                  if (p) {
-                    setBusy(true);
-                    try {
-                      await apply(p, target.device.id, target.displayId);
-                      setTarget(null);
-                    } finally {
-                      setBusy(false);
-                    }
-                  }
-                }}
-              >
-                적용 요청 저장
-              </button>
-            </>
-          ) : (
-            <Empty text="먼저 내 이미지에 사진을 추가해 주세요" />
-          )}
-        </Modal>
-      )}
+      {target && <ApplyWallpaperDialog pictures={library.images} devices={library.devices}
+        fixedTarget={`${target.device.id}/${target.displayId}`} busy={busy} close={() => setTarget(null)}
+        confirm={async ({ picture, deviceId, displayId, frame }) => {
+          setBusy(true);
+          try {
+            if (await apply(picture, deviceId, displayId, { frame })) setTarget(null);
+          } finally { setBusy(false); }
+        }} />}
       {clearing && <Modal title="배경화면을 삭제할까요?" close={() => { if (!busy) setClearing(null); }}>
         <p>‘{clearing.device.name}’의 {clearing.device.displays.find(s => s.id === clearing.displayId)?.name}을 기본 배경화면으로 전환합니다.</p>
         <div className="modal-actions">

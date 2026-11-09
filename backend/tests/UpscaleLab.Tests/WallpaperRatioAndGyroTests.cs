@@ -51,6 +51,23 @@ public sealed class WallpaperRatioAndGyroTests
             Assert.Equal(169u, image.Width);
             Assert.Equal(300u, image.Height);
         }
+
+        var framed = await service.SnapshotAsync(project.UserId, asset.Id, new(true, 70, true, true,
+            new(70, "original", "original", 1, true, Frame: new(160, 90, true, 1, 1, .5))), default);
+        var framedManifest = JsonSerializer.Deserialize<WallpaperManifest>((await db.WallpaperAssets.FindAsync(framed.Id))!.ManifestJson)!;
+        Assert.Equal((160, 90), (framedManifest.Width, framedManifest.Height));
+        Assert.True(framedManifest.GyroEnabled);
+        Assert.True(framedManifest.MouseEnabled);
+        Assert.Equal(68, framedManifest.Rig?.PivotX);
+        Assert.Equal(40, framedManifest.Rig?.PivotY);
+        Assert.Equal(types.Select(type => type.ToString()), framedManifest.Files.Select(file => file.Role));
+        foreach (var file in framedManifest.Files)
+        {
+            using var image = new MagickImage(store.Files[file.Source]);
+            Assert.Equal((160u, 90u), (image.Width, image.Height));
+            using var pixels = image.GetPixels();
+            Assert.Equal(0, pixels.GetPixel(0, 0).ToColor()!.A);
+        }
     }
 
     [Fact]

@@ -9,15 +9,18 @@ public sealed record CreateGalleryPostRequest(
     Guid? ProjectId = null,
     bool IsPublic = true,
     [param: MaxLength(50)] string? Tag = null,
-    string[]? Tags = null);
+    string[]? Tags = null,
+    string[]? PlatformTags = null);
 
 public sealed record UpdateGalleryPostTagRequest(
     [param: MaxLength(50)] string? Tag = null,
-    string[]? Tags = null);
+    string[]? Tags = null,
+    string[]? PlatformTags = null);
 
 public sealed record UpdateGalleryPostRequest(
     [param: Required, MaxLength(160)] string Title,
-    string[]? Tags = null);
+    string[]? Tags = null,
+    string[]? PlatformTags = null);
 
 public sealed record GalleryPostResponse(
     Guid Id,
@@ -37,7 +40,8 @@ public sealed record GalleryPostResponse(
     string Tag,
     IReadOnlyList<string> Tags,
     string? ThumbnailUrl = null,
-    string? ProfileImageUrl = null);
+    string? ProfileImageUrl = null,
+    IReadOnlyList<string>? PlatformTags = null);
 
 public sealed record GalleryPostDetailResponse(
     GalleryPostResponse Post,

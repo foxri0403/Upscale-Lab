@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using UpscaleLab.Api.Authentication;
 using UpscaleLab.Application.Wallpapers;
 using UpscaleLab.Application.Images;
+using UpscaleLab.Application.Gallery;
 
 namespace UpscaleLab.Api.Controllers;
 
@@ -42,8 +43,19 @@ public sealed class WallpapersController(IWallpaperService wallpapers) : Control
 
     [AllowAnonymous]
     [HttpGet("shared")]
-    public async Task<ActionResult<IReadOnlyList<WallpaperSummary>>> Shared(CancellationToken ct) =>
-        Ok(await wallpapers.ListAsync(null, true, ct));
+    public async Task<ActionResult<IReadOnlyList<WallpaperSummary>>> Shared(
+        [FromQuery] string? search, [FromQuery] string? sort, [FromQuery] string[]? tags,
+        [FromQuery] string[]? platformTags, [FromQuery] bool untagged, CancellationToken ct, [FromQuery] int limit = 100) =>
+        Ok(await wallpapers.ListAsync(User.GetOptionalUserId(), true, ct,
+            new ExploreQuery(search, sort, tags, platformTags, untagged, limit)));
+
+    [HttpPost("{id:guid}/likes")]
+    public async Task<ActionResult<GalleryEngagement>> Like(Guid id, CancellationToken ct) =>
+        Ok(await wallpapers.SetLikeAsync(User.GetRequiredUserId(), id, true, ct));
+
+    [HttpDelete("{id:guid}/likes")]
+    public async Task<ActionResult<GalleryEngagement>> Unlike(Guid id, CancellationToken ct) =>
+        Ok(await wallpapers.SetLikeAsync(User.GetRequiredUserId(), id, false, ct));
 
     [HttpPost]
     public async Task<ActionResult<WallpaperSummary>> Create(CreateWallpaperRequest request, CancellationToken ct)

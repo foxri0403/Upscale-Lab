@@ -39,6 +39,8 @@ export function mapDeviceLibrary(states: CloudState[], registrations: CloudDevic
               : "홈 화면"
             : d.name,
         resolution: `${d.width} × ${d.height}`,
+        width: d.width,
+        height: d.height,
         connected: d.isConnected,
         refreshRateHz: d.refreshRateHz,
         canApplyWallpaper: d.canApplyWallpaper ?? true,

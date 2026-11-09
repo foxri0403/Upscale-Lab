@@ -4,5 +4,5 @@ import type { Picture } from "./model";
 // A source project and its application snapshots occupy one card in My Images.
 export function galleryImages(projects: Picture[], assets: Picture[]): Picture[] {
   const ids = new Set(projects.map(p => p.projectId).filter(Boolean));
-  return [...projects, ...assets.filter(a => !a.sourceProjectId || !ids.has(a.sourceProjectId))];
+  return [...projects, ...assets.filter(a => !a.isDeviceVariant && (!a.sourceProjectId || !ids.has(a.sourceProjectId)))];
 }

@@ -34,7 +34,7 @@ export function imageTags(picture: Pick<Picture, "tags" | "genre">): string[] {
 export function tagSummary(tags: readonly string[]): string {
   return tags.length
     ? tags.slice(0, 5).join(" · ") + (tags.length > 5 ? " · …" : "")
-    : "장르 없음";
+    : "하위 태그 없음";
 }
 export function allTagsSelected(selected: readonly string[]): boolean {
   return selectableTags.every((t) => selected.includes(t));

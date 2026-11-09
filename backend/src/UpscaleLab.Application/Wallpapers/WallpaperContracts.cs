@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using UpscaleLab.Domain.Enums;
 using UpscaleLab.Application.Images;
+using UpscaleLab.Application.Gallery;
 
 namespace UpscaleLab.Application.Wallpapers;
 
@@ -12,12 +13,15 @@ public sealed record CreateWallpaperRequest(Guid ProjectId,
 public sealed record SnapshotWallpaperRequest(bool MotionEnabled, [param: Range(0, 100)] int Strength,
     bool? MouseEnabled = null, bool? GyroEnabled = null, WallpaperRenderSettings? Render = null,
     HeadRigSettings? Rig = null);
-public sealed record WallpaperRenderSettings(int Strength, string Filter, string Crop, int Scale, bool Foreground, ImageCropRegion? CropRegion = null);
+public sealed record WallpaperRenderSettings(int Strength, string Filter, string Crop, int Scale, bool Foreground,
+    ImageCropRegion? CropRegion = null, WallpaperFrame? Frame = null);
+public sealed record WallpaperFrame(int Width, int Height, bool Contain, double Zoom, double X, double Y);
 public sealed record RenameWallpaperRequest([param: Required, MaxLength(160)] string Title);
 public sealed record ShareWallpaperRequest(bool IsPublic);
 public sealed record WallpaperSummary(Guid Id, string Title, WallpaperMode Mode, bool IsPublic, DateTime CreatedAt,
     Guid? SourceProjectId = null, ImageEditState? Edit = null, IReadOnlyList<string>? Features = null,
-    Guid? UserId = null, string? Username = null, string? ProfileImageUrl = null);
+    Guid? UserId = null, string? Username = null, string? ProfileImageUrl = null,
+    int LikeCount = 0, long DownloadCount = 0, bool IsLikedByCurrentUser = false, bool IsDeviceVariant = false);
 public sealed record WallpaperLink(string Token);
 public sealed record LinkedWallpaper(string Title, WallpaperManifest Manifest, IReadOnlyList<string>? Features = null);
 // Stored manifests use object keys; network manifests replace keys with fresh URLs.
@@ -39,7 +43,8 @@ public interface IWallpaperService
     Task RenameAsync(Guid userId, Guid assetId, RenameWallpaperRequest request, CancellationToken ct);
     Task<WallpaperSummary> CreateAsync(Guid userId, CreateWallpaperRequest request, CancellationToken ct);
     Task<WallpaperSummary> ImportAsync(Guid userId, Guid assetId, CancellationToken ct);
-    Task<IReadOnlyList<WallpaperSummary>> ListAsync(Guid? userId, bool shared, CancellationToken ct);
+    Task<IReadOnlyList<WallpaperSummary>> ListAsync(Guid? userId, bool shared, CancellationToken ct, ExploreQuery? explore = null);
+    Task<GalleryEngagement> SetLikeAsync(Guid userId, Guid assetId, bool liked, CancellationToken ct);
     Task<WallpaperManifest> GetManifestAsync(Guid? userId, Guid assetId, bool agentAccess, CancellationToken ct);
     Task SetSharingAsync(Guid userId, Guid assetId, bool isPublic, CancellationToken ct);
     Task ArchiveAsync(Guid userId, Guid assetId, CancellationToken ct);

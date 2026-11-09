@@ -12,7 +12,6 @@ import {
   Monitor,
   Check,
   Save,
-  ArrowRight,
   RotateCcw,
   Info,
   Image as ImageIcon,
@@ -46,6 +45,10 @@ import { ImageInformation } from "./ImageInformation";
 import { StudioCanvas } from "./StudioCanvas";
 import { canSelectUpscaleResolution, upscaleDimensions, upscaleResolutions } from "./upscale-resolution";
 import { allTagsSelected, imageTags, selectableTags, unspecifiedTag } from "./image-tags";
+import { PlatformTagOptions } from "./GalleryBadges";
+import type { PlatformTag } from "./platform-tags";
+import { ApplyWallpaperDialog } from "./ApplyWallpaperDialog";
+import { wallpaperTargets } from "./explore-actions";
 import { imageFeatures } from "./image-features";
 import { copyGeneratedLink } from "./share-clipboard";
 import "./studio.css";
@@ -130,6 +133,7 @@ export function Studio({ route }: { route: string }) {
   }, error => toast(error.message), picture?.id, tool === "crop");
   const [name, setName] = useState(picture?.name || "");
   const [tags, setTags] = useState<string[]>(picture ? imageTags(picture) : []);
+  const [platformTags, setPlatformTags] = useState<PlatformTag[]>(picture?.platformTags ?? []);
   const [shareFeedback, setShareFeedback] = useState<{ x: number; y: number; text: string } | null>(null);
   const shareTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sharePending = useRef(false);
@@ -148,8 +152,6 @@ export function Studio({ route }: { route: string }) {
   const [createdLive2dProjectId, setCreatedLive2dProjectId] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const saving = useRef(false);
-  const [target, setTarget] = useState("pc/monitor1");
-  const [applyPcLiveMotion, setApplyPcLiveMotion] = useState(true);
   const [job, setJob] = useState<Job | null>(null);
   const [capabilities, setCapabilities] = useState<{ upscale: boolean; layers: boolean; characterLayers?: boolean } | null>(null);
   const subjectJob = useRef<string | null>(null);
@@ -210,6 +212,7 @@ export function Studio({ route }: { route: string }) {
     setEdit(normalizedEdit(picture?.edit));
     setName(picture?.name || "");
     setTags(picture ? imageTags(picture) : []);
+    setPlatformTags(picture?.platformTags ?? []);
   }, [picture?.id]);
   const isFox =
     !picture?.separationDisabled && (!!(picture?.background && picture.foregrounds?.length) ||
@@ -228,7 +231,8 @@ export function Studio({ route }: { route: string }) {
     tool === "layers" && !published, published || busy || processing || !isFox, undefined, true);
   const dirty = cropAutosave.pending || separation.dirty ||
     JSON.stringify(normalizedEdit(edit)) !== JSON.stringify(normalizedEdit(picture?.edit)) ||
-    name.trim() !== picture?.name || JSON.stringify(tags) !== JSON.stringify(picture ? imageTags(picture) : []);
+    name.trim() !== picture?.name || JSON.stringify(tags) !== JSON.stringify(picture ? imageTags(picture) : []) ||
+    JSON.stringify(platformTags) !== JSON.stringify(picture?.platformTags ?? []);
   const saved = !!picture && !picture.isDraft;
   useEffect(() => {
     if (!createdLive2dProjectId || busy || cropAutosave.pending || dirty || !saved) return;
@@ -246,14 +250,7 @@ export function Studio({ route }: { route: string }) {
     }
   }, { active: busy || processing || checkingJob || cropAutosave.pending || separation.tracing,
     blocked: () => toast("작업 중에는 다른 기능이나 화면으로 전환할 수 없습니다. 작업 완료를 기다리거나 작업 취소를 눌러 주세요.") });
-  const options = library.devices.flatMap((d) =>
-    d.displays
-      .filter((s) => s.connected && s.canApplyWallpaper !== false)
-      .map((s) => ({ id: `${d.id}/${s.id}`, name: `${d.name} · ${s.name}` })),
-  );
-  const selectedTarget = options.some((o) => o.id === target)
-    ? target
-    : options[0]?.id || "";
+  const options = wallpaperTargets(library.devices, false);
   const dimensions = imageDimensions.src === (tool === "crop" && isFox ? backgroundSrc : picture?.src) ? imageDimensions : picture;
   const sourceWidth = dimensions?.width || 0;
   const sourceHeight = dimensions?.height || 0;
@@ -306,7 +303,7 @@ export function Studio({ route }: { route: string }) {
     } catch (error) { toast((error as Error).message); }
     finally { setBusy(false); }
   }
-  const draft = picture ? { ...picture, name: name.trim(), tags, genre: (tags[0] || unspecifiedTag) as Genre, edit } : null;
+  const draft = picture ? { ...picture, name: name.trim(), tags, platformTags, genre: (tags[0] || unspecifiedTag) as Genre, edit } : null;
   async function save(silent = false) {
     if (!picture || published || saving.current || busy) return false;
     if (cropAutosave.pending) { toast("자르기 자동 저장을 마친 뒤 다시 시도해 주세요."); return false; }
@@ -317,7 +314,7 @@ export function Studio({ route }: { route: string }) {
     const snapshot = { ...edit };
     try {
       const savedAt = cloud ? (await saveImageEdit({ ...draft!, edit: snapshot })).savedAt : new Date().toISOString();
-      const replace = (p: typeof picture) => p.id === picture.id ? { ...p, isDraft: false, name: name.trim(), tags, genre: (tags[0] || unspecifiedTag) as Genre,
+      const replace = (p: typeof picture) => p.id === picture.id ? { ...p, isDraft: false, name: name.trim(), tags, platformTags, genre: (tags[0] || unspecifiedTag) as Genre,
         features: imageFeatures({ ...p, edit: snapshot }), edit: snapshot, savedAt } : p;
       const success = update((value) => ({ ...value,
         images: value.images.map(replace), assets: value.assets?.map(replace),
@@ -788,10 +785,12 @@ export function Studio({ route }: { route: string }) {
           </>
         )}
         {tool === "tags" && <>
-          <h3>태그 수정</h3>
+          <h3>상위 태그</h3>
+          <PlatformTagOptions selected={platformTags} change={setPlatformTags} />
+          <h3>하위 태그</h3>
           <label className="studio-tag-all"><input ref={allTags} type="checkbox" checked={allTagsSelected(tags)}
             onChange={event => setTags(event.target.checked ? [...selectableTags] : [])} /><span>전체 선택</span></label>
-          <div className="studio-tag-options" role="group" aria-label="이미지 태그">
+          <div className="studio-tag-options" role="group" aria-label="하위 태그">
             {selectableTags.map(tag => <label key={tag}><input type="checkbox" checked={tags.includes(tag)}
               onChange={event => setTags(current => event.target.checked ? [...current, tag] : current.filter(value => value !== tag))} /><span>{tag}</span></label>)}
           </div>
@@ -868,57 +867,14 @@ export function Studio({ route }: { route: string }) {
         }} />}
       {dialog === "info" && <ImageInformation picture={picture}
         layerCount={picture.layers?.length ?? (isFox ? foregroundSrcs.length + 1 : 1)} close={() => setDialog(null)} />}
-      {dialog === "apply" && (
-        <Modal title="배경화면 적용" close={() => setDialog(null)}>
-          <img className="share-preview" src={picture.src} alt={picture.name} />
-          <label>
-            기기 및 화면
-            <select
-              value={selectedTarget}
-              onChange={(e) => setTarget(e.target.value)}
-            >
-              {options.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {(isCharacterProject || (!picture.background && (picture.foregrounds?.length ?? 0) >= 2)) &&
-            library.devices.some(device => device.platform === "Windows" && device.id === selectedTarget.split("/")[0]) &&
-            <label className="studio-rig-toggle">
-              <input type="checkbox" checked={applyPcLiveMotion}
-                onChange={event => setApplyPcLiveMotion(event.target.checked)} />
-              <span>PC에서 Live2D 파츠 움직임 켜고 적용</span>
-            </label>}
-          {(isCharacterProject || (!picture.background && (picture.foregrounds?.length ?? 0) >= 2)) && applyPcLiveMotion &&
-            library.devices.some(device => device.platform === "Windows" && device.id === selectedTarget.split("/")[0]) &&
-            <p className="studio-rig-helper">기존 공유 작품은 그대로 두고, PC 마우스 움직임과 리깅이 켜진 별도 배경화면을 만들어 적용합니다. 분리되지 않은 신체 부위는 독립적으로 움직일 수 없습니다.</p>}
-          <Notice>
-            {cloud
-              ? "연결 앱이 같은 계정으로 로그인한 상태에서 요청을 받아 적용합니다. 실제 적용 완료는 기기의 보고 이후 표시됩니다."
-              : "샘플 기기에 적용 요청을 만듭니다. 실제 PC·휴대폰 배경화면은 변경되지 않습니다. 기기 관리에서 샘플 동기화를 눌러 완료 상태를 확인하세요."}
-          </Notice>
-          <button
-            className="button primary full"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                const [d, s] = selectedTarget.split("/");
-                const usePcMotion = applyPcLiveMotion &&
-                  (isCharacterProject || (!picture.background && (picture.foregrounds?.length ?? 0) >= 2)) &&
-                  library.devices.some(device => device.platform === "Windows" && device.id === d);
-                const applied = await apply(draft || { ...picture, edit }, d, s,
-                  { enablePcLiveMotion: usePcMotion });
-                if (applied) setDialog(null);
-              } finally { setBusy(false); }
-            }}
-          >
-            적용 요청 저장 <ArrowRight size={17} />
-          </button>
-        </Modal>
-      )}
+      {dialog === "apply" && draft && <ApplyWallpaperDialog picture={draft} devices={library.devices}
+        busy={busy} pcMotionAvailable close={() => setDialog(null)}
+        confirm={async ({ picture: ready, deviceId, displayId, frame, pcMotion }) => {
+          setBusy(true);
+          try {
+            if (await apply(ready, deviceId, displayId, { frame, enablePcLiveMotion: pcMotion })) setDialog(null);
+          } finally { setBusy(false); }
+        }} />}
     </div>
   );
 }

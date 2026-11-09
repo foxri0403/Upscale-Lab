@@ -37,9 +37,14 @@ public sealed class GalleryController(IGalleryService galleryService) : Controll
         [FromQuery] string? search,
         [FromQuery] string? tag,
         [FromQuery] string[]? tags,
-        CancellationToken cancellationToken)
+        [FromQuery] string[]? platformTags,
+        [FromQuery] string? sort,
+        [FromQuery] bool untagged,
+        CancellationToken cancellationToken,
+        [FromQuery] int limit = 100)
     {
-        return Ok(await galleryService.GetAllAsync(User.GetOptionalUserId(), search, tag, cancellationToken, tags));
+        return Ok(await galleryService.GetAllAsync(User.GetOptionalUserId(), search, tag, cancellationToken, tags,
+            new ExploreQuery(search, sort, tags, platformTags, untagged, limit)));
     }
 
     [AllowAnonymous]
@@ -101,21 +106,15 @@ public sealed class GalleryController(IGalleryService galleryService) : Controll
         return StatusCode(StatusCodes.Status201Created, response);
     }
 
-    [Authorize]
+    [Authorize(Policy = "AccountSession")]
     [HttpPost("{id:guid}/likes")]
-    public async Task<IActionResult> Like(Guid id, CancellationToken cancellationToken)
-    {
-        await galleryService.LikeAsync(User.GetRequiredUserId(), id, cancellationToken);
-        return NoContent();
-    }
+    public async Task<ActionResult<GalleryEngagement>> Like(Guid id, CancellationToken cancellationToken) =>
+        Ok(await galleryService.SetLikeAsync(User.GetRequiredUserId(), id, true, cancellationToken));
 
-    [Authorize]
+    [Authorize(Policy = "AccountSession")]
     [HttpDelete("{id:guid}/likes")]
-    public async Task<IActionResult> Unlike(Guid id, CancellationToken cancellationToken)
-    {
-        await galleryService.UnlikeAsync(User.GetRequiredUserId(), id, cancellationToken);
-        return NoContent();
-    }
+    public async Task<ActionResult<GalleryEngagement>> Unlike(Guid id, CancellationToken cancellationToken) =>
+        Ok(await galleryService.SetLikeAsync(User.GetRequiredUserId(), id, false, cancellationToken));
 
     [AllowAnonymous]
     [HttpGet("{id:guid}/preview-url")]

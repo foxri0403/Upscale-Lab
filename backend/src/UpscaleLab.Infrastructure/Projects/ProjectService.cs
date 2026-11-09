@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using UpscaleLab.Application.Common;
+using UpscaleLab.Application.Gallery;
 using UpscaleLab.Application.Images;
 using UpscaleLab.Application.Projects;
 using UpscaleLab.Infrastructure.Processing;
@@ -85,6 +86,10 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
 
         try
         {
+            var gallery = dbContext.GalleryPosts.Where(x => x.Id == command.SourceGalleryPostId &&
+                (x.IsPublic || x.UserId == userId));
+            var source = command.SourceGalleryPostId is null ? null : await gallery.SingleOrDefaultAsync(cancellationToken)
+                ?? throw new NotFoundException("공유 게시물을 찾을 수 없습니다.");
             var image = new Image
             {
                 UserId = userId,
@@ -101,12 +106,30 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
                 UserId = userId,
                 OriginalImage = image,
                 Title = command.Title.Trim(),
-                SavedEditJson = command.IsDraft ? ProjectDraftState.Pending : null
+                SavedEditJson = command.IsDraft ? ProjectDraftState.Pending : source is null ? null :
+                    new ImageEditState(ImageEditState.DefaultMotionStrength, "original", "original", 1, true,
+                        DateTime.UtcNow, GalleryTagCompatibility.Resolve(source.Tag, source.Tags, source.Description)
+                            .Where(tag => tag != GalleryTagCatalog.Unspecified).ToArray(),
+                        MotionDefaultsVersion: 1, PlatformTags: source.PlatformTags).ToJson()
             };
+
+            var countSave = source is not null && source.UserId != userId;
+            await using var transaction = countSave && dbContext.Database.IsRelational()
+                ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+            if (transaction is not null)
+            {
+                var changed = await gallery.ExecuteUpdateAsync(update => update
+                    .SetProperty(x => x.SaveCount, x => x.SaveCount + 1)
+                    .SetProperty(x => x.UpdatedAt, DateTime.UtcNow), cancellationToken);
+                if (changed == 0) throw new NotFoundException("공유 게시물을 찾을 수 없습니다.");
+            }
+            else if (countSave && source is not null) source.SaveCount++;
 
             dbContext.LiveLayerProjects.Add(project);
             await dbContext.SaveChangesAsync(cancellationToken);
-            return MapDetail(project);
+            var result = MapDetail(project);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+            return result;
         }
         catch
         {

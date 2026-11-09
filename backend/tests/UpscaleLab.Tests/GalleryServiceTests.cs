@@ -215,29 +215,58 @@ public sealed class GalleryServiceTests
     }
 
     [Fact]
-    public async Task CompletedDownloads_ArePersistedAndReturnedByListAndDetail()
+    public async Task ExploreFiltersAndRanksBeforeLimitingAndKeepsOneLikePerViewer()
+    {
+        await using var db = CreateDbContext();
+        var author = new User { Email = "author@example.invalid", Username = "author", PasswordHash = "hash" };
+        var viewer = new User { Email = "viewer@example.invalid", Username = "viewer", PasswordHash = "hash" };
+        db.Users.Add(viewer);
+        var image = CreateImage(author, "sky.png");
+        db.Images.Add(image);
+        await db.SaveChangesAsync();
+        var service = new GalleryService(db, new FakeStorageService());
+        var ranked = await service.CreateAsync(author.Id,
+            new(image.Id, "푸른 하늘", null, Tags: ["풍경"], PlatformTags: ["tablet", "pc", "pc"]), CancellationToken.None);
+        await service.CreateAsync(author.Id,
+            new(image.Id, "밝은 하늘", null, Tags: ["풍경"], PlatformTags: ["pc"]), CancellationToken.None);
+        var mobile = await service.CreateAsync(author.Id,
+            new(image.Id, "별이 뜬 하늘", null, Tags: ["SF"], PlatformTags: ["mobile"]), CancellationToken.None);
+
+        Assert.Equal(new[] { "pc", "tablet" }, ranked.PlatformTags);
+        await service.SetLikeAsync(viewer.Id, ranked.Id, true, CancellationToken.None);
+        Assert.Equal(new GalleryEngagement(1, true), await service.SetLikeAsync(viewer.Id, ranked.Id, true, CancellationToken.None));
+        await service.SetLikeAsync(viewer.Id, mobile.Id, true, CancellationToken.None);
+        await Assert.ThrowsAsync<NotFoundException>(() => service.SetLikeAsync(author.Id, ranked.Id, true, CancellationToken.None));
+        var match = Assert.Single(await service.GetAllAsync(viewer.Id, null, null, CancellationToken.None,
+            explore: new ExploreQuery("하늘", "likes", ["풍경"], ["pc"], Limit: 1)));
+        Assert.Equal(ranked.Id, match.Id);
+        Assert.True(match.IsLikedByCurrentUser);
+        Assert.Equal(new GalleryEngagement(0, false), await service.SetLikeAsync(viewer.Id, ranked.Id, false, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task PreviewAndLegacyDownloadCalls_DoNotCountAsLibrarySaves()
     {
         await using var db = CreateDbContext();
         var user = new User { Email = "downloads@example.com", Username = "artist", PasswordHash = "hash" };
-        var post = new GalleryPost { User = user, Image = CreateImage(user, "photo.png"), Title = "Photo" };
+        var post = new GalleryPost { User = user, Image = CreateImage(user, "photo.png"), Title = "Photo",
+            DownloadCount = 99, SaveCount = 2 };
         db.GalleryPosts.Add(post);
         await db.SaveChangesAsync();
         var service = new GalleryService(db, new FakeStorageService());
 
         await service.CreateDownloadUrlAsync(post.Id, null, CancellationToken.None, countDownload: false);
         await service.CreatePreviewUrlAsync(post.Id, null, CancellationToken.None);
-        Assert.Equal(0, (await db.GalleryPosts.SingleAsync()).DownloadCount);
-        Assert.Equal(1, (await service.RecordDownloadAsync(post.Id, null, CancellationToken.None)).DownloadCount);
         Assert.Equal(2, (await service.RecordDownloadAsync(post.Id, user.Id, CancellationToken.None)).DownloadCount);
+        Assert.Equal(2, (await service.RecordDownloadAsync(post.Id, null, CancellationToken.None)).DownloadCount);
 
         db.ChangeTracker.Clear();
         var saved = await db.GalleryPosts.SingleAsync();
-        Assert.Equal(2, saved.DownloadCount);
-        Assert.Equal(DateTimeKind.Utc, saved.UpdatedAt.Kind);
+        Assert.Equal(2, saved.SaveCount);
         Assert.Equal(2, Assert.Single(await service.GetAllAsync(null, null, null, CancellationToken.None)).DownloadCount);
         Assert.Equal(2, (await service.GetAsync(post.Id, null, CancellationToken.None)).Post.DownloadCount);
         await service.CreateDownloadUrlAsync(post.Id, null, CancellationToken.None);
-        Assert.Equal(3, (await service.GetAsync(post.Id, null, CancellationToken.None)).Post.DownloadCount);
+        Assert.Equal(2, (await service.GetAsync(post.Id, null, CancellationToken.None)).Post.DownloadCount);
     }
 
     [Fact]
@@ -256,7 +285,7 @@ public sealed class GalleryServiceTests
         await Assert.ThrowsAsync<NotFoundException>(() => service.RecordDownloadAsync(post.Id, Guid.NewGuid(), CancellationToken.None));
         await Assert.ThrowsAsync<NotFoundException>(() => service.RecordDownloadAsync(Guid.NewGuid(), user.Id, CancellationToken.None));
         Assert.Equal(0, (await db.GalleryPosts.SingleAsync()).DownloadCount);
-        Assert.Equal(1, (await service.RecordDownloadAsync(post.Id, user.Id, CancellationToken.None)).DownloadCount);
+        Assert.Equal(0, (await service.RecordDownloadAsync(post.Id, user.Id, CancellationToken.None)).DownloadCount);
     }
 
     [Fact]

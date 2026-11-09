@@ -35,6 +35,8 @@ dotnet publish src/UpscaleLab.Api -c Release -r linux-x64 --self-contained false
 
 배경 마스크는 AddSubjectMaskRefinement, 기기·화면·명령·결과물은 AddWebDeviceControl/AddCompanionInventory 등 현재 migration 체인을 따른다. 레이어 순서 편집과 선택 범위 보완은 기존 컬럼을 사용한다. 이미 운영 데이터가 생긴 테이블을 무조건 Down하거나 과거 SQL을 재실행하지 않는다.
 
+탐색의 상위 태그, 좋아요, 보관함 저장 집계를 포함하는 릴리스에서는 API 전환 전에 `20261109042148_AddGalleryDiscovery` 마이그레이션을 적용한다. 저장 집계는 적용 후 새로 생성된 사본부터 계산한다.
+
 ## 웹
 
 [웹 가이드](../web/README.md)의 build:cloud로 TypeScript·Vite·설치 파일을 검증한다. public/downloads의 manifest와 최신 EXE/APK를 새 릴리스에도 포함한다. 설치 파일의 크기·SHA-256을 빌드 전후 비교하고 다운로드가 404가 아닌지 확인한다.

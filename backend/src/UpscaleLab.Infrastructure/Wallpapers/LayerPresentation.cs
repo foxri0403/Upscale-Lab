@@ -12,15 +12,19 @@ internal sealed class LayerPresentation
     private readonly int cropWidth, cropHeight, originalWidth, originalHeight;
     private readonly int cropX, cropY;
     private readonly double factor;
-    public bool ChangesPixels => Settings.Filter != "original" || Settings.Crop != "original" || Settings.Scale != 1;
+    private readonly WallpaperFrameLayout? frame;
+    public bool ChangesPixels => Settings.Filter != "original" || Settings.Crop != "original" ||
+        Settings.Scale != 1 || Settings.Frame is not null;
     public LayerPresentation(WallpaperRenderSettings settings, int width, int height)
     {
         ImageEditState.Create(new(settings.Strength, settings.Filter, settings.Crop, settings.Scale, settings.Foreground, CropRegion: settings.CropRegion));
         Settings=settings;originalWidth=width;originalHeight=height;
         var selected=ImageCropGeometry.Resolve(width,height,settings.Crop,settings.CropRegion);
         cropX=selected.X;cropY=selected.Y;cropWidth=selected.Width;cropHeight=selected.Height;
-        factor=!ChangesPixels ? 1 : Math.Min(settings.Scale,4096.0/Math.Max(cropWidth,cropHeight));
-        Width=Math.Max(1,(int)Math.Round(cropWidth*factor));Height=Math.Max(1,(int)Math.Round(cropHeight*factor));
+        frame = settings.Frame is { } target ? WallpaperFrameLayout.Create(target, cropWidth, cropHeight) : null;
+        factor = frame?.Scale ?? (!ChangesPixels ? 1 : Math.Min(settings.Scale, 4096.0 / Math.Max(cropWidth, cropHeight)));
+        Width = frame?.Width ?? Math.Max(1, (int)Math.Round(cropWidth * factor));
+        Height = frame?.Height ?? Math.Max(1, (int)Math.Round(cropHeight * factor));
     }
     public WallpaperFile Transform(WallpaperFile file) => file with { X=file.X*factor,Y=file.Y*factor,
         MovementX=file.Role=="Background"?0:Width*.035*Settings.Strength/100,
@@ -33,17 +37,40 @@ internal sealed class LayerPresentation
     public HeadRigSettings? TransformRig(HeadRigSettings? rig)
     {
         if (rig is null) return null;
-        int X(int value) => (int)Math.Clamp(Math.Round(((value / 100.0 * originalWidth - cropX) / cropWidth) * 100), 0, 100);
-        int Y(int value) => (int)Math.Clamp(Math.Round(((value / 100.0 * originalHeight - cropY) / cropHeight) * 100), 0, 100);
+        int X(int value) => (int)Math.Clamp(Math.Round(((value / 100.0 * originalWidth - cropX) * factor +
+            (frame?.Left ?? 0)) / (frame is null ? cropWidth * factor : Width) * 100), 0, 100);
+        int Y(int value) => (int)Math.Clamp(Math.Round(((value / 100.0 * originalHeight - cropY) * factor +
+            (frame?.Top ?? 0)) / (frame is null ? cropHeight * factor : Height) * 100), 0, 100);
         return rig with { PivotX = X(rig.PivotX), PivotY = Y(rig.PivotY),
             TorsoPivotY = Y(rig.TorsoPivotY), LowerPivotY = Y(rig.LowerPivotY) };
     }
-    public byte[] Render(byte[] bytes)
+    public byte[] Render(byte[] bytes, bool fillBackground = false)
     {
         using var image=new MagickImage(bytes);
         if(image.Width!=originalWidth || image.Height!=originalHeight)throw new InvalidDataException("레이어 크기가 일치하지 않습니다.");
-        image.Crop(new MagickGeometry(cropX,cropY,(uint)cropWidth,(uint)cropHeight));image.ResetPage();
-        image.Resize((uint)Width,(uint)Height);
+        var left = 0;
+        var top = 0;
+        var outputWidth = Width;
+        var outputHeight = Height;
+        var input = new MagickGeometry(cropX, cropY, (uint)cropWidth, (uint)cropHeight);
+        if (frame is not null)
+        {
+            left = Math.Max(0, (int)Math.Round(frame.Left));
+            top = Math.Max(0, (int)Math.Round(frame.Top));
+            var right = Math.Min(Width, (int)Math.Round(frame.Left + cropWidth * factor));
+            var bottom = Math.Min(Height, (int)Math.Round(frame.Top + cropHeight * factor));
+            outputWidth = Math.Max(1, right - left);
+            outputHeight = Math.Max(1, bottom - top);
+            // Clip before resizing so extreme aspect ratios never allocate an oversized bitmap.
+            var x = Math.Clamp((int)Math.Round((left - frame.Left) / factor), 0, cropWidth - 1);
+            var y = Math.Clamp((int)Math.Round((top - frame.Top) / factor), 0, cropHeight - 1);
+            var w = Math.Clamp((int)Math.Round(outputWidth / factor), 1, cropWidth - x);
+            var h = Math.Clamp((int)Math.Round(outputHeight / factor), 1, cropHeight - y);
+            input = new MagickGeometry(cropX + x, cropY + y, (uint)w, (uint)h);
+        }
+        image.Crop(input);
+        image.ResetPage();
+        image.Resize(new MagickGeometry((uint)outputWidth, (uint)outputHeight) { IgnoreAspectRatio = true });
         if(Settings.Filter!="original")
         {
             image.Depth=8;var pixels=image.ToByteArray(MagickFormat.Rgba);
@@ -60,7 +87,14 @@ internal sealed class LayerPresentation
                 }
                 pixels[i]=(byte)Math.Clamp(Math.Round(r*255),0,255);pixels[i+1]=(byte)Math.Clamp(Math.Round(g*255),0,255);pixels[i+2]=(byte)Math.Clamp(Math.Round(b*255),0,255);
             }
-            image.Read(pixels,new MagickReadSettings{Format=MagickFormat.Rgba,Width=(uint)Width,Height=(uint)Height,Depth=8});
+            image.Read(pixels,new MagickReadSettings{Format=MagickFormat.Rgba,Width=(uint)outputWidth,Height=(uint)outputHeight,Depth=8});
+        }
+        if (frame is not null)
+        {
+            using var canvas = new MagickImage(fillBackground ? new MagickColor("#181c24") : MagickColors.Transparent,
+                (uint)Width, (uint)Height);
+            canvas.Composite(image, left, top, CompositeOperator.Over);
+            return canvas.ToByteArray(MagickFormat.Png);
         }
         return image.ToByteArray(MagickFormat.Png);
     }
