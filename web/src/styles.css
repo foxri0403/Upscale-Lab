@@ -3007,10 +3007,16 @@ small {
 .explore-details-preview { border-radius: 8px; overflow: hidden; background: #f4f6fb; }
 .explore-details-preview .picture-view { aspect-ratio: 3/2; }
 .explore-details-preview img { object-fit: contain; }
-.explore-details-content h3 { font-size: 1.1428571rem; margin: 16px 0 10px; overflow-wrap: anywhere; }
+.explore-details-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 16px 0 10px; }
+.explore-details-title h3 { font-size: 1.1428571rem; margin: 0; overflow-wrap: anywhere; }
+.explore-details-title .explore-like-button { justify-self: end; gap: 5px; min-height: 44px; padding-inline: 8px; font-size: 0.7857143rem; white-space: nowrap; }
+.explore-like-button > svg { flex: none; }
 .explore-details-creator { display: flex; align-items: center; gap: 8px; font-size: 0.7857143rem; overflow-wrap: anywhere; }
 .explore-details-creator svg { flex-shrink: 0; color: var(--muted); }
 .explore-details-date { color: var(--muted); font-size: 0.7142857rem; margin-top: 5px; }
+.explore-details-stats { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0 0; color: var(--muted); font-size: 0.7857143rem; }
+.explore-details-stats > div { display: flex; flex-wrap: wrap; gap: 0 4px; }
+.explore-details-stats dd { margin: 0; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .explore-details-section { margin-top: 20px; padding-top: 17px; border-top: 1px solid var(--line); }
 .explore-details-section h4 { margin: 0 0 9px; font-size: 0.8571429rem; }
 .explore-details .image-information > div { grid-template-columns: auto minmax(0, 1fr); gap: 10px; padding: 9px 0; border: 0; font-size: 0.7142857rem; }

@@ -45,11 +45,22 @@ export function ExploreDetails({ picture, importing, own, local, close, save, op
               }}
               failed={() => setMeasured({ source, resolution: null })} />
           </div>
-          <h3>{picture.name}</h3>
+          <div className="explore-details-title">
+            <h3>{picture.name}</h3>
+            {toggleLike && <button type="button" className="button secondary explore-like-button"
+              aria-pressed={!!picture.liked} disabled={liking} onClick={toggleLike}>
+              {liking ? <Busy /> : <Heart size={16} fill={picture.liked ? "currentColor" : "none"} aria-hidden="true" />}
+              {picture.liked ? "좋아요 취소" : "좋아요"}
+            </button>}
+          </div>
           <div className="explore-details-creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} />{picture.creator || "작성자 정보 없음"}</div>
           {created && !Number.isNaN(created.getTime()) && <p className="explore-details-date">
             {created.toLocaleDateString("ko-KR")} 업로드
           </p>}
+          <dl className="explore-details-stats" aria-label="이미지 집계">
+            <div><dt>좋아요</dt><dd aria-live="polite">{(picture.likes ?? 0).toLocaleString("ko-KR")}개</dd></div>
+            <div><dt>다운로드</dt><dd aria-live="polite">{(picture.downloads ?? 0).toLocaleString("ko-KR")}회</dd></div>
+          </dl>
           <ImageFeatureBadges picture={picture} />
           <section className="explore-details-section">
             <h4>하위 태그</h4>
@@ -64,18 +75,11 @@ export function ExploreDetails({ picture, importing, own, local, close, save, op
             <dl className="image-information">
               <div><dt>해상도</dt><dd aria-live="polite">{resolution}</dd></div>
               <div><dt>파일 형식</dt><dd>{imageFileFormat(picture.src, picture.contentType)}</dd></div>
-              <div><dt>좋아요</dt><dd aria-live="polite">{(picture.likes ?? 0).toLocaleString("ko-KR")}개</dd></div>
-              <div><dt>다운로드</dt><dd aria-live="polite">{(picture.downloads ?? 0).toLocaleString("ko-KR")}회</dd></div>
             </dl>
           </section>
           {local && <Notice>로컬 샘플 갤러리입니다. 공개 범위는 현재 브라우저로 한정됩니다.</Notice>}
         </div>
         <div className="explore-details-actions">
-          {toggleLike && <button type="button" className="button secondary full explore-like-button"
-            aria-pressed={!!picture.liked} disabled={liking} onClick={toggleLike}>
-            {liking ? <Busy /> : <Heart size={18} fill={picture.liked ? "currentColor" : "none"} aria-hidden="true" />}
-            {picture.liked ? "좋아요 취소" : "좋아요"}
-          </button>}
           {!own && <button className="button primary full" disabled={importing} onClick={save}>
             {importing ? <Busy /> : <Plus size={18} />} 내 이미지에 저장
           </button>}
