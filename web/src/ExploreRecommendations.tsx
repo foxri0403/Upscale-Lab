@@ -2,29 +2,30 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Picture } from "./model";
 import { PictureView } from "./ui";
-import { EngagementBadges, PlatformBadges } from "./GalleryBadges";
 
-function Recommendation({ picture, open }: { picture: Picture; open: (picture: Picture) => void }) {
+function Recommendation({ picture, selected, toggleDetails }: {
+  picture: Picture; selected: boolean; toggleDetails: (picture: Picture) => void;
+}) {
   const [measured, setMeasured] = useState<{ source: string; ratio: number }>();
   const source = picture.background || picture.src;
   const ratio = (picture.width ?? 0) / (picture.height ?? 0);
   const hasRatio = Number.isFinite(ratio) && ratio > 0;
   const aspectRatio = hasRatio ? ratio : measured?.source === source ? measured.ratio : 16 / 9;
   return <button type="button" className="explore-recommendation" style={{ aspectRatio }}
-    onClick={() => open(picture)} aria-label={`${picture.name} 상세 보기`}>
+    onClick={() => toggleDetails(picture)} aria-label={`${picture.name} 상세 보기`}
+    aria-pressed={selected} aria-controls={selected ? "explore-details" : undefined}>
     <PictureView picture={picture} loaded={image => {
       if (!hasRatio && image.naturalWidth > 0 && image.naturalHeight > 0)
         setMeasured({ source, ratio: image.naturalWidth / image.naturalHeight });
     }} />
     <span className="explore-recommendation-title">{picture.name}</span>
-    <PlatformBadges picture={picture} />
-    <EngagementBadges picture={picture} />
   </button>;
 }
 
-export function ExploreRecommendations({ pictures, open, ranked }: {
+export function ExploreRecommendations({ pictures, selectedId, toggleDetails, ranked }: {
   pictures: Picture[];
-  open: (picture: Picture) => void;
+  selectedId?: string;
+  toggleDetails: (picture: Picture) => void;
   ranked: boolean;
 }) {
   const id = useId();
@@ -66,7 +67,7 @@ export function ExploreRecommendations({ pictures, open, ranked }: {
     </div>
     <div className="explore-recommendations-carousel">
       <div className="explore-recommendations-rail" ref={rail} id={`${id}-rail`}>
-        {pictures.map(picture => <Recommendation key={picture.id} picture={picture} open={open} />)}
+        {pictures.map(picture => <Recommendation key={picture.id} picture={picture} selected={picture.id === selectedId} toggleDetails={toggleDetails} />)}
       </div>
       {!(edges.start && edges.end) && <>
         <button type="button" className="explore-recommendations-arrow previous" aria-label="이전 추천 이미지"

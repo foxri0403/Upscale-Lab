@@ -186,7 +186,6 @@
 .explore-recommendation:focus-visible { outline-offset: -3px; }
 .explore-recommendation .picture-view { width: 100%; height: 100%; }
 .explore-recommendation img { object-fit: contain; }
-.explore-recommendation .image-platform-badges { bottom: 39px; }
 .explore-recommendation-title {
   position: absolute;
   left: 0;

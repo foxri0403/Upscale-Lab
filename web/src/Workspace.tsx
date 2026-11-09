@@ -733,7 +733,11 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const likeRequest = useRef(false);
   const [preview, setPreview] = useState<Picture | null>(null);
   const previewTrigger = useRef<HTMLElement | null>(null);
-  function openDetails(picture: Picture) {
+  function toggleDetails(picture: Picture) {
+    if (preview?.id === picture.id) {
+      setPreview(null);
+      return;
+    }
     const active = document.activeElement;
     previewTrigger.current = active instanceof HTMLElement
       ? active.closest(".image-card")?.querySelector<HTMLButtonElement>(".image-card-cover") || active
@@ -974,7 +978,8 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           </button>
         )}
       </div>
-      {explore && <ExploreRecommendations pictures={recommendations} open={openDetails} ranked={hasLikedRecommendations} />}
+      {explore && <ExploreRecommendations pictures={recommendations} selectedId={preview?.id}
+        toggleDetails={toggleDetails} ranked={hasLikedRecommendations} />}
       {explore && <h2 className="explore-list-title">공유 이미지</h2>}
       <div className="gallery-toolbar">
         <label className="search-field">
@@ -1047,7 +1052,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
               liking={liking}
               selected={explore && detailsOpen && preview?.id === p.id}
               open={() => {
-                if (explore) openDetails(p);
+                if (explore) toggleDetails(p);
                 else void openOwnPicture(p);
               }}
               rename={() => {
