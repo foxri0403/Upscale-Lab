@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { Monitor, Plus, SquarePen, X } from "lucide-react";
+import { Heart, Monitor, Plus, SquarePen, X } from "lucide-react";
 import { CreatorAvatar } from "./CreatorAvatar";
 import type { Picture } from "./model";
-import { imageTags } from "./image-tags";
 import { imageFileFormat, imageResolution } from "./image-information";
 import { ImageFeatureBadges } from "./ImageFeatureBadges";
 import { Busy, Notice, PictureView } from "./ui";
-import { EngagementBadges, PlatformBadges } from "./GalleryBadges";
+import { LowerTagList, PlatformTagList } from "./GalleryBadges";
 
 export function ExploreDetails({ picture, importing, own, local, close, save, openStudio, apply, toggleLike, liking }: {
   picture: Picture;
@@ -45,8 +44,6 @@ export function ExploreDetails({ picture, importing, own, local, close, save, op
                   setMeasured({ source, resolution: imageResolution(image.naturalWidth, image.naturalHeight) });
               }}
               failed={() => setMeasured({ source, resolution: null })} />
-            <PlatformBadges picture={picture} />
-            <EngagementBadges picture={picture} toggleLike={toggleLike} busy={liking} />
           </div>
           <h3>{picture.name}</h3>
           <div className="explore-details-creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} />{picture.creator || "작성자 정보 없음"}</div>
@@ -54,22 +51,31 @@ export function ExploreDetails({ picture, importing, own, local, close, save, op
             {created.toLocaleDateString("ko-KR")} 업로드
           </p>}
           <ImageFeatureBadges picture={picture} />
+          <section className="explore-details-section">
+            <h4>하위 태그</h4>
+            <LowerTagList picture={picture} />
+          </section>
+          <section className="explore-details-section">
+            <h4>상위 태그</h4>
+            <PlatformTagList picture={picture} />
+          </section>
           <section className="explore-details-section" aria-label="이미지 정보">
             <h4>이미지 정보</h4>
             <dl className="image-information">
               <div><dt>해상도</dt><dd aria-live="polite">{resolution}</dd></div>
               <div><dt>파일 형식</dt><dd>{imageFileFormat(picture.src, picture.contentType)}</dd></div>
+              <div><dt>좋아요</dt><dd aria-live="polite">{(picture.likes ?? 0).toLocaleString("ko-KR")}개</dd></div>
+              <div><dt>다운로드</dt><dd aria-live="polite">{(picture.downloads ?? 0).toLocaleString("ko-KR")}회</dd></div>
             </dl>
-          </section>
-          <section className="explore-details-section" aria-label="하위 태그">
-            <h4>하위 태그</h4>
-            <div className="explore-details-tags">
-              {imageTags(picture).length ? imageTags(picture).map(tag => <span key={tag}>{tag}</span>) : <span>하위 태그 없음</span>}
-            </div>
           </section>
           {local && <Notice>로컬 샘플 갤러리입니다. 공개 범위는 현재 브라우저로 한정됩니다.</Notice>}
         </div>
         <div className="explore-details-actions">
+          {toggleLike && <button type="button" className="button secondary full explore-like-button"
+            aria-pressed={!!picture.liked} disabled={liking} onClick={toggleLike}>
+            {liking ? <Busy /> : <Heart size={18} fill={picture.liked ? "currentColor" : "none"} aria-hidden="true" />}
+            {picture.liked ? "좋아요 취소" : "좋아요"}
+          </button>}
           {!own && <button className="button primary full" disabled={importing} onClick={save}>
             {importing ? <Busy /> : <Plus size={18} />} 내 이미지에 저장
           </button>}

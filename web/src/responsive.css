@@ -45,7 +45,7 @@
   .image-grid, .explore-page .image-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 14px; }
   .image-card .image-card-body { padding: 14px 14px 62px; min-width: 0; }
   .image-card .image-title { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; font-size: .95rem; }
-  .image-card .image-tags, .image-card .image-resolution { overflow-wrap: anywhere; font-size: .78rem; }
+  .image-card .image-resolution { overflow-wrap: anywhere; font-size: .78rem; }
   .image-card .card-actions { bottom: 10px; right: 10px; flex-direction: row; align-items: center; }
   .image-card .type-badge { white-space: normal; font-size: .72rem; }
   .card-menu > div { top: calc(100% + 6px); max-width: calc(100vw - 32px); }

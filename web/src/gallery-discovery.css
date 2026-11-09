@@ -1,4 +1,4 @@
-.image-card-cover, .explore-details-preview, .explore-recommendation { position: relative; }
+.image-card-cover, .explore-recommendation { position: relative; }
 .image-platform-badges, .image-engagement-badges {
   position: absolute;
   z-index: 1;
@@ -28,31 +28,39 @@
   font-variant-numeric: tabular-nums;
 }
 .image-overlay-badge > svg { flex: none; }
-.image-engagement-badges button {
-  cursor: pointer;
-  pointer-events: auto;
-  min-height: 40px;
-  min-width: 44px;
-}
-.explore-details-preview .image-engagement-badges { align-items: center; }
-.image-overlay-badge[aria-pressed="true"] svg { color: #ffb3bf; }
 .tag-section-title { display: block; padding: 4px 0; font-size: .9rem; }
-.platform-tag-options { display: flex; flex-wrap: wrap; gap: 6px; margin: 5px 0 12px; }
-.platform-tag-options label {
+.platform-tag-label {
   display: inline-flex;
-  flex-wrap: nowrap;
   align-items: center;
   gap: 5px;
-  min-height: 36px;
-  padding: 5px 7px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  font-size: .82rem;
-  cursor: pointer;
+  min-width: 0;
 }
-.platform-tag-options label:has(input:checked) { border-color: var(--primary); background: #edf3ff; }
-.platform-tag-options input[type="checkbox"] { width: 15px; height: 15px; flex: none; margin: 0; }
-.platform-tag-options svg { flex: none; }
+.tablet-landscape-icon { transform: rotate(90deg); }
+.image-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.image-tag-list > li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8f9fd;
+  color: #65738d;
+  padding: 4px 9px;
+  font-size: .7857143rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.platform-tag-label > svg, .image-tag-list > li > svg { flex: none; }
+.image-card-body > .image-tag-list { margin-top: 8px; }
+.explore-like-button[aria-pressed="true"] { color: #b62346; border-color: #edb3c1; background: #fff3f6; }
 .explore-recommendations { min-width: 0; margin: 0 0 26px; }
 .explore-recommendations-heading {
   display: flex;
@@ -147,7 +155,6 @@
 .wallpaper-frame-settings input[type="range"] { width: 100%; min-width: 0; height: 28px; margin: 0; }
 @media (max-width: 600px) {
   .gallery-toolbar .tag-selection-footer { flex-wrap: wrap; }
-  .platform-tag-options label { min-height: 40px; }
   .wallpaper-fit-options .button { flex-basis: 100px; font-size: .82rem; }
   .wallpaper-frame-settings label:has(input[type="range"]) { gap: 4px; }
 }

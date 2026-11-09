@@ -3,18 +3,16 @@ import {
   Check,
   MoreVertical,
   Pencil,
-  Tag,
   Trash2,
   Info,
 } from "lucide-react";
 import { PictureView } from "./ui";
-import { imageTags, tagSummary } from "./image-tags";
 import type { Picture } from "./model";
 import { isImageShared } from "./image-sharing";
 import { ImageSharingToggle } from "./ImageSharingToggle";
 import { ImageFeatureBadges } from "./ImageFeatureBadges";
 import { CreatorAvatar } from "./CreatorAvatar";
-import { EngagementBadges, PlatformBadges } from "./GalleryBadges";
+import { EngagementBadges, LowerTagList, PlatformBadges } from "./GalleryBadges";
 
 export function ImageCard({
   picture,
@@ -51,7 +49,6 @@ export function ImageCard({
   } | null>(null);
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const source = picture.background || picture.src;
-  const tags = imageTags(picture);
   const dimensions = decoded?.src === source ? decoded : picture;
   const resolution =
     dimensions.width && dimensions.height
@@ -92,15 +89,12 @@ export function ImageCard({
         <button className="image-title" onClick={open} title={picture.name}>
           {picture.name}
         </button>
-        <div className="image-tags" aria-label="하위 태그" title={tags.join(" · ") || "하위 태그 없음"}>
-          <Tag size={14} />
-          <span>{tagSummary(tags)}</span>
-        </div>
         <p className="image-resolution" aria-label={`${picture.name} 해상도`}>
           {resolution}
         </p>
         {explore && <span className="creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} /><span>{picture.creator}</span></span>}
         <ImageFeatureBadges picture={picture} />
+        <LowerTagList picture={picture} />
         {!explore && <div className="card-actions">
           {!explore && shared && (
             <span className="mobile-shared-badge" aria-label="업로드된 이미지">

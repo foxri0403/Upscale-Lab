@@ -52,7 +52,7 @@ export function TagSelector({
       <div className="tag-popover" role="group" aria-label="태그 필터">
         {platforms && changePlatforms && <>
           <strong className="tag-section-title">상위 태그</strong>
-          <PlatformTagOptions selected={platforms} change={changePlatforms} />
+          <PlatformTagOptions selected={platforms} change={changePlatforms} filter />
         </>}
         <strong className="tag-section-title">하위 태그</strong>
         <label className="tag-option tag-select-all">

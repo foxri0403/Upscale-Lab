@@ -1,24 +1,31 @@
-import { Download, Heart, Monitor, Smartphone, Tablet } from "lucide-react";
+import { Download, Heart, Monitor, Smartphone, Tablet, type LucideProps } from "lucide-react";
 import type { Picture } from "./model";
+import { imageTags } from "./image-tags";
 import { platformTags, selectPlatform, type PlatformTag } from "./platform-tags";
+
+function TabletLandscape(props: LucideProps) {
+  return <Tablet {...props} className="tablet-landscape-icon" />;
+}
 
 const platforms = {
   pc: { label: "PC", Icon: Monitor },
   mobile: { label: "모바일", Icon: Smartphone },
-  tablet: { label: "태블릿", Icon: Tablet },
+  tablet: { label: "태블릿", Icon: TabletLandscape },
 };
 
-export function PlatformTagOptions({ selected, change }: {
+export function PlatformTagOptions({ selected, change, filter = false }: {
   selected: PlatformTag[];
   change: (value: PlatformTag[]) => void;
+  filter?: boolean;
 }) {
-  return <div className="platform-tag-options" role="group" aria-label="상위 태그">
+  return <div className={filter ? "tag-options" : "studio-tag-options"} role="group" aria-label="상위 태그">
     {platformTags.map(tag => {
       const { label, Icon } = platforms[tag];
-      return <label key={tag}>
-        <input type="checkbox" checked={selected.includes(tag)}
-          onChange={event => change(selectPlatform(selected, tag, event.target.checked))} />
-        <Icon size={16} aria-hidden="true" /><span>{label}</span>
+      const name = <span className="platform-tag-label"><Icon size={16} aria-hidden="true" />{label}</span>;
+      const checkbox = <input type="checkbox" checked={selected.includes(tag)}
+        onChange={event => change(selectPlatform(selected, tag, event.target.checked))} />;
+      return <label key={tag} className={filter ? "tag-option" : undefined}>
+        {filter ? <>{name}{checkbox}</> : <>{checkbox}{name}</>}
       </label>;
     })}
   </div>;
@@ -36,20 +43,31 @@ export function PlatformBadges({ picture }: { picture: Picture }) {
   </span>;
 }
 
-export function EngagementBadges({ picture, toggleLike, busy }: {
-  picture: Picture;
-  toggleLike?: () => void;
-  busy?: boolean;
-}) {
+export function PlatformTagList({ picture }: { picture: Picture }) {
+  const selected = platformTags.filter(tag => picture.platformTags?.includes(tag));
+  return <ul className="image-tag-list" aria-label="상위 태그">
+    {selected.length ? selected.map(tag => {
+      const { label, Icon } = platforms[tag];
+      return <li key={tag}><Icon size={14} aria-hidden="true" />{label}</li>;
+    }) : <li>상위 태그 없음</li>}
+  </ul>;
+}
+
+export function LowerTagList({ picture }: { picture: Picture }) {
+  const tags = imageTags(picture);
+  return <ul className="image-tag-list" aria-label="하위 태그">
+    {tags.length ? tags.map(tag => <li key={tag}>{tag}</li>) : <li>하위 태그 없음</li>}
+  </ul>;
+}
+
+export function EngagementBadges({ picture }: { picture: Picture }) {
   const likes = picture.likes ?? 0;
   const downloads = picture.downloads ?? 0;
-  const heart = <><Heart size={17} aria-hidden="true" fill={picture.liked ? "currentColor" : "none"} />
-    <span>{likes.toLocaleString("ko-KR")}</span></>;
   return <span className="image-engagement-badges">
-    {toggleLike ? <button type="button" className="image-overlay-badge" onClick={toggleLike} disabled={busy}
-      aria-label={`좋아요 ${likes}개`} aria-pressed={!!picture.liked} title={picture.liked ? "좋아요 취소" : "좋아요"}>
-      {heart}
-    </button> : <span className="image-overlay-badge" aria-label={`좋아요 ${likes}개`}>{heart}</span>}
+    <span className="image-overlay-badge" aria-label={`좋아요 ${likes}개`}>
+      <Heart size={17} aria-hidden="true" fill={picture.liked ? "currentColor" : "none"} />
+      <span>{likes.toLocaleString("ko-KR")}</span>
+    </span>
     <span className="image-overlay-badge" title="내 이미지에 저장된 횟수" aria-label={`다운로드 ${downloads}회`}>
       <Download size={17} aria-hidden="true" /><span>{downloads.toLocaleString("ko-KR")}</span>
     </span>
