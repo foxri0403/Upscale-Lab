@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
-import { Images, Monitor, MousePointer2, RotateCcw, Smartphone } from "lucide-react";
+import { Images, Monitor, Mouse, Smartphone } from "lucide-react";
 import { defaultEdit, defaultHeadRig, type Device, type Display, type Picture } from "./model";
 import { wallpaperTargets } from "./explore-actions";
 import { Busy, Empty, Link, Modal, Notice } from "./ui";
@@ -9,16 +9,16 @@ import { FramedWallpaper } from "./FramedWallpaper";
 import { OptionPicker } from "./OptionPicker";
 import { useParallax } from "./use-parallax";
 import { defaultDemoInput } from "./demo-input";
-import { imageFeatures } from "./image-features";
 import { wallpaperExportPolicy } from "./wallpaper-export-policy";
 import { defaultFrame, displaySize, dragFrame, frameLayout, wallpaperCrop, type ScreenSize, type WallpaperFrame } from "./wallpaper-frame";
 
 type Target = ReturnType<typeof wallpaperTargets>[number] & { display: Display; platform: Device["platform"] };
 export type WallpaperSelection = { picture: Picture; deviceId: string; displayId: string; frame: WallpaperFrame; pcMotion: boolean };
 
-export function ApplyWallpaperDialog({ picture, pictures, devices, fixedTarget, fromExplore, pcMotionAvailable, busy, close, confirm }: {
+export function ApplyWallpaperDialog({ picture, pictures, currentPicture, devices, fixedTarget, fromExplore, pcMotionAvailable, busy, close, confirm }: {
   picture?: Picture;
   pictures?: Picture[];
+  currentPicture?: Picture;
   devices: Device[];
   fixedTarget?: string;
   fromExplore?: boolean;
@@ -29,16 +29,17 @@ export function ApplyWallpaperDialog({ picture, pictures, devices, fixedTarget, 
 }) {
   const targets = wallpaperTargets(devices, !!fromExplore);
   const [targetId, setTargetId] = useState(targets[0]?.id || "");
-  const [pictureId, setPictureId] = useState(pictures?.[0]?.id || "");
+  const [pictureId, setPictureId] = useState<string>();
   const target = targets.find(value => value.id === (fixedTarget || targetId)) || (fixedTarget ? undefined : targets[0]);
   const device = devices.find(value => value.id === target?.deviceId);
   const display = device?.displays.find(value => value.id === target?.displayId);
   const selected = target && device && display ? { ...target, display, platform: device.platform } : undefined;
-  const selectedPicture = picture || pictures?.find(value => value.id === pictureId) || pictures?.[0];
+  const choices = currentPicture && pictures ? [currentPicture, ...pictures.filter(value => value.id !== currentPicture.id)] : pictures;
+  const selectedPicture = picture ?? choices?.find(value => value.id === pictureId) ?? currentPicture;
   return <Modal title="배경화면 적용 미리보기" className="wallpaper-apply-dialog" wide close={() => { if (!busy) close(); }}>
-    {pictures && <div className="wallpaper-picker"><span>이미지 선택</span>
+    {choices && <div className="wallpaper-picker"><span>이미지 선택</span>
       <OptionPicker label="이미지 선택" value={selectedPicture?.id || ""} disabled={busy} change={setPictureId}
-        icon={<Images size={18} aria-hidden="true" />} options={pictures.map(value => ({ value: value.id, label: value.name }))} />
+        icon={<Images size={18} aria-hidden="true" />} options={choices.map(value => ({ value: value.id, label: value.name }))} />
     </div>}
     {!fixedTarget && targets.length > 0 && <div className="wallpaper-picker"><span>기기 및 화면</span>
       <OptionPicker label="기기 및 화면" value={selected?.id || ""} disabled={busy} change={setTargetId}
@@ -47,7 +48,7 @@ export function ApplyWallpaperDialog({ picture, pictures, devices, fixedTarget, 
     {!selected ? <Empty text="적용할 수 있는 화면이 없어요">
       <p>연결 앱에 로그인한 뒤 적용할 화면을 확인해 주세요.</p>
       {!fixedTarget && <Link to="/app/devices" className="button secondary">기기 관리로 이동</Link>}
-    </Empty> : !selectedPicture ? <Empty text="먼저 내 이미지에 사진을 추가해 주세요" />
+    </Empty> : !selectedPicture ? <Empty text={choices ? "이미지 정보 없음" : "먼저 내 이미지에 사진을 추가해 주세요"} />
       : <WallpaperApplyPreview key={`${selectedPicture.id}/${selected.id}/${selected.display.resolution}`}
         picture={selectedPicture} target={selected} fromExplore={fromExplore} pcMotionAvailable={pcMotionAvailable}
         busy={busy} confirm={confirm} />}
@@ -93,7 +94,10 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, pc
   pcMotionAvailable?: boolean; busy: boolean; confirm: (selection: WallpaperSelection) => Promise<void>;
 }) {
   const crop = wallpaperCrop(picture, size);
-  const [frame, setFrame] = useState(() => defaultFrame(screen, crop));
+  const [frame, setFrame] = useState(() => {
+    const previous = picture.wallpaperFrame;
+    return previous?.width === screen.width && previous.height === screen.height ? previous : defaultFrame(screen, crop);
+  });
   const [pcMotion, setPcMotion] = useState(true);
   const [testing, setTesting] = useState(false);
   const [testError, setTestError] = useState("");
@@ -108,14 +112,9 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, pc
   const showPcMotion = pcMotionAvailable && windows && characterParts;
   const enablePcMotion = !!showPcMotion && pcMotion;
   const { layered } = wallpaperExportPolicy(picture, enablePcMotion ? { ...edit, foreground: true } : edit);
-  const legacyMotion = picture.legacyMotion && !edit.mouseEnabled && !edit.gyroEnabled;
-  const appliedMotion = enablePcMotion || (windows ? edit.mouseEnabled : edit.gyroEnabled) || legacyMotion;
-  const motionLabel = appliedMotion ? (windows ? "마우스 움직임" : "자이로센서") : "움직임 꺼짐";
-  const wallpaperMode = layered ? `Live 2D · ${characterParts ? "캐릭터 파츠" : "배경·피사체 레이어"} · ${motionLabel}` : "정적 배경화면";
-  const techniques = imageFeatures(picture).filter(feature => !layered || feature !== "Live 2D");
   const gyro = testInput === "gyro";
   const motion = useParallax(layered && testing && !busy, edit.strength, !gyro, gyro);
-  const MotionIcon = gyro ? Smartphone : MousePointer2;
+  const MotionIcon = gyro ? Smartphone : Mouse;
   const rig = enablePcMotion ? { ...defaultHeadRig, ...edit.rig, enabled: true, bodyMode: "follow" as const } : edit.rig;
 
   useEffect(() => {
@@ -171,8 +170,11 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, pc
         <button type="button" className={`button ${frame.contain ? "secondary" : "primary"}`} aria-pressed={!frame.contain}
           onClick={() => setFrame({ ...frame, contain: false, zoom: 1 })}>화면 채우기</button>
         <button type="button" className={`button ${frame.contain ? "primary" : "secondary"}`} aria-pressed={frame.contain}
-          onClick={() => setFrame({ ...frame, contain: true, zoom: 1 })}>이미지 전체 표시</button>
-        <button type="button" className="button secondary" onClick={() => setFrame(defaultFrame(screen, crop))}><RotateCcw size={16} /> 초기화</button>
+          onClick={() => setFrame({ ...frame, contain: true, zoom: 1 })}>초기화</button>
+        <button type="button" className="button secondary wallpaper-motion-test" aria-pressed={testing}
+          aria-busy={motion.gyroPending} disabled={!layered || motion.gyroPending} onClick={() => void toggleMotionTest()}>
+          <MotionIcon size={18} aria-hidden="true" />움직임 테스트
+        </button>
       </div>
       <label>확대 {Math.round(frame.zoom * 100)}%
         <input type="range" min="1" max="3" step="0.01" value={frame.zoom}
@@ -193,14 +195,8 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, pc
         <span>PC에서 Live 2D 파츠 움직임 켜고 적용</span>
       </label>}
     </fieldset>
-    <button type="button" className="button secondary full wallpaper-motion-test" aria-pressed={testing}
-      aria-busy={motion.gyroPending} disabled={busy || !layered || motion.gyroPending} onClick={() => void toggleMotionTest()}>
-      <MotionIcon size={18} aria-hidden="true" />{gyro ? "자이로센서 움직임 테스트" : "마우스 움직임 테스트"}
-    </button>
     {testError && <p className="wallpaper-motion-status" role="status">{testError}</p>}
-    <Notice><strong>적용 기술</strong> · {[...techniques, wallpaperMode].join(" · ")}
-      {fromExplore && <> <br />이미지를 내 이미지에 저장한 뒤 적용 요청을 전송합니다.</>}
-    </Notice>
+    {fromExplore && <Notice>이미지를 내 이미지에 저장한 뒤 적용 요청을 전송합니다.</Notice>}
     <button className="button primary full" disabled={busy} onClick={() => void submit()}>
       {busy ? <Busy /> : <Monitor size={18} />}{busy ? "적용 요청 전송 중…" : "이 배치로 적용"}
     </button>

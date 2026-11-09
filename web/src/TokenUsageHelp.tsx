@@ -47,9 +47,8 @@ export function TokenUsageHelp() {
       소모 토큰량 확인
     </button>
     <div ref={panel} id={id} popover="auto" className="token-usage-popover" role="dialog"
-      aria-labelledby={`${id}-title`} style={{ visibility: open ? "visible" : "hidden" }}
+      aria-label="작업별 토큰 사용량" style={{ visibility: open ? "visible" : "hidden" }}
       onToggle={() => setOpen(!!panel.current?.matches(":popover-open"))}>
-      <h2 id={`${id}-title`}>작업별 토큰 사용량</h2>
       <TokenUsageTable compact />
     </div>
   </div>;

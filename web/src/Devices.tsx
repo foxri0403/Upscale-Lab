@@ -33,6 +33,9 @@ export function Devices() {
     ...(!cloud ? sampleImages() : []),
   ];
   const findPicture = (id: string) => allPictures.find((p) => p.id === id);
+  const targetDisplay = library.devices.find(device => device.id === target?.device.id)
+    ?.displays.find(display => display.id === target?.displayId);
+  const currentPicture = targetDisplay?.current ? findPicture(targetDisplay.current) : undefined;
   async function sync(device: Device) {
     if (cloud) {
       setRefreshing(device.id);
@@ -218,7 +221,7 @@ export function Devices() {
                               ) : (
                                 <div className="unknown-wallpaper">
                                   {mobile && display.canApplyWallpaper !== false ? <DeviceIcon size={30} /> : <Monitor size={30} />}
-                                  <span>{display.observation === "Cleared" ? "기본 바탕화면" : "이미지 정보 없음"}</span>
+                                  <span>이미지 정보 없음</span>
                                 </div>
                               )}
                               {mobile && current && display.target === "Lock" && (
@@ -230,8 +233,8 @@ export function Devices() {
                             {display.resolution}
                             {display.refreshRateHz != null && ` · ${Number(display.refreshRateHz.toFixed(2))} Hz`}
                           </p>
-                          <p className="display-wallpaper-title" title={current?.name || "기본 바탕화면"}>
-                            {current?.name || "기본 바탕화면"}
+                          <p className="display-wallpaper-title" title={current?.name || "이미지 정보 없음"}>
+                            {current?.name || "이미지 정보 없음"}
                           </p>
                           {desired && (
                             <div className="pending-wallpaper">
@@ -242,7 +245,7 @@ export function Devices() {
                           <button
                             className="button secondary full"
                             disabled={
-                              !library.images.length || !display.connected || display.canApplyWallpaper === false
+                              !display.connected || display.canApplyWallpaper === false
                             }
                             onClick={() => choose(device, display.id)}
                           >
@@ -263,7 +266,7 @@ export function Devices() {
           })}
         </div>
       )}
-      {target && <ApplyWallpaperDialog pictures={library.images} devices={library.devices}
+      {target && <ApplyWallpaperDialog pictures={library.images} currentPicture={currentPicture} devices={library.devices}
         fixedTarget={`${target.device.id}/${target.displayId}`} busy={busy} close={() => setTarget(null)}
         confirm={async ({ picture, deviceId, displayId, frame }) => {
           setBusy(true);

@@ -37,18 +37,16 @@
   width: min(380px, calc(100vw - 24px));
   max-height: calc(100dvh - 24px);
   overflow: auto;
-  padding: 16px;
+  padding: 0;
   background: white;
   color: var(--ink);
   border: 1px solid var(--line);
   border-radius: 10px;
   box-shadow: 0 10px 35px #17203315;
 }
-.token-usage-popover h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
 .token-usage-compact table { font-size: 12px; }
 .token-usage-compact th, .token-usage-compact td { padding: 11px 10px; }
-.token-usage-compact .billing-usage-table { border-radius: 10px; }
-.token-usage-compact .billing-usage-note { font-size: 11px; margin-top: 10px; }
+.token-usage-compact .billing-usage-table { border: 0; border-radius: 0; }
 
 @media (max-width: 600px) {
   .token-usage th, .token-usage td { padding: 15px 10px; }

@@ -17,6 +17,6 @@ export function TokenUsageTable({ compact = false }: { compact?: boolean }) {
         </tbody>
       </table>
     </div>
-    <p className="billing-usage-note">단위: 토큰. 같은 프로젝트의 성공한 작업을 기준으로 계산합니다. FHD 재수정은 1토큰입니다. 처리 실패 시 환불되며, 직접 취소한 작업의 토큰은 반환되지 않습니다.</p>
+    {!compact && <p className="billing-usage-note">단위: 토큰. 같은 프로젝트의 성공한 작업을 기준으로 계산합니다. FHD 재수정은 1토큰입니다. 처리 실패 시 환불되며, 직접 취소한 작업의 토큰은 반환되지 않습니다.</p>}
   </div>;
 }
