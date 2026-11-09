@@ -87,19 +87,17 @@ export function ImageCard({
           }}
         />
         <PlatformBadges picture={picture} />
-        {explore && <EngagementBadges picture={picture} showLikes={false} />}
+        {explore && <EngagementBadges picture={picture} />}
       </button>
       <div className="image-card-body">
-        <button className="image-title" onClick={open} title={picture.name}>
-          {picture.name}
-        </button>
-        <div className="image-card-summary">
-          <div>
-            <p className="image-resolution" aria-label={`${picture.name} 해상도`}>{resolution}</p>
-            {explore && <span className="creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} /><span>{picture.creator}</span></span>}
-          </div>
+        <div className="image-card-title-row">
+          <button className="image-title" onClick={open} title={picture.name}>
+            {picture.name}
+          </button>
           {toggleLike && <GalleryLikeButton liked={!!picture.liked} disabled={liking} toggle={toggleLike} />}
         </div>
+        <p className="image-resolution" aria-label={`${picture.name} 해상도`}>{resolution}</p>
+        {explore && <span className="creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} /><span>{picture.creator}</span></span>}
         <ImageFeatureBadges picture={picture} />
         <LowerTagList picture={picture} />
         {!explore && <div className="card-actions">

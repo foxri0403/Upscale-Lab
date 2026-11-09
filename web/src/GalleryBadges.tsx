@@ -72,14 +72,14 @@ export function GalleryLikeButton({ liked, disabled, toggle }: {
   </button>;
 }
 
-export function EngagementBadges({ picture, showLikes = true }: { picture: Picture; showLikes?: boolean }) {
+export function EngagementBadges({ picture }: { picture: Picture }) {
   const likes = picture.likes ?? 0;
   const downloads = picture.downloads ?? 0;
   return <span className="image-engagement-badges">
-    {showLikes && <span className="image-overlay-badge" aria-label={`좋아요 ${likes}개`}>
+    <span className="image-overlay-badge" aria-label={`좋아요 ${likes}개`}>
       <Heart size={17} aria-hidden="true" fill={picture.liked ? "currentColor" : "none"} />
       <span>{likes.toLocaleString("ko-KR")}</span>
-    </span>}
+    </span>
     <span className="image-overlay-badge" title="내 이미지에 저장된 횟수" aria-label={`다운로드 ${downloads}회`}>
       <Download size={17} aria-hidden="true" /><span>{downloads.toLocaleString("ko-KR")}</span>
     </span>

@@ -60,9 +60,10 @@
 }
 .platform-tag-label > svg, .image-tag-list > li > svg { flex: none; }
 .image-card-body > .image-tag-list { margin-top: 8px; }
-.explore-page .image-card .image-card-body { padding-right: 16px; }
-.image-card-summary { display: flex; align-items: center; gap: 6px; }
-.image-card-summary > div { flex: 1; min-width: 0; }
+.explore-page .image-grid { align-items: start; }
+.explore-page .image-card .image-card-body { min-height: 0; padding-right: 16px; padding-bottom: 12px; }
+.image-card-title-row { display: flex; align-items: center; gap: 6px; }
+.image-card-title-row > .image-title { flex: 1; min-width: 0; }
 .gallery-like-button {
   display: inline-grid;
   place-items: center;
