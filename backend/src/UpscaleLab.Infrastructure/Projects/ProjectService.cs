@@ -44,7 +44,7 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
         if (await dbContext.GalleryPosts.AnyAsync(x => x.ProjectId == projectId && x.IsPublic, ct) ||
             await dbContext.WallpaperAssets.AnyAsync(x => x.SourceProjectId == projectId && x.IsPublic && !x.IsArchived, ct))
             throw new ConflictException("공유를 끈 뒤 사진 설정을 변경해 주세요.");
-        var previous = ImageEditState.FromJson(project.SavedEditJson);
+        var previous = ImageEditState.RequireEditable(project.SavedEditJson);
         var edit = ImageEditState.Create(request, previous);
         if (ProjectDraftState.IsDiscarded(project.SavedEditJson))
             throw new NotFoundException("폐기된 임시 이미지입니다.");
@@ -62,6 +62,7 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
         var project = await dbContext.LiveLayerProjects.SingleOrDefaultAsync(
             x => x.Id == projectId && x.UserId == userId, ct)
             ?? throw new NotFoundException("프로젝트를 찾을 수 없습니다.");
+        ImageEditState.RequireEditable(project.SavedEditJson);
         if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Length > 160)
             throw new ValidationException("이미지 이름은 1~160자로 입력해 주세요.");
         if (await dbContext.GalleryPosts.AnyAsync(x => x.ProjectId == projectId && x.IsPublic, ct) ||
@@ -107,10 +108,9 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
                 OriginalImage = image,
                 Title = command.Title.Trim(),
                 SavedEditJson = command.IsDraft ? ProjectDraftState.Pending : source is null ? null :
-                    new ImageEditState(ImageEditState.DefaultMotionStrength, "original", "original", 1, true,
-                        DateTime.UtcNow, GalleryTagCompatibility.Resolve(source.Tag, source.Tags, source.Description)
-                            .Where(tag => tag != GalleryTagCatalog.Unspecified).ToArray(),
-                        MotionDefaultsVersion: 1, PlatformTags: source.PlatformTags).ToJson()
+                    (ImageEditState.Original().WithTags(
+                        GalleryTagCompatibility.Resolve(source.Tag, source.Tags, source.Description).ToArray(), source.PlatformTags)
+                        with { IsReadOnly = source.UserId != userId }).ToJson()
             };
 
             var countSave = source is not null && source.UserId != userId;
@@ -198,6 +198,7 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
         {
             throw new NotFoundException("레이어를 찾을 수 없습니다.");
         }
+        ImageEditState.RequireEditable(layer.Project.SavedEditJson);
 
         layer.Depth = request.Depth ?? layer.Depth;
         layer.PositionX = request.PositionX ?? layer.PositionX;
@@ -218,6 +219,7 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
             ?? throw new NotFoundException("프로젝트를 찾을 수 없습니다.");
         if (ProjectDraftState.IsDiscarded(project.SavedEditJson))
             throw new NotFoundException("프로젝트를 찾을 수 없습니다.");
+        ImageEditState.RequireEditable(project.SavedEditJson);
         if (await dbContext.GalleryPosts.AnyAsync(x => x.ProjectId == projectId && x.IsPublic, cancellationToken) ||
             await dbContext.WallpaperAssets.AnyAsync(x => x.SourceProjectId == projectId && x.IsPublic && !x.IsArchived, cancellationToken))
             throw new ConflictException("공유를 끈 뒤 레이어 순서를 편집해 주세요.");

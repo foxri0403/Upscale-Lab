@@ -4,7 +4,7 @@ import type { VerificationTiming } from "./signup-validation";
 import type { ConsentValues } from "./CopyrightConsent";
 export type RegistrationChallenge = { email: string; username: string; token: string; expiresAt: string; termsVersion: string };
 export type RegistrationResponse = VerificationTiming & { email: string; username: string; requiresEmailVerification: boolean; cancellationToken: string; registration?: RegistrationChallenge };
-export type SavedEdit = Edit & { savedAt: string; tags?: string[]; platformTags?: Picture["platformTags"] };
+export type SavedEdit = Edit & { savedAt: string; tags?: string[]; platformTags?: Picture["platformTags"]; isReadOnly?: boolean };
 declare global {
   interface Window {
     __UPSCALE_CONFIG__?: { apiBaseUrl?: string; mode?: "cloud" | "demo" };

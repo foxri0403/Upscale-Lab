@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using UpscaleLab.Application.Images;
 using ImageMagick;
 using Microsoft.Extensions.Logging;
 using UpscaleLab.Application.Common;
@@ -48,6 +49,7 @@ public sealed class ProjectProcessingService(
             ?? throw new NotFoundException("프로젝트를 찾을 수 없습니다.");
 
         if (ProjectDraftState.IsDiscarded(project.SavedEditJson)) throw new NotFoundException("프로젝트를 찾을 수 없습니다.");
+        ImageEditState.RequireEditable(project.SavedEditJson);
 
         if (!Enum.IsDefined(request.Operation) || request.UpscaleFactor is not (2 or 4))
             throw new ValidationException("지원하는 작업 종류와 배율(2 또는 4)을 선택하세요.");

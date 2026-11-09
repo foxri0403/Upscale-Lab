@@ -101,6 +101,13 @@ public sealed class WallpapersController(IWallpaperService wallpapers) : Control
     public async Task<ActionResult<ImageEditState>> SaveEdit(Guid id, SaveImageEditRequest request, CancellationToken ct) =>
         Ok(await wallpapers.SaveEditAsync(User.GetRequiredUserId(), id, request, ct));
 
+    [HttpPatch("{id:guid}/metadata")]
+    public async Task<IActionResult> UpdateMetadata(Guid id, UpdateWallpaperMetadataRequest request, CancellationToken ct)
+    {
+        await wallpapers.UpdateMetadataAsync(User.GetRequiredUserId(), id, request, ct);
+        return NoContent();
+    }
+
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Archive(Guid id, CancellationToken ct)
     {

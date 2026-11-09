@@ -1304,15 +1304,6 @@ small {
   margin-top: 5px;
   white-space: normal;
 }
-.card-actions {
-  position: absolute;
-  right: 10px;
-  bottom: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  align-items: flex-end;
-}
 .mobile-shared-badge {
   display: inline-flex;
   align-items: center;

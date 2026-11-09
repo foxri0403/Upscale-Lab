@@ -54,6 +54,7 @@ export function projectPicture(p: Project): Picture {
     id: p.id,
     projectId: p.id,
     isDraft: p.isDraft ?? false,
+    isReadOnly: p.edit?.isReadOnly ?? false,
     detailsUntil: p.layers !== undefined ? Date.now() + 5 * 60000 : undefined,
     edit: p.edit ? { strength: p.edit.strength, motionDefaultsVersion: p.edit.motionDefaultsVersion, filter: p.edit.filter, crop: p.edit.crop,
       cropRegion: p.edit.cropRegion || undefined,
@@ -94,6 +95,7 @@ export async function assetPicture(a: Asset, fresh = false, signal?: AbortSignal
       ...cached.picture,
       sourceProjectId: a.sourceProjectId ?? undefined,
       isDeviceVariant: a.isDeviceVariant,
+      isReadOnly: a.edit?.isReadOnly ?? false,
       name: a.title,
       edit: a.edit ? { strength: a.edit.strength, motionDefaultsVersion: a.edit.motionDefaultsVersion, filter: a.edit.filter, crop: a.edit.crop,
         cropRegion: a.edit.cropRegion || undefined,
@@ -111,6 +113,7 @@ export async function assetPicture(a: Asset, fresh = false, signal?: AbortSignal
     id: `asset:${a.id}`,
     assetId: a.id,
     isDeviceVariant: a.isDeviceVariant,
+    isReadOnly: a.edit?.isReadOnly ?? false,
     legacyMotion: !!m.motionEnabled && m.mouseEnabled == null && m.gyroEnabled == null,
     edit: a.edit ? { strength: a.edit.strength, motionDefaultsVersion: a.edit.motionDefaultsVersion, filter: a.edit.filter, crop: a.edit.crop,
       cropRegion: a.edit.cropRegion || undefined,
@@ -262,6 +265,7 @@ export async function uploadProject(file: File, isDraft = true): Promise<Picture
  * with the same upscale / background / character-layer APIs as a new upload.
  */
 export async function prepareEditableProject(picture: Picture): Promise<Picture> {
+  if (picture.isReadOnly) throw new Error("다른 사용자의 저장 이미지는 편집할 수 없습니다.");
   if (!needsEditableCopy(picture)) return picture;
   // Source already represents saved pixels. Do not double-apply an old crop or
   // filter; always include every visible PNG layer when flattening the copy.
@@ -370,6 +374,7 @@ export async function detailPicture(p: Picture): Promise<Picture> {
   return result;
 }
 export async function createAsset(picture: Picture, frame?: WallpaperFrame): Promise<Asset> {
+  if (picture.isReadOnly && !frame) throw new Error("다른 사용자의 저장 이미지는 기기 배경화면에만 적용할 수 있습니다.");
   const edit = picture.edit || defaultEdit;
   let projectId = picture.projectId;
   // Preserve actual character PNG parts: publishing a flattened static PNG loses
@@ -378,7 +383,7 @@ export async function createAsset(picture: Picture, frame?: WallpaperFrame): Pro
   const legacyMotion = !!frame && !!picture.legacyMotion && !edit.mouseEnabled && !edit.gyroEnabled;
   const render = { strength: edit.strength, filter: edit.filter, crop: edit.crop, scale: edit.scale,
     foreground: edit.foreground, cropRegion: edit.cropRegion, frame };
-  if (picture.assetId && !picture.projectId && (layered || !picture.foregrounds?.length))
+  if (picture.assetId && !picture.projectId && (picture.isReadOnly || layered || !picture.foregrounds?.length))
     return post<Asset>(`/api/wallpapers/${picture.assetId}/snapshot`, {
       motionEnabled: legacyMotion || !!edit.mouseEnabled || !!edit.gyroEnabled, strength: edit.strength,
       mouseEnabled: legacyMotion ? undefined : !!edit.mouseEnabled, gyroEnabled: legacyMotion ? undefined : !!edit.gyroEnabled,

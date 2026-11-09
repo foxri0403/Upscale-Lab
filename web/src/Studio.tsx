@@ -241,7 +241,7 @@ export function Studio({ route }: { route: string }) {
     navigate(`/app/studio?id=${encodeURIComponent(createdLive2dProjectId)}&tool=live`);
     setCreatedLive2dProjectId(null);
   }, [createdLive2dProjectId, busy, cropAutosave.pending, dirty, saved]);
-  useUnsavedWarning(!!picture && (!saved || dirty), () => {
+  useUnsavedWarning(!!picture && !picture.isReadOnly && (!saved || dirty), () => {
     if (!picture || discarding.current) return;
     discarding.current = true;
     if (picture.isDraft) {
@@ -541,6 +541,9 @@ export function Studio({ route }: { route: string }) {
         </Link>
       </Empty>
     ) : <StudioUpload />;
+  if (picture.isReadOnly) return <Empty text="다른 사용자의 저장 이미지는 편집할 수 없어요">
+    <Link to="/app/images" className="button primary">내 이미지로 이동</Link>
+  </Empty>;
   return (
     <div className="studio-layout studio-editor">
       <h1 className="visually-hidden">{picture.name} 작업실</h1>

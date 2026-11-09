@@ -19,6 +19,7 @@ internal static class ProjectEffectResetter
         if (feature is not ("All" or "Upscale" or "Layers"))
             throw new ValidationException("초기화할 편집 기능을 확인해 주세요.");
         if (ProjectDraftState.IsDiscarded(project.SavedEditJson)) throw new NotFoundException("폐기된 임시 이미지입니다.");
+        ImageEditState.RequireEditable(project.SavedEditJson);
         if (project.ProcessingJobs.Any(x => x.Status is ProcessingJobStatus.Queued or ProcessingJobStatus.Processing))
             throw new ConflictException("이미지 처리가 완료된 뒤 적용을 취소해 주세요.");
         if (await db.GalleryPosts.AnyAsync(x => x.ProjectId == project.Id && x.IsPublic, ct) ||

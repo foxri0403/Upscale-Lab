@@ -28,12 +28,19 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         request.Rig?.Validate();
         var source = await Owned(userId, assetId, ct);
         var manifest = ReadManifest(source);
+        var edit = ImageEditState.FromJson(source.SavedEditJson);
+        if (edit?.IsReadOnly == true)
+        {
+            if (request.Render?.Frame is not { } frame)
+                throw new ConflictException("다른 사용자의 저장 이미지는 기기 배경화면에만 적용할 수 있습니다.");
+            request = new SnapshotWallpaperRequest(manifest.MotionEnabled, edit.Strength, manifest.MouseEnabled, manifest.GyroEnabled,
+                new(edit.Strength, edit.Filter, edit.Crop, edit.Scale, edit.Foreground, edit.CropRegion, frame), manifest.Rig);
+        }
         if (source.Mode != WallpaperMode.Live2D && request.Render is null) return Map(source);
         var presentation = request.Render is null ? null : new LayerPresentation(request.Render, manifest.Width, manifest.Height);
         var files = manifest.Files.Select(file => file.Role == "Background" ? file : file with {
             MovementX = manifest.Width * .035 * request.Strength / 100,
             MovementY = manifest.Height * .035 * request.Strength / 100 }).ToArray();
-        var edit = ImageEditState.FromJson(source.SavedEditJson);
         var independentMotion = request.MouseEnabled.HasValue || request.GyroEnabled.HasValue;
         if (presentation is null && manifest.MotionEnabled == request.MotionEnabled && files.SequenceEqual(manifest.Files) &&
             (!request.MouseEnabled.HasValue || request.MouseEnabled == (edit?.MouseEnabled ?? false)) &&
@@ -101,6 +108,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
     public async Task<WallpaperLink> CreateLinkAsync(Guid userId, Guid assetId, CancellationToken ct)
     {
         var asset = await Owned(userId, assetId, ct);
+        ImageEditState.RequireEditable(asset.SavedEditJson);
         asset.ShareToken ??= Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
         await db.SaveChangesAsync(ct);
         return new(asset.ShareToken);
@@ -124,7 +132,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
     {
         var asset = await Owned(userId, assetId, ct);
         if (asset.IsPublic) throw new ConflictException("공유를 끈 뒤 사진 설정을 변경해 주세요.");
-        var previous = ImageEditState.FromJson(asset.SavedEditJson);
+        var previous = ImageEditState.RequireEditable(asset.SavedEditJson);
         var edit = ImageEditState.Create(request, previous);
         if (request.Tags is null) edit = edit with { Tags = previous?.Tags };
         if (request.Title is not null) asset.Title = request.Title.Trim();
@@ -139,7 +147,9 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         var source = await shared.SingleOrDefaultAsync(ct)
             ?? throw new NotFoundException("공유 배경화면을 찾을 수 없습니다.");
         var manifest = ReadManifest(source);
-        var asset = new WallpaperAsset { UserId = userId, Title = source.Title, Mode = source.Mode, SavedEditJson = source.SavedEditJson };
+        var edit = ImageEditState.FromJson(source.SavedEditJson);
+        if (source.UserId != userId) edit = (edit ?? ImageEditState.Original()) with { IsReadOnly = true };
+        var asset = new WallpaperAsset { UserId = userId, Title = source.Title, Mode = source.Mode, SavedEditJson = edit?.ToJson() };
         var copied = new List<string>();
         try
         {
@@ -186,6 +196,15 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             .Include(x => x.ProcessingJobs)
             .SingleOrDefaultAsync(x => x.Id == request.ProjectId && x.UserId == userId, ct)
             ?? throw new NotFoundException("프로젝트를 찾을 수 없습니다.");
+        var sourceEdit = ImageEditState.FromJson(project.SavedEditJson);
+        if (sourceEdit?.IsReadOnly == true)
+        {
+            if (request.Render?.Frame is not { } frame || request.Mode != WallpaperMode.Static ||
+                request.ProcessingJobId.HasValue || (request.OriginProjectId ?? project.Id) != project.Id)
+                throw new ConflictException("다른 사용자의 저장 이미지는 기기 배경화면에만 적용할 수 있습니다.");
+            request = request with { Title = project.Title, MotionEnabled = false, MouseEnabled = false, GyroEnabled = false,
+                Render = new(sourceEdit.Strength, "original", "original", 1, true, Frame: frame), Rig = null };
+        }
         if (request.OriginProjectId.HasValue && !await db.LiveLayerProjects.AnyAsync(
             x => x.Id == request.OriginProjectId && x.UserId == userId, ct))
             throw new NotFoundException("원본 프로젝트를 찾을 수 없습니다.");
@@ -220,7 +239,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         var origin = request.OriginProjectId ?? project.Id;
         var metadataProject = origin == project.Id ? project : await db.LiveLayerProjects
             .Include(x => x.Layers).Include(x => x.ProcessingJobs).SingleAsync(x => x.Id == origin && x.UserId == userId, ct);
-        var metadata = ImageEditState.FromJson(metadataProject.SavedEditJson);
+        var metadata = origin == project.Id ? sourceEdit : ImageEditState.RequireEditable(metadataProject.SavedEditJson);
         request.Rig?.Validate();
         var selectedRig = request.Rig ?? metadata?.Rig;
         var presentation = request.Render is not null &&
@@ -254,7 +273,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             DateTime.UtcNow, metadata?.Tags, independentMotion ? metadata?.LiveEnabled == true : request.Mode == WallpaperMode.Live2D && request.MotionEnabled,
             request.MouseEnabled ?? metadata?.MouseEnabled ?? false, request.GyroEnabled ?? metadata?.GyroEnabled ?? false,
             MotionDefaultsVersion: 1, Rig: presentation?.TransformRig(selectedRig) ?? selectedRig,
-            PlatformTags: metadata?.PlatformTags).ToJson();
+            PlatformTags: metadata?.PlatformTags, IsReadOnly: metadata?.IsReadOnly == true).ToJson();
         var copied = new List<string>();
         try
         {
@@ -358,6 +377,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
     public async Task SetSharingAsync(Guid userId, Guid assetId, bool isPublic, CancellationToken ct)
     {
         var asset = await Owned(userId, assetId, ct);
+        if (isPublic) ImageEditState.RequireEditable(asset.SavedEditJson);
         asset.IsPublic = isPublic;
         await db.SaveChangesAsync(ct);
     }
@@ -365,10 +385,33 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
     public async Task RenameAsync(Guid userId, Guid assetId, RenameWallpaperRequest request, CancellationToken ct)
     {
         var asset = await Owned(userId, assetId, ct);
+        ImageEditState.RequireEditable(asset.SavedEditJson);
         if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Length > 160)
             throw new ValidationException("이미지 이름은 1~160자로 입력해 주세요.");
         if (asset.IsPublic) throw new ConflictException("공유를 끈 뒤 이미지 이름을 변경해 주세요.");
         asset.Title = request.Title.Trim();
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task UpdateMetadataAsync(Guid userId, Guid assetId, UpdateWallpaperMetadataRequest request, CancellationToken ct)
+    {
+        var asset = await Owned(userId, assetId, ct);
+        var title = request.Title?.Trim();
+        if (string.IsNullOrWhiteSpace(title) || title.Length > 160)
+            throw new ValidationException("이미지 이름은 1~160자로 입력해 주세요.");
+        var edit = ImageEditState.RequireEditable(asset.SavedEditJson) ?? ImageEditState.Original();
+        asset.Title = title;
+        asset.SavedEditJson = edit.WithTags(request.Tags, request.PlatformTags).ToJson();
+        if (asset.SourceProjectId is { } projectId)
+        {
+            var project = await db.LiveLayerProjects.SingleOrDefaultAsync(x => x.Id == projectId && x.UserId == userId, ct);
+            if (project is not null)
+            {
+                var projectEdit = ImageEditState.RequireEditable(project.SavedEditJson) ?? ImageEditState.Original();
+                project.Title = title;
+                project.SavedEditJson = projectEdit.WithTags(request.Tags, request.PlatformTags).ToJson();
+            }
+        }
         await db.SaveChangesAsync(ct);
     }
 

@@ -21,6 +21,7 @@ import {
   Plus,
   ArrowDownUp,
   X,
+  Monitor,
 } from "lucide-react";
 import { type Session } from "./auth";
 import { useMediaQuery } from "./use-media-query";
@@ -42,6 +43,8 @@ import {
   Modal,
   Empty,
   Busy,
+  Notice,
+  PictureView,
   navigate,
 } from "./ui";
 import { Studio } from "./Studio";
@@ -79,6 +82,7 @@ import { ExploreRecommendations } from "./ExploreRecommendations";
 import { useExploreResults } from "./use-explore-results";
 import "./gallery-discovery.css";
 import { displaySize, type WallpaperFrame } from "./wallpaper-frame";
+import { SharedImageSettings, type SharedImageMetadata } from "./SharedImageSettings";
 
 type SharedPicture = Picture & { ownerId: string };
 type ApplyOptions = { useExistingAsset?: boolean; enablePcLiveMotion?: boolean; frame?: WallpaperFrame };
@@ -89,6 +93,7 @@ type DemoContext = {
   toast: (message: string) => void;
   shared: SharedPicture[];
   publish: (picture: Picture, enabled: boolean) => Promise<boolean>;
+  editShared: (picture: Picture, metadata: SharedImageMetadata) => Promise<boolean>;
   apply: (
     picture: Picture,
     deviceId: string,
@@ -378,6 +383,10 @@ export function Workspace({
   }, [key]);
   async function publish(picture: Picture, enabled: boolean) {
     if (sharing.current) return false;
+    if (enabled && picture.isReadOnly) {
+      toast("다른 사용자의 저장 이미지는 다시 공유할 수 없습니다.");
+      return false;
+    }
     sharing.current = true;
     try {
       if (cloud) {
@@ -405,10 +414,13 @@ export function Workspace({
         );
         return true;
       }
-      const id = `shared-${session.id}-${picture.id}`;
+      const original = current.current.images.find(p => p.id === picture.id || p.sharedId === picture.id) ?? picture;
+      const id = !enabled && original.sharedId ? original.sharedId
+        : !enabled && picture.ownerId === session.id && picture.id.startsWith("shared-") ? picture.id
+        : `shared-${session.id}-${original.id}`;
       const previousShared = read<SharedPicture[]>("upscale.demo.shared.v1", []);
       let next = previousShared.filter(
-        (p) => p.id !== id,
+        (p) => p.id !== id || p.ownerId !== session.id,
       );
       if (enabled)
         next = [
@@ -428,7 +440,7 @@ export function Workspace({
       const saved = update((value) => ({
         ...value,
         images: value.images.map((p) =>
-          p.id === picture.id
+          p.id === original.id || p.sharedId === id
             ? { ...p, sharedId: enabled ? id : undefined,
                 galleryPostId: undefined, galleryPostIds: [], sharedAssetIds: [] }
             : p,
@@ -448,6 +460,32 @@ export function Workspace({
     } finally {
       sharing.current = false;
     }
+  }
+  async function editShared(picture: Picture, metadata: SharedImageMetadata) {
+    if (!isOwnExplorePicture(picture, session.id, [...current.current.images, ...(current.current.assets || [])]) ||
+        picture.isReadOnly) return false;
+    try {
+      if (cloud) {
+        const path = picture.galleryPostId ? `/api/gallery/${picture.galleryPostId}`
+          : `/api/wallpapers/${picture.assetId}/metadata`;
+        await request(path, { method: "PATCH", body: JSON.stringify(metadata) });
+        await refresh();
+      } else {
+        const previous = read<SharedPicture[]>("upscale.demo.shared.v1", []);
+        if (!previous.some(p => p.id === picture.id && p.ownerId === session.id))
+          throw new Error("공유 이미지를 찾을 수 없습니다.");
+        const edit = { name: metadata.title, tags: metadata.tags, platformTags: metadata.platformTags };
+        const next = previous.map(p => p.id === picture.id && p.ownerId === session.id ? { ...p, ...edit } : p);
+        write("upscale.demo.shared.v1", next);
+        if (!update(value => ({ ...value, images: value.images.map(p => p.sharedId === picture.id ? { ...p, ...edit } : p) }))) {
+          write("upscale.demo.shared.v1", previous);
+          return false;
+        }
+        setShared(next);
+      }
+      toast("이미지 이름과 태그를 변경했습니다.");
+      return true;
+    } catch (error) { toast((error as Error).message); return false; }
   }
   async function apply(picture: Picture, deviceId: string, displayId: string,
     options?: ApplyOptions) {
@@ -532,6 +570,7 @@ export function Workspace({
         toast,
         shared,
         publish,
+        editShared,
         apply,
         refresh,
         refreshDevices,
@@ -678,7 +717,7 @@ export function Workspace({
 }
 
 export function Gallery({ explore = false }: { explore?: boolean }) {
-  const { library, session, update, toast, shared, refresh, apply, loading } =
+  const { library, session, update, toast, shared, refresh, apply, publish, editShared, loading } =
     useDemo();
   const [query, setQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>(() => [
@@ -705,6 +744,10 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     previewTrigger.current?.focus();
   }
   const [editing, setEditing] = useState<Picture | null>(null);
+  const [editingShared, setEditingShared] = useState<Picture | null>(null);
+  const [unpublishing, setUnpublishing] = useState<Picture | null>(null);
+  const [unpublishBusy, setUnpublishBusy] = useState(false);
+  const [viewing, setViewing] = useState<Picture | null>(null);
   const [name, setName] = useState("");
   const [deleting, setDeleting] = useState<Picture | null>(null);
   const [importing, setImporting] = useState(false);
@@ -798,6 +841,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       }
       const copy: Picture = { ...picture, id: uuid(), ownerId: session.id,
         sharedId: undefined, galleryPostId: undefined, galleryPostIds: [], sharedAssetIds: [],
+        isReadOnly: !isOwnExplorePicture(picture, session.id, ownedPictures),
         created: new Date().toISOString() };
       if (!update(value => ({ ...value, images: [copy, ...value.images] })))
         throw new Error("이미지를 저장하지 못했습니다. 브라우저 저장 공간을 확인해 주세요.");
@@ -821,6 +865,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   }
   async function openOwnPicture(picture: Picture) {
     if (importing) return;
+    if (picture.isReadOnly) { setViewing(picture); return; }
     if (!cloud || !picture.assetId || picture.projectId) {
       navigate(`/app/studio?id=${encodeURIComponent(picture.id)}`);
       return;
@@ -846,7 +891,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const recommendations = hasLikedRecommendations ? rankedRecommendations.slice(0, 8)
     : randomRecommendations(all.map(withEngagement), recommendationSeed);
   async function importPicture(p: Picture, open: boolean) {
-    if (importing) return;
+    if (importing || (open && !isOwnExplorePicture(p, session.id, ownedPictures))) return;
     setImporting(true);
     try {
       const saved = await ensureOwnPicture(p);
@@ -867,11 +912,11 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     applying.current = true;
     setImporting(true);
     try {
-      if (!wallpaperTargets(library.devices).some(target => target.deviceId === deviceId && target.displayId === displayId))
+      if (!wallpaperTargets(library.devices, explore).some(target => target.deviceId === deviceId && target.displayId === displayId))
         throw new Error("연결된 화면을 선택해 주세요.");
-      const saved = await ensureOwnPicture(applyingPicture);
+      const saved = explore ? await ensureOwnPicture(applyingPicture) : applyingPicture;
       if (await apply({ ...saved, width: picture.width, height: picture.height }, deviceId, displayId,
-        { useExistingAsset: true, frame })) setApplyingPicture(null);
+        { useExistingAsset: explore, frame })) setApplyingPicture(null);
     } catch (error) { toast((error as Error).message); }
     finally { applying.current = false; setImporting(false); }
   }
@@ -1012,10 +1057,15 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
                 else void openOwnPicture(p);
               }}
               rename={() => {
-                if (isImageShared(p)) return;
+                if (explore) {
+                  setEditingShared(p);
+                  return;
+                }
+                if (isImageShared(p) || p.isReadOnly) return;
                 setEditing(p);
                 setName(p.name);
               }}
+              unpublish={explore && isOwnExplorePicture(p, session.id, ownedPictures) ? () => setUnpublishing(p) : undefined}
               remove={() => setDeleting(p)}
             />
           ))}
@@ -1033,9 +1083,35 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
         toggleLike={isOwnExplorePicture(selectedPicture, session.id, ownedPictures) ? undefined : () => void toggleLike(selectedPicture)}
         liking={liking}
       />}
-      {applyingPicture && <ApplyWallpaperDialog picture={applyingPicture} devices={library.devices} fromExplore
+      {viewing && <Modal title={viewing.name} close={() => setViewing(null)}>
+        <div className="explore-details-preview saved-image-preview"><PictureView picture={viewing} /></div>
+        <Notice>다른 사용자의 저장 이미지입니다. 기기에 적용할 때 화면 비율과 위치를 조절할 수 있습니다.</Notice>
+        <button type="button" className="button primary full" onClick={() => {
+          setApplyingPicture(viewing);
+          setViewing(null);
+        }}><Monitor size={18} /> 연결된 기기에 적용</button>
+      </Modal>}
+      {applyingPicture && <ApplyWallpaperDialog picture={applyingPicture} devices={library.devices} fromExplore={explore}
         busy={importing} close={() => setApplyingPicture(null)}
         confirm={applyExplorePicture} />}
+      {editingShared && <SharedImageSettings picture={editingShared} close={() => setEditingShared(null)}
+        save={metadata => editShared(editingShared, metadata)} />}
+      {unpublishing && <Modal title="업로드를 취소할까요?" close={() => { if (!unpublishBusy) setUnpublishing(null); }}>
+        <p>‘{unpublishing.name}’을 탐색에서 내립니다. 내 이미지에 저장된 파일은 유지됩니다.</p>
+        {unpublishing.galleryPostId && <p>기존 갤러리 게시글의 댓글과 좋아요도 함께 삭제됩니다.</p>}
+        <div className="modal-actions">
+          <button type="button" className="button secondary" disabled={unpublishBusy} onClick={() => setUnpublishing(null)}>닫기</button>
+          <button type="button" className="button danger" disabled={unpublishBusy} onClick={async () => {
+            setUnpublishBusy(true);
+            try {
+              if (await publish(unpublishing, false)) {
+                if (preview?.id === unpublishing.id) closeDetails();
+                setUnpublishing(null);
+              }
+            } finally { setUnpublishBusy(false); }
+          }}>{unpublishBusy ? <Busy /> : "업로드 취소"}</button>
+        </div>
+      </Modal>}
       {editing && (
         <Modal title="이미지 이름 변경" close={() => setEditing(null)}>
           <form

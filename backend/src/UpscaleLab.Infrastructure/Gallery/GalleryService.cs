@@ -137,6 +137,9 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         var image = await dbContext.Images.SingleOrDefaultAsync(
             x => x.Id == imageId && x.UserId == userId,
             cancellationToken) ?? throw new NotFoundException("게시할 이미지를 찾을 수 없습니다.");
+        var edit = ImageEditState.RequireEditable(project?.SavedEditJson ?? await dbContext.LiveLayerProjects
+            .Where(x => x.UserId == userId && x.OriginalImageId == imageId)
+            .Select(x => x.SavedEditJson).FirstOrDefaultAsync(cancellationToken));
 
         var post = new GalleryPost
         {
@@ -146,7 +149,7 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
             Title = request.Title.Trim(),
             Tags = GalleryTagCatalog.NormalizeMany(request.Tags, request.Tag),
             PlatformTags = GalleryPlatformTags.Normalize(request.PlatformTags ??
-                ImageEditState.FromJson(project?.SavedEditJson)?.PlatformTags),
+                edit?.PlatformTags),
             Description = request.Description?.Trim(),
             IsPublic = request.IsPublic
         };
@@ -197,7 +200,9 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         var title = request.Title?.Trim();
         if (string.IsNullOrWhiteSpace(title) || title.Length > 160)
             throw new ValidationException("이미지 이름은 1~160자로 입력해 주세요.");
-        var tags = GalleryTagCatalog.NormalizeMany(request.Tags, null);
+        var tags = request.Tags is null
+            ? GalleryTagCompatibility.Resolve(post.Tag, post.Tags, post.Description).ToArray()
+            : GalleryTagCatalog.NormalizeMany(request.Tags);
         post.Title = title;
         post.Tags = tags;
         if (request.PlatformTags is not null)
@@ -207,7 +212,9 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
         post.UpdatedAt = DateTime.UtcNow;
         if (post.Project is { } project && project.UserId == userId)
         {
+            var edit = ImageEditState.RequireEditable(project.SavedEditJson) ?? ImageEditState.Original();
             project.Title = title;
+            project.SavedEditJson = edit.WithTags(post.Tags, request.PlatformTags).ToJson();
             project.UpdatedAt = DateTime.UtcNow;
         }
         await dbContext.SaveChangesAsync(cancellationToken);

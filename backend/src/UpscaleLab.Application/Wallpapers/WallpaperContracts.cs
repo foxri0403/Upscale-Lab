@@ -17,6 +17,8 @@ public sealed record WallpaperRenderSettings(int Strength, string Filter, string
     ImageCropRegion? CropRegion = null, WallpaperFrame? Frame = null);
 public sealed record WallpaperFrame(int Width, int Height, bool Contain, double Zoom, double X, double Y);
 public sealed record RenameWallpaperRequest([param: Required, MaxLength(160)] string Title);
+public sealed record UpdateWallpaperMetadataRequest([param: Required, MaxLength(160)] string Title,
+    string[]? Tags = null, string[]? PlatformTags = null);
 public sealed record ShareWallpaperRequest(bool IsPublic);
 public sealed record WallpaperSummary(Guid Id, string Title, WallpaperMode Mode, bool IsPublic, DateTime CreatedAt,
     Guid? SourceProjectId = null, ImageEditState? Edit = null, IReadOnlyList<string>? Features = null,
@@ -41,6 +43,7 @@ public interface IWallpaperService
     Task<LinkedWallpaper> GetLinkedAsync(string token, CancellationToken ct);
     Task<ImageEditState> SaveEditAsync(Guid userId, Guid assetId, SaveImageEditRequest request, CancellationToken ct);
     Task RenameAsync(Guid userId, Guid assetId, RenameWallpaperRequest request, CancellationToken ct);
+    Task UpdateMetadataAsync(Guid userId, Guid assetId, UpdateWallpaperMetadataRequest request, CancellationToken ct);
     Task<WallpaperSummary> CreateAsync(Guid userId, CreateWallpaperRequest request, CancellationToken ct);
     Task<WallpaperSummary> ImportAsync(Guid userId, Guid assetId, CancellationToken ct);
     Task<IReadOnlyList<WallpaperSummary>> ListAsync(Guid? userId, bool shared, CancellationToken ct, ExploreQuery? explore = null);

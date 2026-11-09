@@ -1,11 +1,14 @@
 using ImageMagick;
 using Microsoft.EntityFrameworkCore;
 using UpscaleLab.Application.Common;
+using UpscaleLab.Application.Gallery;
 using UpscaleLab.Application.Storage;
 using UpscaleLab.Domain.Entities;
+using UpscaleLab.Domain.Enums;
 using UpscaleLab.Infrastructure.Database;
 using UpscaleLab.Infrastructure.Gallery;
 using UpscaleLab.Infrastructure.Projects;
+using UpscaleLab.Infrastructure.Wallpapers;
 using Xunit;
 
 namespace UpscaleLab.Tests;
@@ -45,9 +48,26 @@ public sealed class GalleryImportServiceTests
         Assert.Equal(7, post.DownloadCount);
         Assert.Equal(1, post.SaveCount);
         Assert.Equal(new[] { "pc", "tablet" }, result.Edit!.PlatformTags);
+        Assert.True(result.Edit.IsReadOnly);
+        Assert.True(Assert.Single(await projects.GetAllAsync(viewer, Ct)).Edit!.IsReadOnly);
+        await Assert.ThrowsAsync<ConflictException>(() => projects.SaveEditAsync(viewer, result.Id,
+            new(50, "mono", "original", 1, true), Ct));
+        await Assert.ThrowsAsync<ConflictException>(() => projects.ResetEffectsAsync(viewer, result.Id, new("All"), Ct));
+        var gallery = new GalleryService(db, storage);
+        await Assert.ThrowsAsync<ConflictException>(() => gallery.CreateAsync(viewer,
+            new CreateGalleryPostRequest(copy.OriginalImageId, "복사본", null), Ct));
+        var wallpapers = new WallpaperService(db, storage, storage);
+        await Assert.ThrowsAsync<ConflictException>(() => wallpapers.CreateAsync(viewer,
+            new(result.Id, result.Title, WallpaperMode.Static), Ct));
+        var applied = await wallpapers.CreateAsync(viewer, new(result.Id, result.Title, WallpaperMode.Static,
+            Render: new(50, "original", "original", 1, true, Frame: new(160, 90, true, 1, .8, .5))), Ct);
+        var manifest = await wallpapers.GetManifestAsync(viewer, applied.Id, false, Ct);
+        Assert.Equal((160, 90), (manifest.Width, manifest.Height));
+        Assert.True(applied.IsDeviceVariant);
+        Assert.True(applied.Edit!.IsReadOnly);
         Assert.Equal(1, (await new GalleryService(db, storage).GetAsync(post.Id, viewer, Ct)).Post.DownloadCount);
         Assert.Single(db.GalleryPosts);
-        Assert.Empty(db.WallpaperAssets);
+        Assert.Single(db.WallpaperAssets);
         Assert.Single(await projects.GetAllAsync(viewer, Ct));
         await Assert.ThrowsAsync<NotFoundException>(() => projects.GetAsync(post.UserId, copy.Id, Ct));
         Assert.True(storage.Files.ContainsKey(post.Image.OriginalObjectKey));
@@ -113,7 +133,7 @@ public sealed class GalleryImportServiceTests
             DownloadCount = 7, PlatformTags = ["pc", "tablet"] };
     }
 
-    private sealed class Store : IStorageService
+    private sealed class Store : IStorageService, IObjectCopyService
     {
         public Dictionary<string, byte[]> Files { get; } = new();
         public int Reads { get; private set; }
@@ -137,6 +157,11 @@ public sealed class GalleryImportServiceTests
             Files[key] = bytes.ToArray(); return new(key, $"s3://test/{key}");
         }
         public Task DeleteAsync(string key, CancellationToken ct) { Files.Remove(key); return Task.CompletedTask; }
+        public Task CopyAsync(string sourceKey, string destinationKey, CancellationToken ct)
+        {
+            Files[destinationKey] = Files[sourceKey].ToArray();
+            return Task.CompletedTask;
+        }
         public string CreateDownloadUrl(string key, TimeSpan lifetime) => $"https://example.invalid/{key}";
         public string CreateUploadUrl(string key, string type, TimeSpan lifetime) => throw new NotSupportedException();
     }

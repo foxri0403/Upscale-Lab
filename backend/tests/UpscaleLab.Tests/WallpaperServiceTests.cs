@@ -169,6 +169,51 @@ public sealed class WallpaperServiceTests
     }
 
     [Fact]
+    public async Task AuthorCanUpdatePublicMetadataWhileViewerCanOnlyFrameTheSavedCopy()
+    {
+        await using var db = WorkflowData.Db();
+        var store = new WorkflowStore();
+        var project = WorkflowData.Project(Guid.NewGuid());
+        using var source = new MagickImage(MagickColors.Red, 10, 10);
+        store.Files["source.png"] = source.ToByteArray(MagickFormat.Png);
+        db.Add(project);
+        await db.SaveChangesAsync();
+        var service = new WallpaperService(db, store, store);
+        var original = await service.CreateAsync(project.UserId, new(project.Id, "Original", WallpaperMode.Static), Ct);
+        await service.SetSharingAsync(project.UserId, original.Id, true, Ct);
+        var originalManifest = (await db.WallpaperAssets.FindAsync(original.Id))!.ManifestJson;
+        var viewer = Guid.NewGuid();
+        await Assert.ThrowsAsync<NotFoundException>(() => service.UpdateMetadataAsync(viewer, original.Id,
+            new("Unauthorized", ["게임"], ["pc"]), Ct));
+        await service.UpdateMetadataAsync(project.UserId, original.Id, new("Updated", ["풍경"], ["pc", "tablet"]), Ct);
+        var listed = Assert.Single(await service.ListAsync(null, true, Ct,
+            new ExploreQuery("Updated", Tags: ["풍경"], PlatformTags: ["tablet"])));
+        Assert.Equal(new[] { "pc", "tablet" }, listed.Edit!.PlatformTags);
+        Assert.Equal(originalManifest, (await db.WallpaperAssets.FindAsync(original.Id))!.ManifestJson);
+        Assert.Equal("Updated", project.Title);
+        Assert.Equal(new[] { "풍경" }, ImageEditState.FromJson(project.SavedEditJson)!.Tags);
+
+        var imported = await service.ImportAsync(viewer, original.Id, Ct);
+        Assert.True(imported.Edit!.IsReadOnly);
+        await Assert.ThrowsAsync<ConflictException>(() => service.SaveEditAsync(viewer, imported.Id, new(50, "mono", "original", 1, true), Ct));
+        await Assert.ThrowsAsync<ConflictException>(() => service.SetSharingAsync(viewer, imported.Id, true, Ct));
+        await Assert.ThrowsAsync<ConflictException>(() => service.UpdateMetadataAsync(viewer, imported.Id, new("Edit"), Ct));
+        await Assert.ThrowsAsync<ConflictException>(() => service.SnapshotAsync(viewer, imported.Id, new(false, 50), Ct));
+        var applied = await service.SnapshotAsync(viewer, imported.Id, new(false, 50,
+            Render: new(50, "mono", "original", 1, true, Frame: new(160, 90, true, 1, 1, .5))), Ct);
+        Assert.True(applied.IsDeviceVariant);
+        Assert.True(applied.Edit!.IsReadOnly);
+        var manifest = JsonSerializer.Deserialize<WallpaperManifest>((await db.WallpaperAssets.FindAsync(applied.Id))!.ManifestJson)!;
+        Assert.Equal((160, 90), (manifest.Width, manifest.Height));
+        using var result = new MagickImage(store.Files[manifest.Files.Single().Source]);
+        using var pixels = result.GetPixels();
+        Assert.Equal(24, pixels.GetPixel(0, 45).ToColor()!.R);
+        Assert.Equal(255, pixels.GetPixel(159, 45).ToColor()!.R);
+        Assert.Equal(0, pixels.GetPixel(159, 45).ToColor()!.G);
+        await Assert.ThrowsAsync<ConflictException>(() => service.CreateLinkAsync(viewer, applied.Id, Ct));
+    }
+
+    [Fact]
     public async Task FailedLayerCopy_RemovesPartialFilesAndDoesNotPublishAnAsset()
     {
         await using var db = WorkflowData.Db();

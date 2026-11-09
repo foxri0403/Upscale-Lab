@@ -55,6 +55,7 @@ export type Picture = {
   subjectLayerId?: string;
   separationDisabled?: boolean;
   isDraft?: boolean;
+  isReadOnly?: boolean;
   id: string;
   name: string;
   src: string;

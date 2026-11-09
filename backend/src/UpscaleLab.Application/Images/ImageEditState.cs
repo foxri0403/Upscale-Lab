@@ -34,10 +34,28 @@ public sealed record HeadRigSettings(bool Enabled, int HeadTilt, int EyeMove, in
 // Non-destructive library edits are separate from immutable device wallpaper files.
 public sealed record ImageEditState(int Strength, string Filter, string Crop, int Scale, bool Foreground, DateTime SavedAt,
     string[]? Tags = null, bool LiveEnabled = false, bool MouseEnabled = false, bool GyroEnabled = false, ImageCropRegion? CropRegion = null, int MotionDefaultsVersion = 0, HeadRigSettings? Rig = null,
-    string[]? PlatformTags = null)
+    string[]? PlatformTags = null, bool IsReadOnly = false)
 {
     public const int DefaultMotionStrength = 50;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    public static ImageEditState Original() =>
+        new(DefaultMotionStrength, "original", "original", 1, true, DateTime.UtcNow, MotionDefaultsVersion: 1);
+
+    public static ImageEditState? RequireEditable(string? savedEdit)
+    {
+        var state = FromJson(savedEdit);
+        if (state?.IsReadOnly == true)
+            throw new ConflictException("다른 사용자의 저장 이미지는 편집하거나 다시 공유할 수 없습니다.");
+        return state;
+    }
+
+    public ImageEditState WithTags(string[]? tags, string[]? platformTags) => this with
+    {
+        Tags = tags is null ? Tags : GalleryTagCatalog.NormalizeMany(tags).Where(x => x != GalleryTagCatalog.Unspecified).ToArray(),
+        PlatformTags = platformTags is null ? PlatformTags : GalleryPlatformTags.Normalize(platformTags),
+        SavedAt = DateTime.UtcNow
+    };
 
     public static ImageEditState Create(SaveImageEditRequest request, ImageEditState? previous = null)
     {

@@ -11,7 +11,7 @@ export function StudioUpload() {
   const { library, update, toast } = useDemo();
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const savedImages = library.images.filter(p => !p.isDraft);
+  const savedImages = library.images.filter(p => !p.isDraft && !p.isReadOnly);
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   async function add(file?: File) {

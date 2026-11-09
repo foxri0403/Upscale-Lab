@@ -4,7 +4,7 @@ import {
   MoreVertical,
   Pencil,
   Trash2,
-  Info,
+  Upload,
 } from "lucide-react";
 import { PictureView } from "./ui";
 import type { Picture } from "./model";
@@ -22,6 +22,7 @@ export function ImageCard({
   liking,
   open,
   rename,
+  unpublish,
   remove,
 }: {
   picture: Picture;
@@ -31,6 +32,7 @@ export function ImageCard({
   liking?: boolean;
   open: () => void;
   rename: () => void;
+  unpublish?: () => void;
   remove: () => void;
 }) {
   const menu = useRef<HTMLDetailsElement>(null);
@@ -61,11 +63,16 @@ export function ImageCard({
         ? "해상도 정보 없음"
         : "해상도 확인 중…";
   const shared = isImageShared(picture);
+  const showMenu = !explore || !!unpublish;
+  function runMenuAction(action: () => void) {
+    if (menu.current) menu.current.open = false;
+    action();
+  }
   return (
     <article className={`image-card ${selected ? "image-card-selected" : ""}`}>
       <button
         className="image-card-cover"
-        aria-label={`${picture.name} ${explore ? "상세 보기" : "편집하기"}`}
+        aria-label={`${picture.name} ${explore || picture.isReadOnly ? "상세 보기" : "편집하기"}`}
         aria-pressed={explore ? selected : undefined}
         aria-controls={explore && selected ? "explore-details" : undefined}
         onClick={open}
@@ -90,17 +97,12 @@ export function ImageCard({
         {explore && <EngagementBadges picture={picture} />}
       </button>
       <div className="image-card-body">
-        <div className="image-card-title-row">
-          <button className="image-title" onClick={open} title={picture.name}>
-            {picture.name}
-          </button>
-          {toggleLike && <GalleryLikeButton liked={!!picture.liked} disabled={liking} toggle={toggleLike} />}
-        </div>
+        <button className="image-title" onClick={open} title={picture.name}>{picture.name}</button>
         <p className="image-resolution" aria-label={`${picture.name} 해상도`}>{resolution}</p>
         {explore && <span className="creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} /><span>{picture.creator}</span></span>}
         <ImageFeatureBadges picture={picture} />
-        <LowerTagList picture={picture} />
-        {!explore && <div className="card-actions">
+        <div className="image-card-footer">
+          <LowerTagList picture={picture} />
           {!explore && shared && (
             <span className="mobile-shared-badge" aria-label="업로드된 이미지">
               업로드
@@ -109,7 +111,7 @@ export function ImageCard({
               </span>
             </span>
           )}
-          <details className="card-menu" ref={menu}
+          {showMenu ? <details className="card-menu" ref={menu}
             onKeyDown={(event) => {
               if (event.key === "Escape" && menu.current) {
                 menu.current.open = false;
@@ -121,48 +123,34 @@ export function ImageCard({
             </summary>
             <div>
               {explore ? (
-                <button
-                  onClick={(e) => {
-                    e.currentTarget.closest("details")?.removeAttribute("open");
-                    open();
-                  }}
-                >
-                  <Info size={15} /> 상세 보기
-                </button>
+                <>
+                  <button type="button" onClick={() => runMenuAction(rename)}><Pencil size={15} /> 이름 및 태그 수정</button>
+                  {unpublish && <button type="button" className="danger-text" onClick={() => runMenuAction(unpublish)}>
+                    <Upload size={15} /> 업로드 취소
+                  </button>}
+                </>
               ) : (
                 <>
-                  <div className="image-sharing-row">
-                    <span>업로드 {shared ? "ON" : "OFF"}</span>
-                    <ImageSharingToggle picture={picture} label={`${picture.name} 업로드`} />
-                  </div>
-                  <button
+                  {!picture.isReadOnly && <>
+                    <div className="image-sharing-row">
+                      <span>업로드 {shared ? "ON" : "OFF"}</span>
+                      <ImageSharingToggle picture={picture} label={`${picture.name} 업로드`} />
+                    </div>
+                    <button type="button"
                     disabled={shared}
                     title={shared ? "공유를 끈 뒤 변경할 수 있습니다." : undefined}
-                    onClick={(e) => {
-                      e.currentTarget
-                        .closest("details")
-                        ?.removeAttribute("open");
-                      rename();
-                    }}
-                  >
-                    <Pencil size={15} /> 이름 변경
-                  </button>
-                  <button
-                    className="danger-text"
-                    onClick={(e) => {
-                      e.currentTarget
-                        .closest("details")
-                        ?.removeAttribute("open");
-                      remove();
-                    }}
-                  >
+                    onClick={() => runMenuAction(rename)}>
+                      <Pencil size={15} /> 이름 변경
+                    </button>
+                  </>}
+                  <button type="button" className="danger-text" onClick={() => runMenuAction(remove)}>
                     <Trash2 size={15} /> 보관함에서 삭제
                   </button>
                 </>
               )}
             </div>
-          </details>
-        </div>}
+          </details> : toggleLike && <GalleryLikeButton liked={!!picture.liked} disabled={liking} toggle={toggleLike} />}
+        </div>
       </div>
     </article>
   );
