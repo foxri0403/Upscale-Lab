@@ -60,14 +60,26 @@ export function LowerTagList({ picture }: { picture: Picture }) {
   </ul>;
 }
 
-export function EngagementBadges({ picture }: { picture: Picture }) {
+export function GalleryLikeButton({ liked, disabled, toggle }: {
+  liked: boolean;
+  disabled?: boolean;
+  toggle: () => void;
+}) {
+  const label = liked ? "좋아요 취소" : "좋아요";
+  return <button type="button" className="gallery-like-button" aria-label={label} title={label}
+    aria-pressed={liked} disabled={disabled} onClick={toggle}>
+    <Heart size={20} fill={liked ? "currentColor" : "none"} aria-hidden="true" />
+  </button>;
+}
+
+export function EngagementBadges({ picture, showLikes = true }: { picture: Picture; showLikes?: boolean }) {
   const likes = picture.likes ?? 0;
   const downloads = picture.downloads ?? 0;
   return <span className="image-engagement-badges">
-    <span className="image-overlay-badge" aria-label={`좋아요 ${likes}개`}>
+    {showLikes && <span className="image-overlay-badge" aria-label={`좋아요 ${likes}개`}>
       <Heart size={17} aria-hidden="true" fill={picture.liked ? "currentColor" : "none"} />
       <span>{likes.toLocaleString("ko-KR")}</span>
-    </span>
+    </span>}
     <span className="image-overlay-badge" title="내 이미지에 저장된 횟수" aria-label={`다운로드 ${downloads}회`}>
       <Download size={17} aria-hidden="true" /><span>{downloads.toLocaleString("ko-KR")}</span>
     </span>

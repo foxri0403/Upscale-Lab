@@ -689,7 +689,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const [recommendationSeed] = useState(() => Math.floor(Math.random() * 2 ** 32));
   const [localEngagement, setLocalEngagement] = useState(() => read<Record<string, { users: string[]; downloads: number }>>("upscale.demo.engagement.v1", {}));
   const [engagement, setEngagement] = useState<Record<string, Pick<Picture, "likes" | "liked">>>({});
-  const [liking, setLiking] = useState<string | null>(null);
+  const [liking, setLiking] = useState(false);
   const likeRequest = useRef(false);
   const [preview, setPreview] = useState<Picture | null>(null);
   const previewTrigger = useRef<HTMLElement | null>(null);
@@ -766,7 +766,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   async function toggleLike(picture: Picture) {
     if (likeRequest.current || isOwnExplorePicture(picture, session.id, ownedPictures)) return;
     likeRequest.current = true;
-    setLiking(picture.id);
+    setLiking(true);
     try {
       if (cloud) {
         const path = picture.galleryPostId ? `/api/gallery/${picture.galleryPostId}` : `/api/wallpapers/${picture.assetId}`;
@@ -780,7 +780,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           users: picture.liked ? value.users.filter(id => id !== session.id) : [...new Set([...value.users, session.id])] }));
       }
     } catch (error) { toast((error as Error).message); }
-    finally { likeRequest.current = false; setLiking(null); }
+    finally { likeRequest.current = false; setLiking(false); }
   }
   async function ensureOwnPicture(picture: Picture): Promise<Picture> {
     const owned = ownedExplorePicture(picture, session.id, ownedPictures);
@@ -1004,6 +1004,8 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
               key={p.id}
               picture={p}
               explore={explore}
+              toggleLike={explore && !isOwnExplorePicture(p, session.id, ownedPictures) ? () => void toggleLike(p) : undefined}
+              liking={liking}
               selected={explore && detailsOpen && preview?.id === p.id}
               open={() => {
                 if (explore) openDetails(p);
@@ -1029,7 +1031,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
         openStudio={() => { void importPicture(selectedPicture, true); }}
         apply={() => setApplyingPicture(selectedPicture)}
         toggleLike={isOwnExplorePicture(selectedPicture, session.id, ownedPictures) ? undefined : () => void toggleLike(selectedPicture)}
-        liking={liking === selectedPicture.id}
+        liking={liking}
       />}
       {applyingPicture && <ApplyWallpaperDialog picture={applyingPicture} devices={library.devices} fromExplore
         busy={importing} close={() => setApplyingPicture(null)}

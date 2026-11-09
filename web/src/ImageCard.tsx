@@ -12,12 +12,14 @@ import { isImageShared } from "./image-sharing";
 import { ImageSharingToggle } from "./ImageSharingToggle";
 import { ImageFeatureBadges } from "./ImageFeatureBadges";
 import { CreatorAvatar } from "./CreatorAvatar";
-import { EngagementBadges, LowerTagList, PlatformBadges } from "./GalleryBadges";
+import { EngagementBadges, GalleryLikeButton, LowerTagList, PlatformBadges } from "./GalleryBadges";
 
 export function ImageCard({
   picture,
   explore,
   selected = false,
+  toggleLike,
+  liking,
   open,
   rename,
   remove,
@@ -25,6 +27,8 @@ export function ImageCard({
   picture: Picture;
   explore: boolean;
   selected?: boolean;
+  toggleLike?: () => void;
+  liking?: boolean;
   open: () => void;
   rename: () => void;
   remove: () => void;
@@ -83,16 +87,19 @@ export function ImageCard({
           }}
         />
         <PlatformBadges picture={picture} />
-        {explore && <EngagementBadges picture={picture} />}
+        {explore && <EngagementBadges picture={picture} showLikes={false} />}
       </button>
       <div className="image-card-body">
         <button className="image-title" onClick={open} title={picture.name}>
           {picture.name}
         </button>
-        <p className="image-resolution" aria-label={`${picture.name} 해상도`}>
-          {resolution}
-        </p>
-        {explore && <span className="creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} /><span>{picture.creator}</span></span>}
+        <div className="image-card-summary">
+          <div>
+            <p className="image-resolution" aria-label={`${picture.name} 해상도`}>{resolution}</p>
+            {explore && <span className="creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} /><span>{picture.creator}</span></span>}
+          </div>
+          {toggleLike && <GalleryLikeButton liked={!!picture.liked} disabled={liking} toggle={toggleLike} />}
+        </div>
         <ImageFeatureBadges picture={picture} />
         <LowerTagList picture={picture} />
         {!explore && <div className="card-actions">

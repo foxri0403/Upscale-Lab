@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Heart, Monitor, Plus, SquarePen, X } from "lucide-react";
+import { Monitor, Plus, SquarePen, X } from "lucide-react";
 import { CreatorAvatar } from "./CreatorAvatar";
 import type { Picture } from "./model";
 import { imageFileFormat, imageResolution } from "./image-information";
 import { ImageFeatureBadges } from "./ImageFeatureBadges";
 import { Busy, Notice, PictureView } from "./ui";
-import { LowerTagList, PlatformTagList } from "./GalleryBadges";
+import { GalleryLikeButton, LowerTagList, PlatformTagList } from "./GalleryBadges";
 
 export function ExploreDetails({ picture, importing, own, local, close, save, openStudio, apply, toggleLike, liking }: {
   picture: Picture;
@@ -45,14 +45,7 @@ export function ExploreDetails({ picture, importing, own, local, close, save, op
               }}
               failed={() => setMeasured({ source, resolution: null })} />
           </div>
-          <div className="explore-details-title">
-            <h3>{picture.name}</h3>
-            {toggleLike && <button type="button" className="button secondary explore-like-button"
-              aria-pressed={!!picture.liked} disabled={liking} onClick={toggleLike}>
-              {liking ? <Busy /> : <Heart size={16} fill={picture.liked ? "currentColor" : "none"} aria-hidden="true" />}
-              {picture.liked ? "좋아요 취소" : "좋아요"}
-            </button>}
-          </div>
+          <h3>{picture.name}</h3>
           <div className="explore-details-creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} />{picture.creator || "작성자 정보 없음"}</div>
           {created && !Number.isNaN(created.getTime()) && <p className="explore-details-date">
             {created.toLocaleDateString("ko-KR")} 업로드
@@ -62,13 +55,15 @@ export function ExploreDetails({ picture, importing, own, local, close, save, op
             <div><dt>다운로드</dt><dd aria-live="polite">{(picture.downloads ?? 0).toLocaleString("ko-KR")}회</dd></div>
           </dl>
           <ImageFeatureBadges picture={picture} />
-          <section className="explore-details-section">
-            <h4>하위 태그</h4>
-            <LowerTagList picture={picture} />
-          </section>
-          <section className="explore-details-section">
-            <h4>상위 태그</h4>
-            <PlatformTagList picture={picture} />
+          <section className="explore-details-section explore-details-tag-groups" aria-label="이미지 태그">
+            <div>
+              <h4>상위 태그</h4>
+              <PlatformTagList picture={picture} />
+            </div>
+            <div>
+              <h4>하위 태그</h4>
+              <LowerTagList picture={picture} />
+            </div>
           </section>
           <section className="explore-details-section" aria-label="이미지 정보">
             <h4>이미지 정보</h4>
@@ -80,9 +75,12 @@ export function ExploreDetails({ picture, importing, own, local, close, save, op
           {local && <Notice>로컬 샘플 갤러리입니다. 공개 범위는 현재 브라우저로 한정됩니다.</Notice>}
         </div>
         <div className="explore-details-actions">
-          {!own && <button className="button primary full" disabled={importing} onClick={save}>
-            {importing ? <Busy /> : <Plus size={18} />} 내 이미지에 저장
-          </button>}
+          {!own && <div className="explore-details-save-row">
+            {toggleLike && <GalleryLikeButton liked={!!picture.liked} disabled={liking} toggle={toggleLike} />}
+            <button className="button primary full" disabled={importing} onClick={save}>
+              {importing ? <Busy /> : <Plus size={18} />} 내 이미지에 저장
+            </button>
+          </div>}
           <button className="button secondary full" disabled={importing} onClick={openStudio}>
             <SquarePen size={18} /> {own ? "작업실에서 열기" : "복사하여 편집·레이어 분리"}
           </button>
