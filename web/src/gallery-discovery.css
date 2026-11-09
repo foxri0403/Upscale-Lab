@@ -68,13 +68,15 @@
   overflow: hidden;
   overflow-wrap: anywhere;
 }
-.image-card .image-card-body { display: flex; flex-direction: column; min-height: 0; padding-right: 16px; padding-bottom: 12px; }
+.image-card .image-card-body { display: flex; flex-direction: column; min-height: 0; }
+.image-card-heading { display: flex; align-items: flex-start; gap: 6px; }
+.image-card-name-and-resolution { flex: 1; min-width: 0; }
+.image-card-heading > .card-menu { flex: none; }
+.image-card-heading .card-menu > summary { width: 44px; height: 44px; border-radius: 0; background: transparent; }
+.image-card-heading .card-menu > summary:hover { color: var(--primary); }
+.image-card-heading .card-menu > div { top: calc(100% + 4px); max-width: calc(100vw - 24px); }
 .image-card-footer { display: flex; align-items: flex-end; gap: 6px; padding-top: 8px; margin-top: auto; }
 .image-card-footer > .image-tag-list { flex: 1; min-width: 0; }
-.image-card-footer > .card-menu { flex: none; }
-.image-card-footer .card-menu > summary { width: 44px; height: 44px; border-radius: 0; background: transparent; }
-.image-card-footer .card-menu > summary:hover { color: var(--primary); }
-.image-card-footer .card-menu > div { top: calc(100% + 4px); max-width: calc(100vw - 24px); }
 .image-card-footer .mobile-shared-badge { align-self: center; }
 .shared-image-settings fieldset { min-width: 0; padding: 0; margin: 0; border: 0; }
 .shared-image-settings h3 { margin: 12px 0 6px; font-size: .9rem; }

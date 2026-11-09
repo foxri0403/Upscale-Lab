@@ -45,9 +45,14 @@ public sealed record ImageEditState(int Strength, string Filter, string Crop, in
     public static ImageEditState? RequireEditable(string? savedEdit)
     {
         var state = FromJson(savedEdit);
-        if (state?.IsReadOnly == true)
-            throw new ConflictException("다른 사용자의 저장 이미지는 편집하거나 다시 공유할 수 없습니다.");
+        state?.EnsureEditable();
         return state;
+    }
+
+    public void EnsureEditable()
+    {
+        if (IsReadOnly)
+            throw new ConflictException("다른 사용자의 저장 이미지는 편집하거나 다시 공유할 수 없습니다.");
     }
 
     public ImageEditState WithTags(string[]? tags, string[]? platformTags) => this with

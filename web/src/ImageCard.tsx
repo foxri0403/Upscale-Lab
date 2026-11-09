@@ -97,20 +97,12 @@ export function ImageCard({
         {explore && <EngagementBadges picture={picture} />}
       </button>
       <div className="image-card-body">
-        <button className="image-title" onClick={open} title={picture.name}>{picture.name}</button>
-        <p className="image-resolution" aria-label={`${picture.name} 해상도`}>{resolution}</p>
-        {explore && <span className="creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} /><span>{picture.creator}</span></span>}
-        <ImageFeatureBadges picture={picture} />
-        <div className="image-card-footer">
-          <LowerTagList picture={picture} />
-          {!explore && shared && (
-            <span className="mobile-shared-badge" aria-label="업로드된 이미지">
-              업로드
-              <span>
-                <Check size={11} strokeWidth={3} />
-              </span>
-            </span>
-          )}
+        <div className="image-card-heading">
+          <div className="image-card-name-and-resolution">
+            <button className="image-title" onClick={open} title={picture.name}>{picture.name}</button>
+            <p className="image-resolution" aria-label={`${picture.name} 해상도`}>{resolution}</p>
+            {!explore && picture.isReadOnly && <small className="muted">읽기 전용</small>}
+          </div>
           {showMenu ? <details className="card-menu" ref={menu}
             onKeyDown={(event) => {
               if (event.key === "Escape" && menu.current) {
@@ -137,9 +129,9 @@ export function ImageCard({
                       <ImageSharingToggle picture={picture} label={`${picture.name} 업로드`} />
                     </div>
                     <button type="button"
-                    disabled={shared}
-                    title={shared ? "공유를 끈 뒤 변경할 수 있습니다." : undefined}
-                    onClick={() => runMenuAction(rename)}>
+                      disabled={shared}
+                      title={shared ? "공유를 끈 뒤 변경할 수 있습니다." : undefined}
+                      onClick={() => runMenuAction(rename)}>
                       <Pencil size={15} /> 이름 변경
                     </button>
                   </>}
@@ -150,6 +142,14 @@ export function ImageCard({
               )}
             </div>
           </details> : toggleLike && <GalleryLikeButton liked={!!picture.liked} disabled={liking} toggle={toggleLike} />}
+        </div>
+        {explore && <span className="creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} /><span>{picture.creator}</span></span>}
+        <ImageFeatureBadges picture={picture} />
+        <div className="image-card-footer">
+          <LowerTagList picture={picture} />
+          {!explore && shared && <span className="mobile-shared-badge" aria-label="업로드된 이미지">
+            업로드 <span><Check size={11} strokeWidth={3} /></span>
+          </span>}
         </div>
       </div>
     </article>

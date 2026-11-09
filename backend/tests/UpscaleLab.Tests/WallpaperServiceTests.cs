@@ -89,6 +89,8 @@ public sealed class WallpaperServiceTests
         Assert.NotEqual(first.Files.Single().Source, second.Files.Single().Source);
         Assert.NotNull(first.UrlsExpireAt);
         Assert.DoesNotContain("https://", (await db.WallpaperAssets.SingleAsync()).ManifestJson);
+        Assert.False(Assert.Single(await service.ListAsync(project.UserId, false, Ct)).Edit!.IsReadOnly);
+        await service.RenameAsync(project.UserId, asset.Id, new("Owned original"), Ct);
     }
 
     [Fact]
@@ -168,8 +170,10 @@ public sealed class WallpaperServiceTests
         Assert.Equal((90, 160), (untouched.Width, untouched.Height));
     }
 
-    [Fact]
-    public async Task AuthorCanUpdatePublicMetadataWhileViewerCanOnlyFrameTheSavedCopy()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AuthorCanUpdatePublicMetadataWhileViewerCanOnlyFrameTheSavedCopy(bool legacyCopy)
     {
         await using var db = WorkflowData.Db();
         var store = new WorkflowStore();
@@ -195,6 +199,13 @@ public sealed class WallpaperServiceTests
 
         var imported = await service.ImportAsync(viewer, original.Id, Ct);
         Assert.True(imported.Edit!.IsReadOnly);
+        if (legacyCopy)
+        {
+            var oldAsset = (await db.WallpaperAssets.FindAsync(imported.Id))!;
+            oldAsset.SavedEditJson = (imported.Edit with { IsReadOnly = false }).ToJson();
+            await db.SaveChangesAsync(Ct);
+        }
+        Assert.True(Assert.Single(await service.ListAsync(viewer, false, Ct)).Edit!.IsReadOnly);
         await Assert.ThrowsAsync<ConflictException>(() => service.SaveEditAsync(viewer, imported.Id, new(50, "mono", "original", 1, true), Ct));
         await Assert.ThrowsAsync<ConflictException>(() => service.SetSharingAsync(viewer, imported.Id, true, Ct));
         await Assert.ThrowsAsync<ConflictException>(() => service.UpdateMetadataAsync(viewer, imported.Id, new("Edit"), Ct));

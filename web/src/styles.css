@@ -1269,12 +1269,9 @@ small {
 }
 .image-card-body {
   flex: 1;
-  padding: 13px 74px 16px 16px;
+  padding: 13px 16px 12px;
   position: relative;
   min-height: 82px;
-}
-.image-card .image-card-body {
-  padding-right: 74px;
 }
 .image-title {
   font-size: 1rem;

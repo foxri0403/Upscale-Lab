@@ -28,7 +28,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         request.Rig?.Validate();
         var source = await Owned(userId, assetId, ct);
         var manifest = ReadManifest(source);
-        var edit = ImageEditState.FromJson(source.SavedEditJson);
+        var edit = EffectiveEdit(source);
         if (edit?.IsReadOnly == true)
         {
             if (request.Render?.Frame is not { } frame)
@@ -77,6 +77,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             if (!independentMotion && request.MotionEnabled) features.Add("Live 2D");
             stored["_features"] = JsonSerializer.SerializeToNode(features);
             if (request.Render?.Frame is not null) stored["_deviceVariant"] = true;
+            else stored["_ownerSnapshot"] = true;
             asset.ManifestJson = stored.ToJsonString(); db.WallpaperAssets.Add(asset); await db.SaveChangesAsync(ct);
             return Map(asset);
         }
@@ -108,7 +109,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
     public async Task<WallpaperLink> CreateLinkAsync(Guid userId, Guid assetId, CancellationToken ct)
     {
         var asset = await Owned(userId, assetId, ct);
-        ImageEditState.RequireEditable(asset.SavedEditJson);
+        RequireEditable(asset);
         asset.ShareToken ??= Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
         await db.SaveChangesAsync(ct);
         return new(asset.ShareToken);
@@ -132,7 +133,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
     {
         var asset = await Owned(userId, assetId, ct);
         if (asset.IsPublic) throw new ConflictException("공유를 끈 뒤 사진 설정을 변경해 주세요.");
-        var previous = ImageEditState.RequireEditable(asset.SavedEditJson);
+        var previous = RequireEditable(asset);
         var edit = ImageEditState.Create(request, previous);
         if (request.Tags is null) edit = edit with { Tags = previous?.Tags };
         if (request.Title is not null) asset.Title = request.Title.Trim();
@@ -147,7 +148,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         var source = await shared.SingleOrDefaultAsync(ct)
             ?? throw new NotFoundException("공유 배경화면을 찾을 수 없습니다.");
         var manifest = ReadManifest(source);
-        var edit = ImageEditState.FromJson(source.SavedEditJson);
+        var edit = EffectiveEdit(source);
         if (source.UserId != userId) edit = (edit ?? ImageEditState.Original()) with { IsReadOnly = true };
         var asset = new WallpaperAsset { UserId = userId, Title = source.Title, Mode = source.Mode, SavedEditJson = edit?.ToJson() };
         var copied = new List<string>();
@@ -163,6 +164,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             }
             var stored = JsonSerializer.SerializeToNode(manifest with { AssetId = asset.Id, Files = files, UrlsExpireAt = null })!.AsObject();
             stored["_features"] = JsonSerializer.SerializeToNode(Features(source));
+            if (source.UserId == userId && edit?.IsReadOnly != true) stored["_ownerSnapshot"] = true;
             asset.ManifestJson = stored.ToJsonString();
             var countSave = source.UserId != userId;
             await using var transaction = countSave && db.Database.IsRelational()
@@ -330,7 +332,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             .Select(x => new { x.Id, x.Username, x.ProfileImageObjectKey }).ToDictionaryAsync(x => x.Id, ct);
         return assets.Select(item => {
             var x = item.Asset;
-            var result = shared ? new WallpaperSummary(x.Id, x.Title, x.Mode, x.IsPublic, x.CreatedAt, Edit: ImageEditState.FromJson(x.SavedEditJson), Features: Features(x)) : Map(x);
+            var result = shared ? new WallpaperSummary(x.Id, x.Title, x.Mode, x.IsPublic, x.CreatedAt, Edit: EffectiveEdit(x), Features: Features(x)) : Map(x);
             var author = authors.GetValueOrDefault(x.UserId);
             return result with { UserId = x.UserId, Username = author?.Username,
                 LikeCount = item.Likes, DownloadCount = x.SaveCount, IsLikedByCurrentUser = item.Liked,
@@ -377,7 +379,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
     public async Task SetSharingAsync(Guid userId, Guid assetId, bool isPublic, CancellationToken ct)
     {
         var asset = await Owned(userId, assetId, ct);
-        if (isPublic) ImageEditState.RequireEditable(asset.SavedEditJson);
+        if (isPublic) RequireEditable(asset);
         asset.IsPublic = isPublic;
         await db.SaveChangesAsync(ct);
     }
@@ -385,7 +387,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
     public async Task RenameAsync(Guid userId, Guid assetId, RenameWallpaperRequest request, CancellationToken ct)
     {
         var asset = await Owned(userId, assetId, ct);
-        ImageEditState.RequireEditable(asset.SavedEditJson);
+        RequireEditable(asset);
         if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Length > 160)
             throw new ValidationException("이미지 이름은 1~160자로 입력해 주세요.");
         if (asset.IsPublic) throw new ConflictException("공유를 끈 뒤 이미지 이름을 변경해 주세요.");
@@ -399,7 +401,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         var title = request.Title?.Trim();
         if (string.IsNullOrWhiteSpace(title) || title.Length > 160)
             throw new ValidationException("이미지 이름은 1~160자로 입력해 주세요.");
-        var edit = ImageEditState.RequireEditable(asset.SavedEditJson) ?? ImageEditState.Original();
+        var edit = RequireEditable(asset) ?? ImageEditState.Original();
         asset.Title = title;
         asset.SavedEditJson = edit.WithTags(request.Tags, request.PlatformTags).ToJson();
         if (asset.SourceProjectId is { } projectId)
@@ -445,7 +447,36 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         using var json = JsonDocument.Parse(x.ManifestJson);
         var deviceVariant = json.RootElement.TryGetProperty("_deviceVariant", out var flag) && flag.ValueKind == JsonValueKind.True;
         return new(x.Id, x.Title, x.Mode, x.IsPublic, x.CreatedAt, x.SourceProjectId,
-            ImageEditState.FromJson(x.SavedEditJson), Features(x), IsDeviceVariant: deviceVariant);
+            EffectiveEdit(x, json.RootElement), Features(x), IsDeviceVariant: deviceVariant);
+    }
+
+    private static ImageEditState? RequireEditable(WallpaperAsset asset)
+    {
+        var edit = EffectiveEdit(asset);
+        edit?.EnsureEditable();
+        return edit;
+    }
+
+    private static ImageEditState? EffectiveEdit(WallpaperAsset asset)
+    {
+        using var json = JsonDocument.Parse(asset.ManifestJson);
+        return EffectiveEdit(asset, json.RootElement);
+    }
+
+    private static ImageEditState? EffectiveEdit(WallpaperAsset asset, JsonElement manifest)
+    {
+        var edit = ImageEditState.FromJson(asset.SavedEditJson);
+        if (edit?.IsReadOnly == true) return edit;
+
+        // Older imports owned a copy of the files, but had neither an owned source
+        // project nor the creation fingerprint of an authored asset.
+        var deviceVariant = manifest.TryGetProperty("_deviceVariant", out var deviceFlag) && deviceFlag.ValueKind == JsonValueKind.True;
+        var authored = asset.SourceProjectId.HasValue ||
+            (manifest.TryGetProperty("_sourceFingerprint", out var fingerprint) && fingerprint.ValueKind == JsonValueKind.String) ||
+            (manifest.TryGetProperty("_ownerSnapshot", out var ownerFlag) && ownerFlag.ValueKind == JsonValueKind.True);
+        return deviceVariant || !authored
+            ? (edit ?? ImageEditState.Original() with { SavedAt = asset.CreatedAt }) with { IsReadOnly = true }
+            : edit;
     }
 
     private static IReadOnlyList<string> Features(WallpaperAsset asset)

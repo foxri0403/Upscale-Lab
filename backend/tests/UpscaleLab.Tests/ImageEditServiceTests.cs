@@ -60,7 +60,7 @@ public sealed class ImageEditServiceTests
     {
         await using var db = WorkflowData.Db(); var store = new WorkflowStore();
         var project = WorkflowData.Project(Guid.NewGuid()); db.Add(project);
-        var asset = new WallpaperAsset { UserId = project.UserId, SourceProjectId = project.Id, IsPublic = true };
+        var asset = new WallpaperAsset { UserId = project.UserId, SourceProjectId = project.Id, IsPublic = true, ManifestJson = "{}" };
         db.Add(asset); await db.SaveChangesAsync();
         var projects = new ProjectService(db, store); var assets = new WallpaperService(db, store, store);
         await Assert.ThrowsAsync<NotFoundException>(() => projects.SaveEditAsync(Guid.NewGuid(), project.Id, Initial, Ct));

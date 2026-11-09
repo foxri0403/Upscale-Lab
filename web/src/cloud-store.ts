@@ -182,7 +182,7 @@ export async function fetchLibrary(
     Promise.all(publicAssets.map((a) => assetPicture(a))),
   ]);
   const owned = new Set(assets.map((a) => a.id));
-  const preferences = read<Record<string, Partial<Picture>>>(
+  const preferences = read<Record<string, Pick<Picture, "edit">>>(
     preferencesKey(userId),
     {},
   );
@@ -211,10 +211,7 @@ export async function fetchLibrary(
   });
   const images = galleryImages(projectsWithMetadata, ownPictures).map((p) => ({
     ...p,
-    ...(p.savedAt ? {} : preferences[p.id]),
-    src: p.src,
-    background: p.background,
-    foregrounds: p.foregrounds,
+    edit: !p.savedAt && !p.isReadOnly ? preferences[p.id]?.edit ?? p.edit : p.edit,
   }));
   return {
     library: {
