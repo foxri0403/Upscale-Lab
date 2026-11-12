@@ -1,16 +1,14 @@
-import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Check, Eye, Layers3, RotateCcw, Save, Undo2 } from "lucide-react";
+import { useMemo, useState, type CSSProperties } from "react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, RotateCcw, Save, Undo2 } from "lucide-react";
 import type { ApiLayer } from "./api";
 import { assignableRigParts, rigPart, type RigPart } from "./character-rig";
 import type { HeadRig } from "./model";
 import { Modal, Busy } from "./ui";
-import {
-  addLayerToTop, automaticLayerIds, currentLayerIds, isCompleteStack,
-  moveLayer, removeLayer, type LayerStack,
-} from "./layer-stack";
+import { automaticLayerIds, currentLayerIds, isCompleteStack, moveLayer } from "./layer-stack";
 import "./layer-stack-editor.css";
 import { layerLabel } from "./layer-label";
 import { selectedLivePartId } from "./live-layer-preview";
+import { useMediaQuery } from "./use-media-query";
 
 type PartAssignments = HeadRig["partAssignments"];
 
@@ -21,33 +19,44 @@ export function LayerStackEditor({ layers, partAssignments, close, onSave }: {
   onSave: (order?: string[], assignments?: PartAssignments) => Promise<void>;
 }) {
   const [initial] = useState(() => currentLayerIds(layers));
-  const [stack, setStack] = useState<LayerStack>(() => ({
-    mode: initial.join(",") === automaticLayerIds(layers).join(",") ? "automatic" : "manual", ids: initial,
-  }));
+  const [order, setOrder] = useState(initial);
   const [assignments, setAssignments] = useState(partAssignments);
-  const [history, setHistory] = useState<LayerStack[]>([]);
+  const [history, setHistory] = useState<string[][]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [stageRatio, setStageRatio] = useState("1 / 1");
-  const [stageBackground, setStageBackground] = useState<"checker" | "light">("checker");
+  const [stageRatio, setStageRatio] = useState(1);
   const [requestedPreviewPartId, setRequestedPreviewPartId] = useState<string | null>(null);
+  const [partIndex, setPartIndex] = useState(0);
+  const partsPerPage = useMediaQuery("(max-height: 550px)") ? 3 : 5;
 
   const indexed = useMemo(() => new Map(layers.map(layer => [layer.id, layer])), [layers]);
   const previewPartId = selectedLivePartId(layers, requestedPreviewPartId);
-  const pending = layers.filter(layer => !stack.ids.includes(layer.id));
-  const backgroundLayer = layers.find(layer => layer.layerType === "Background");
-  const backgroundCorrect = !backgroundLayer || stack.ids[0] === backgroundLayer.id;
-  const complete = isCompleteStack(stack.ids, layers) && backgroundCorrect;
-  const orderChanged = stack.ids.join(",") !== initial.join(",");
+  const selectedLayer = previewPartId ? indexed.get(previewPartId) : undefined;
+  const selectedIndex = selectedLayer ? order.indexOf(selectedLayer.id) : -1;
+  const selectedName = selectedLayer ? `${layerLabel(selectedLayer.layerType)} · ${selectedIndex + 1}` : "파츠 선택";
+  const background = layers.find(layer => layer.layerType === "Background");
+  const complete = isCompleteStack(order, layers) && (!background || order[0] === background.id);
+  const orderChanged = order.join(",") !== initial.join(",");
   const rolesChanged = assignments !== undefined && layers.some(layer =>
     rigPart(layer.layerType, layer.id, assignments) !== rigPart(layer.layerType, layer.id, partAssignments));
   const changed = orderChanged || rolesChanged;
+  const automatic = automaticLayerIds(layers);
+  const previewIds = selectedLayer ? [selectedLayer.id] : order;
+  const page = Math.floor(partIndex / partsPerPage);
+  const pageCount = Math.ceil(order.length / partsPerPage);
+  const pageIds = [...order].reverse().slice(page * partsPerPage, (page + 1) * partsPerPage);
 
-  function changeStack(next: LayerStack) {
-    setRequestedPreviewPartId(null); // Editing the stack returns to the complete composition.
-    setHistory(previous => [...previous.slice(-63), stack]);
-    setStack(next);
+  function showOrder(next: string[]) {
+    setOrder(next);
+    if (selectedLayer) {
+      const index = next.indexOf(selectedLayer.id);
+      if (index >= 0) setPartIndex(next.length - 1 - index);
+    }
     setError("");
+  }
+  function changeOrder(next: string[]) {
+    setHistory(previous => [...previous.slice(-63), order]);
+    showOrder(next);
   }
   function safeClose() {
     if (saving) return;
@@ -59,134 +68,87 @@ export function LayerStackEditor({ layers, partAssignments, close, onSave }: {
     setSaving(true);
     setError("");
     try {
-      await onSave(orderChanged ? stack.ids : undefined, rolesChanged ? assignments : undefined);
+      await onSave(orderChanged ? order : undefined, rolesChanged ? assignments : undefined);
       close();
     } catch (e) {
       setError((e as Error).message);
     } finally { setSaving(false); }
   }
 
-  return <Modal title="수동 레이어 조합" close={safeClose} wide>
+  return <Modal title="수동 레이어 조합" close={safeClose} wide className="layer-stack-dialog">
     <div className="layer-stack-editor">
       {layers.length < 2 ?
         <p role="status">조합할 레이어가 없습니다. 먼저 이미지 분리를 완료해 주세요.</p> : <>
-        <div className="layer-stack-tabs" role="group" aria-label="레이어 합성 방식">
-          <button type="button" className={stack.mode === "automatic" ? "active" : ""}
-            aria-pressed={stack.mode === "automatic"}
-            onClick={() => changeStack({ mode: "automatic", ids: automaticLayerIds(layers) })}>
-            <Layers3 size={17} /> AI 자동 순서
-          </button>
-          <button type="button" className={stack.mode === "manual" ? "active" : ""}
-            aria-pressed={stack.mode === "manual"}
-            onClick={() => changeStack({ mode: "manual", ids: [] })}>
-            <ArrowUp size={17} /> 수동 조합 새로 시작
-          </button>
-        </div>
-        <div className="layer-stack-columns">
-          <div className="layer-stack-preview">
-            <div className="layer-stack-preview-heading">
-              <strong>{previewPartId ? "선택한 파츠 미리보기" : "실시간 합성 결과"}</strong>
-              <button type="button" onClick={() => setStageBackground(p => p === "checker" ? "light" : "checker")}>배경 전환</button>
-            </div>
-            <div className="layer-stack-view-modes" role="group" aria-label="레이어 미리보기 방식">
-              <button type="button" aria-pressed={previewPartId === null} className={previewPartId === null ? "active" : ""}
-                onClick={() => setRequestedPreviewPartId(null)}><Layers3 size={15} /> 전체 보기</button>
-              <button type="button" aria-pressed={previewPartId !== null} className={previewPartId !== null ? "active" : ""}
-                onClick={() => setRequestedPreviewPartId(previewPartId ?? stack.ids.at(-1) ?? layers[0]?.id ?? null)}>
-                <Eye size={15} /> 파츠별 보기</button>
-            </div>
-            <div className={`layer-stack-stage ${stageBackground}`} style={{ aspectRatio: stageRatio }} role="img"
-              aria-label={previewPartId ? `${layerLabel(indexed.get(previewPartId)?.layerType ?? "Other")} 파츠 단독 미리보기` : "레이어 합성 미리보기"}>
-              {(previewPartId ? [previewPartId] : stack.ids).map(id => {
+        <div className={`layer-stack-columns${assignments ? " with-roles" : ""}`}>
+          <div className="layer-stack-stage checker" role="img"
+            style={{ aspectRatio: stageRatio, "--layer-stack-ratio": stageRatio } as CSSProperties}
+            aria-label={selectedLayer ? `${selectedName} 파츠 미리보기` : "레이어 합성 미리보기"}>
+            {previewIds.map(id => {
+              const layer = indexed.get(id);
+              return layer && <img key={id} src={layer.imageUrl} alt="" draggable={false}
+                onLoad={event => {
+                  const { naturalWidth, naturalHeight } = event.currentTarget;
+                  if (id === previewIds[0] && naturalHeight) setStageRatio(naturalWidth / naturalHeight);
+                }} />;
+            })}
+          </div>
+          <section className="layer-stack-parts" aria-label="파츠 선택">
+            <h3>파츠 선택</h3>
+            <div className="layer-stack-items" role="group" aria-label="레이어 목록">
+              {pageIds.map((id, index) => {
                 const layer = indexed.get(id);
-                return layer && <img key={id} src={layer.imageUrl} alt="" draggable={false}
-                  onLoad={event => { if (id === (previewPartId ?? stack.ids[0]) && event.currentTarget.naturalHeight)
-                    setStageRatio(`${event.currentTarget.naturalWidth} / ${event.currentTarget.naturalHeight}`); }} />;
+                if (!layer) return null;
+                return <button type="button" className="layer-stack-item" key={id} aria-pressed={previewPartId === id}
+                  disabled={saving} onClick={() => setRequestedPreviewPartId(previewPartId === id ? null : id)}>
+                  <span className="layer-stack-thumb checker"><img src={layer.imageUrl} alt="" /></span>
+                  <span>{layerLabel(layer.layerType)} · {order.length - page * partsPerPage - index}</span>
+                </button>;
               })}
-              {!stack.ids.length && !previewPartId && <p>맨 아래에 놓을 파츠를 선택하세요.</p>}
             </div>
-            <span className="layer-stack-count">{previewPartId
-              ? `${layerLabel(indexed.get(previewPartId)?.layerType ?? "Other")} 파츠만 표시 중`
-              : `${stack.ids.length}/${layers.length}개 쌓음`}</span>
-          </div>
-          <div className="layer-stack-lists">
-            <section className="layer-stack-list-section">
-              <h3>추가할 파츠 <small>({pending.length}개)</small></h3>
-              <div className="layer-stack-items" aria-label="추가할 파츠 목록">
-                {!pending.length && <p className="layer-stack-empty">모든 파츠를 추가했어요.</p>}
-                {pending.map((layer) => <div className={`layer-stack-pending-row ${previewPartId === layer.id ? "selected" : ""}`} key={layer.id}>
-                  <button className="layer-stack-item pending" type="button"
-                    disabled={!!backgroundLayer && !stack.ids.length && layer.id !== backgroundLayer.id}
-                    title="조합 맨 위에 추가"
-                    onClick={() => changeStack({ mode: "manual", ids: addLayerToTop(stack.ids, layer.id, layers) })}>
-                    <span className="layer-stack-thumb"><img src={layer.imageUrl} alt="" /></span>
-                    <span>{layerLabel(layer.layerType)} · {layer.automaticOrder ?? layer.layerOrder}</span>
-                    <ArrowUp size={15} aria-hidden="true" />
-                    <span className="sr-only">맨 위에 추가</span>
-                  </button>
-                  <button className="layer-stack-preview-only" type="button" aria-pressed={previewPartId === layer.id}
-                    title="이 파츠만 보기" aria-label={`${layerLabel(layer.layerType)} 파츠만 보기`}
-                    onClick={() => setRequestedPreviewPartId(layer.id)}><Eye size={17} /></button>
-                </div>)}
+            <div className="layer-stack-part-actions">
+              {pageCount > 1 && <div className="layer-stack-pages" role="group" aria-label="파츠 목록 페이지">
+                <button type="button" aria-label="이전 파츠 목록" disabled={page === 0 || saving}
+                  onClick={() => setPartIndex((page - 1) * partsPerPage)}><ChevronLeft size={16} /></button>
+                <span aria-live="polite">{page + 1} / {pageCount}</span>
+                <button type="button" aria-label="다음 파츠 목록" disabled={page >= pageCount - 1 || saving}
+                  onClick={() => setPartIndex((page + 1) * partsPerPage)}><ChevronRight size={16} /></button>
+              </div>}
+              <div className="layer-stack-order" role="group" aria-label="선택한 파츠의 순서">
+                <button type="button" aria-label="앞쪽으로 한 칸" title="앞쪽으로 한 칸"
+                  disabled={!selectedLayer || saving || selectedIndex >= order.length - 1 || selectedLayer.id === background?.id}
+                  onClick={() => { if (selectedLayer) changeOrder(moveLayer(order, selectedLayer.id, 1)); }}><ArrowUp size={16} /></button>
+                <button type="button" aria-label="뒤쪽으로 한 칸" title="뒤쪽으로 한 칸"
+                  disabled={!selectedLayer || saving || selectedIndex <= (background ? 1 : 0)}
+                  onClick={() => { if (selectedLayer) changeOrder(moveLayer(order, selectedLayer.id, -1)); }}><ArrowDown size={16} /></button>
               </div>
-            </section>
-            <section className="layer-stack-list-section">
-              <h3>쌓은 파츠 <small>({stack.ids.length}개, 맨 위부터 표시)</small></h3>
-              <div className="layer-stack-items" aria-label="쌓은 파츠 목록">
-                {[...stack.ids].reverse().map((id, reversedIndex) => {
-                  const layer = indexed.get(id);
-                  if (!layer) return null;
-                  const index = stack.ids.length - 1 - reversedIndex;
-                  return <div className={`layer-stack-item stacked ${previewPartId === id ? "selected" : ""}`} key={id}>
-                    <span className="layer-stack-num">{index + 1}</span>
-                    <span className="layer-stack-thumb"><img src={layer.imageUrl} alt="" /></span>
-                    <button type="button" className="layer-stack-item-name layer-stack-select-part"
-                      title="이 파츠만 보기" aria-pressed={previewPartId === id}
-                      onClick={() => setRequestedPreviewPartId(id)}>
-                      {layerLabel(layer.layerType)} · {layer.automaticOrder ?? layer.layerOrder}
-                    </button>
-                    <button type="button" title="앞쪽으로 한 칸" aria-label={`${layerLabel(layer.layerType)} 앞쪽으로 한 칸`}
-                      disabled={index === stack.ids.length - 1 || layer.layerType === "Background"}
-                      onClick={() => changeStack({ mode: "manual", ids: moveLayer(stack.ids, id, 1) })}><ArrowUp size={15} /></button>
-                    <button type="button" title="뒤쪽으로 한 칸" aria-label={`${layerLabel(layer.layerType)} 뒤쪽으로 한 칸`}
-                      disabled={index === 0 || (index === 1 && !!backgroundLayer)}
-                      onClick={() => changeStack({ mode: "manual", ids: moveLayer(stack.ids, id, -1) })}><ArrowDown size={15} /></button>
-                    <button type="button" title="쌓기에서 제거" aria-label={`${layerLabel(layer.layerType)} 제거`}
-                      onClick={() => changeStack({ mode: "manual", ids: removeLayer(stack.ids, id) })}>×</button>
-                  </div>;
-                })}
-                {!stack.ids.length && <p className="layer-stack-empty">아직 쌓은 파츠가 없습니다.</p>}
-              </div>
-            </section>
-          </div>
-        </div>
-        {assignments && <fieldset className="layer-stack-roles" disabled={saving}>
-          <legend>PNG 파츠 역할</legend>
-          <div>
-            {layers.map((layer, index) => <label key={layer.id}>
-              <span>{layerLabel(layer.layerType)} #{index + 1}</span>
-              <select aria-label={`${layerLabel(layer.layerType)} ${index + 1} 움직임 부위`}
-                value={rigPart(layer.layerType, layer.id, assignments)}
+            </div>
+          </section>
+          {assignments && <fieldset className="layer-stack-roles" disabled={!selectedLayer || saving}>
+            <legend>PNG 파츠 역할</legend>
+            <label>
+              {selectedLayer && <span>{selectedName}</span>}
+              <select aria-label={`${selectedName} 움직임 부위`}
+                value={selectedLayer ? rigPart(selectedLayer.layerType, selectedLayer.id, assignments) : ""}
                 onChange={event => {
+                  if (!selectedLayer) return;
                   const part = event.currentTarget.value as RigPart;
-                  setAssignments(previous => ({ ...previous, [layer.id]: part }));
+                  setAssignments(previous => ({ ...previous, [selectedLayer.id]: part }));
                 }}>
+                <option value="" disabled>파츠 선택</option>
                 {assignableRigParts.map(part => <option key={part.value} value={part.value}>{part.label}</option>)}
               </select>
-            </label>)}
-          </div>
-        </fieldset>}
+            </label>
+          </fieldset>}
+        </div>
         <div className="layer-stack-footer">
           <div className="layer-stack-tools">
             <button type="button" disabled={!history.length || saving}
               onClick={() => {
-                setStack(history[history.length - 1]);
-                setRequestedPreviewPartId(null);
-                setHistory(h => h.slice(0, -1));
+                showOrder(history[history.length - 1]);
+                setHistory(previous => previous.slice(0, -1));
               }}><Undo2 size={16} /> 되돌리기</button>
-            <button type="button" disabled={saving}
-              onClick={() => changeStack({ mode: "automatic", ids: automaticLayerIds(layers) })}>
-              <RotateCcw size={16} /> AI 순서로 복원</button>
+            <button type="button" disabled={saving || automatic.join(",") === order.join(",")}
+              onClick={() => changeOrder(automatic)}><RotateCcw size={16} /> AI 순서로 복원</button>
           </div>
           <div className="layer-stack-save-actions">
             <button type="button" className="button secondary" onClick={safeClose} disabled={saving}>취소</button>
@@ -194,14 +156,10 @@ export function LayerStackEditor({ layers, partAssignments, close, onSave }: {
               disabled={saving || !complete || !changed}>
               {saving ? <Busy /> : <Save size={16} />}
               {saving ? "저장 중…" : partAssignments ? "레이어 변경 적용" : "이 순서로 저장"}
-              {!changed && complete && <Check size={14} />}
             </button>
           </div>
         </div>
-        {!complete && <p className="layer-stack-warning" role="status">
-          {backgroundCorrect ? `저장하려면 모든 파츠를 한 번씩 쌓아야 합니다. (${pending.length}개 남음)`
-            : "배경 레이어는 가장 아래에 배치해야 합니다."}
-        </p>}
+        {!complete && <p className="layer-stack-error" role="status">저장할 레이어 순서를 확인해 주세요.</p>}
       </>}
       {error && <p className="layer-stack-error" role="alert">{error}</p>}
     </div>

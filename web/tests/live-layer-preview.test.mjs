@@ -35,6 +35,7 @@ test("main studio and reorder dialog expose accessible part-only controls", () =
   assert.match(studio, /setRequestedLivePartId\(null\)[\s\S]*?<span>전체<\/span>/);
   assert.doesNotMatch(studio, /전체 합성 보기|파츠별 보기/);
   assert.match(canvas, /livePreviewLayers\(/);
-  assert.match(editor, /layer-stack-preview-only/);
-  assert.match(editor, /setRequestedPreviewPartId\(null\)/);
+  assert.match(editor, /aria-pressed=\{previewPartId === id\}/);
+  assert.match(editor, /setRequestedPreviewPartId\(previewPartId === id \? null : id\)/);
+  assert.doesNotMatch(editor, /실시간 합성 결과|파츠별 보기|추가할 파츠/);
 });
