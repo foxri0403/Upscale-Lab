@@ -20,13 +20,12 @@ test("unknown image dimensions and unsupported presets do not invent a target si
   assert.equal(upscaleDimensions(1920, 1080, 4096), null);
 });
 
-test("completed FHD, QHD and 4K outputs allow same-resolution revisions, but do not permit downscaling", () => {
-  for (const edge of [1920, 2560, 3840]) {
-    assert.equal(canSelectUpscaleResolution(edge, edge, true), true);
-    assert.equal(canSelectUpscaleResolution(edge, edge, false), false);
-    assert.equal(canSelectUpscaleResolution(edge, edge + 10, true), false);
-  }
-  assert.equal(canSelectUpscaleResolution(1920, 1080, false), true);
-  assert.equal(canSelectUpscaleResolution(1920, 0, true), false);
-  assert.equal(canSelectUpscaleResolution(4096, 1920, true), false);
+test("Studio offers only presets above the current longest edge", () => {
+  const available = longest => upscaleResolutions.filter(({ edge }) => canSelectUpscaleResolution(edge, longest)).map(({ name }) => name);
+  assert.deepEqual(available(1536), ["FHD", "QHD", "4K"]);
+  assert.deepEqual(available(1920), ["QHD", "4K"]);
+  assert.deepEqual(available(2560), ["4K"]);
+  assert.deepEqual(available(3840), []);
+  assert.deepEqual(available(0), []);
+  assert.equal(canSelectUpscaleResolution(4096, 1920), false);
 });

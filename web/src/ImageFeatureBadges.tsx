@@ -8,7 +8,7 @@ export function ImageFeatureBadges({ picture }: { picture: Picture }) {
   return (
     <div className="card-meta" aria-label="적용 기술">
       {features.map(feature => (
-        <span key={feature} className={`type-badge ${feature === "Live 2D" ? "live" : ""}`}>
+        <span key={feature} className="type-badge">
           {feature === "Live 2D" ? <Layers3 size={14} />
             : feature === "배경 분리" ? <Scan size={14} /> : <Expand size={14} />}
           {feature}

@@ -139,7 +139,7 @@ export function Studio({ route }: { route: string }) {
   const pointer = useRef({ x: 0, y: 0 });
   const allTags = useRef<HTMLInputElement>(null);
   const settingsScroll = useRef<HTMLDivElement>(null);
-  const [resolution, setResolution] = useState(2560);
+  const [upscaleSelection, setUpscaleSelection] = useState<{ pictureId: string; jobId?: string; edge: number }>();
   const [imageDimensions, setImageDimensions] = useState({ src: "", width: 0, height: 0 });
   const [dialog, setDialog] = useState<"apply" | "info" | "layerStack" | null>(null);
   const [busy, setBusy] = useState(false);
@@ -259,7 +259,11 @@ export function Studio({ route }: { route: string }) {
   const sourceWidth = dimensions?.width || 0;
   const sourceHeight = dimensions?.height || 0;
   const longest = Math.max(sourceWidth, sourceHeight);
-  const targetDimensions = upscaleDimensions(sourceWidth, sourceHeight, resolution);
+  const availableResolutions = upscaleResolutions.filter(({ edge }) => canSelectUpscaleResolution(edge, longest));
+  const preferredEdge = upscaleSelection?.pictureId === picture?.id && upscaleSelection?.jobId === picture?.jobId
+    ? upscaleSelection?.edge : undefined;
+  const resolution = availableResolutions.find(({ edge }) => edge === preferredEdge)?.edge ?? availableResolutions[0]?.edge;
+  const targetDimensions = resolution ? upscaleDimensions(sourceWidth, sourceHeight, resolution) : null;
   const liveMotion = tool === "live" && isCharacterProject && activeLivePartId === null;
   const backgroundMotion = tool === "layers" && isFox && !separationConflict && selectedLayer !== "background" && (published || separation.view === "motion");
   const motion = useParallax(liveMotion || backgroundMotion, edit.strength,
@@ -286,11 +290,6 @@ export function Studio({ route }: { route: string }) {
       if (gyroContext.current.id === requestedFor && gyroContext.current.editable) changeMotionInput("gyroEnabled", true);
     } catch (error) { toast((error as Error).message); }
   }
-  useEffect(() => {
-    if (!longest || job?.status === "Completed") return;
-    setResolution(current => current > longest ? current
-      : upscaleResolutions.find(value => value.edge > longest)?.edge || 3840);
-  }, [longest, job?.status]);
   function change<K extends keyof Edit>(key: K, value: Edit[K]) {
     if (published) return;
     setEdit((e) => ({ ...e, [key]: value }));
@@ -413,6 +412,7 @@ export function Studio({ route }: { route: string }) {
   async function startProcessing() {
     if (!picture || published || busy || processing || checkingJob || cropAutosave.pending || separationConflict ||
         separation.tracing || separation.drawing || separation.polygonPoints) return;
+    if (tool === "upscale" && !resolution) return;
     if (tool === "layers") {
       if (isFox) { await applySubjectEdits(); return; }
       setSelectedLayer("all"); separation.setView("overlay");
@@ -624,7 +624,8 @@ export function Studio({ route }: { route: string }) {
                 const size = upscaleDimensions(sourceWidth, sourceHeight, edge);
                 return <button key={edge} aria-pressed={resolution === edge}
                   className={resolution === edge ? "active" : ""}
-                  disabled={!canSelectUpscaleResolution(edge, longest, !!picture.jobId)} onClick={() => setResolution(edge)}>
+                  disabled={!canSelectUpscaleResolution(edge, longest)}
+                  onClick={() => setUpscaleSelection({ pictureId: picture.id, jobId: picture.jobId, edge })}>
                   <strong>{name}</strong><span>{size ? `${size.width.toLocaleString()} × ${size.height.toLocaleString()}` : `${edge.toLocaleString()}px`}</span>
                 </button>;
               })}
@@ -650,7 +651,7 @@ export function Studio({ route }: { route: string }) {
                 (tool === "layers" && capabilities?.layers === false) ||
                 (tool === "live" && !separationAvailable("character", capabilities)) ||
                 (tool === "upscale" && capabilities?.upscale === false) ||
-                (tool === "upscale" && !canSelectUpscaleResolution(resolution, longest, !!picture.jobId))
+                (tool === "upscale" && !resolution)
               }
               onClick={() => void startProcessing()}
             >
@@ -665,6 +666,10 @@ export function Studio({ route }: { route: string }) {
                 : tool === "live" ? "파츠 분리 시작" : isFox ? "피사체 다시 분리" : "피사체 자동 분리"}
             </button>
             <TokenUsageHelp />
+            {tool === "layers" && !separationConflict && <button className="button secondary full effect-cancel" type="button"
+              disabled={!picture.projectId || !isFox || separation.dirty} onClick={() => void resetEffects("Layers")}>
+              <RotateCcw size={16} />배경 분리 적용 취소
+            </button>}
             {separationConflict && <Notice>{separationConflict}</Notice>}
             {tool === "layers" && separation.error && <p className="mask-error" role="alert">{separation.error}</p>}
             {tool === "upscale" && <button className="button secondary full effect-cancel" type="button"
@@ -692,13 +697,9 @@ export function Studio({ route }: { route: string }) {
           <LayerPreviewSelector value={selectedLayer} change={value => { setSelectedLayer(value); if (value !== "background") separation.setView(value === "subject" ? "cutout" : "overlay"); }}
             ready={isFox} original={picture.src} background={backgroundSrc} foregrounds={foregroundSrcs} layers={picture.layers}
             edit={edit} width={sourceWidth} height={sourceHeight} />
-          <fieldset className="photo-settings layer-motion-settings" disabled={published || busy || processing || separation.dirty}>
+          <fieldset className="photo-settings" disabled={published || busy || processing || separation.dirty}>
             <LayerMotionControls edit={edit} ready={isFox} change={(key, value) => { change(key, value); separation.setView("motion"); }}
               gyroPending={motion.gyroPending} toggleGyro={() => { separation.setView("motion"); void toggleGyro(); }} />
-            <button className="button secondary full effect-cancel" type="button"
-              disabled={!picture.projectId || !isFox || separation.dirty} onClick={() => void resetEffects("Layers")}>
-              <RotateCcw size={16} />배경 분리 적용 취소
-            </button>
           </fieldset>
         </>}
         {tool === "live" && <div className="studio-live-controls">
