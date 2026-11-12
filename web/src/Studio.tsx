@@ -96,7 +96,7 @@ const tools: {
     name: "필터",
     icon: SlidersHorizontal,
   },
-  { id: "tags", name: "태그 수정", icon: Tag },
+  { id: "tags", name: "태그", icon: Tag },
 ];
 const normalizedEdit = (value?: Edit) => ({ ...defaultEdit, ...value, strength: motionStrength(value), motionDefaultsVersion: 1 });
 export function Studio({ route }: { route: string }) {
