@@ -47,9 +47,10 @@ export function LayerStackEditor({ layers, rig, close, onSave }: {
   const automatic = automaticLayerIds(layers);
   const groupById = new Map(layers.map(layer => [layer.id, rigMovementGroup(rigPart(layer.layerType, layer.id, assignments))]));
   const selectedGroup = rigMovementGroups.find(group => group.id === activeGroup);
-  const previewIds = selectedLayer && !selectedGroup && !testing ? [selectedLayer.id] : order;
+  const previewIds = selectedLayer && !selectedGroup ? [selectedLayer.id] : order;
   const topFirst = [...order].reverse();
-  const motion = useCharacterRig(testing && !saving, rig && { ...rig, enabled: true, partAssignments: assignments ?? {} }, previewIds.join(","), undefined, true);
+  const motion = useCharacterRig(testing && !!selectedGroup && !saving, rig && { ...rig, enabled: true, partAssignments: assignments ?? {} },
+    `${activeGroup ?? ""}:${previewIds.join(",")}`, undefined, true);
 
   useLayoutEffect(() => {
     const list = partsList.current;
@@ -82,6 +83,10 @@ export function LayerStackEditor({ layers, rig, close, onSave }: {
     setAssignments(previous => ({ ...previous, [layer.id]: toggleRigMovementGroup(group,
       rigPart(layer.layerType, layer.id, previous), rigPart(layer.layerType, layer.id, partAssignments), rigPart(layer.layerType)) }));
   }
+  function selectGroup(group: RigMovementGroup | null) {
+    setActiveGroup(group);
+    if (!group) setTesting(false);
+  }
   function safeClose() {
     if (saving) return;
     if (changed && !window.confirm("적용하지 않은 레이어 변경을 버릴까요?")) return;
@@ -106,13 +111,14 @@ export function LayerStackEditor({ layers, rig, close, onSave }: {
         <div className={`layer-stack-columns${assignments ? " with-groups" : ""}`}>
           <div className="layer-stack-stage checker" role="img" ref={motion.stage}
             style={{ aspectRatio: stageRatio, "--layer-stack-ratio": stageRatio } as CSSProperties}
-            aria-label={selectedGroup ? `${selectedGroup.label} 그룹 미리보기` : selectedLayer && !testing ? `${selectedName} 파츠 미리보기` : "레이어 합성 미리보기"}>
+            aria-label={selectedGroup ? `${selectedGroup.label} 그룹 미리보기` : selectedLayer ? `${selectedName} 파츠 미리보기` : "레이어 합성 미리보기"}>
             <div className="layer-stack-preview-plane" ref={motion.layers}>
               {previewIds.map(id => {
                 const layer = indexed.get(id);
+                const inGroup = selectedGroup && groupById.get(id) === selectedGroup.id;
                 return layer && <img key={id} src={layer.imageUrl} alt="" draggable={false}
-                  className={selectedGroup && groupById.get(id) !== selectedGroup.id ? "layer-stack-dimmed" : undefined}
-                  data-rig-part={rig ? rigPart(layer.layerType, id, assignments) : undefined}
+                  className={selectedGroup && !inGroup ? "layer-stack-dimmed" : undefined}
+                  data-rig-part={inGroup ? rigPart(layer.layerType, id, assignments) : undefined}
                   onLoad={event => {
                     const { naturalWidth, naturalHeight } = event.currentTarget;
                     if (id === previewIds[0] && naturalHeight) setStageRatio(naturalWidth / naturalHeight);
@@ -126,7 +132,7 @@ export function LayerStackEditor({ layers, rig, close, onSave }: {
               <button type="button" className="layer-stack-item layer-stack-all" ref={allLayersRow}
                 aria-pressed={!selectedLayer && !selectedGroup} disabled={saving} onClick={() => {
                   setRequestedPreviewPartId(null);
-                  setActiveGroup(null);
+                  selectGroup(null);
                 }}>
                 <span className="layer-stack-thumb layer-stack-composite checker">{order.map(id => {
                   const layer = indexed.get(id);
@@ -149,10 +155,10 @@ export function LayerStackEditor({ layers, rig, close, onSave }: {
                   <div className="layer-stack-order" role="group" aria-label={`${name} 순서`}>
                     <button type="button" aria-label={`${name} 앞쪽으로 한 칸`} title="앞쪽으로 한 칸"
                       disabled={saving || index === 0 || id === background?.id}
-                      onClick={() => move(id, 1)}><ArrowUp size={14} /></button>
+                      onClick={() => move(id, 1)}><ArrowUp size={16} /></button>
                     <button type="button" aria-label={`${name} 뒤쪽으로 한 칸`} title="뒤쪽으로 한 칸"
                       disabled={saving || position <= (background ? 2 : 1)}
-                      onClick={() => move(id, -1)}><ArrowDown size={14} /></button>
+                      onClick={() => move(id, -1)}><ArrowDown size={16} /></button>
                   </div>
                 </div>;
               })}
@@ -162,7 +168,7 @@ export function LayerStackEditor({ layers, rig, close, onSave }: {
             <h3>움직임 그룹 수정</h3>
             <div className="layer-stack-group-options" role="group" aria-label="미리 볼 움직임 그룹">
               {rigMovementGroups.map(group => <button key={group.id} type="button" aria-pressed={activeGroup === group.id}
-                disabled={saving} onClick={() => setActiveGroup(current => current === group.id ? null : group.id)}>
+                disabled={saving} onClick={() => selectGroup(activeGroup === group.id ? null : group.id)}>
                 <span>{group.label}</span>
                 <small>{[...groupById.values()].filter(groupId => groupId === group.id).length}개</small>
               </button>)}
@@ -196,7 +202,8 @@ export function LayerStackEditor({ layers, rig, close, onSave }: {
                 </optgroup>)}
               </select>
             </label>}
-            <button className="button secondary layer-stack-motion-test" type="button" aria-pressed={testing} disabled={saving}
+            <button className="button secondary layer-stack-motion-test" type="button" aria-pressed={testing} disabled={saving || !selectedGroup}
+              title={!selectedGroup ? "움직임 그룹을 먼저 선택해 주세요" : undefined}
               onClick={() => setTesting(value => !value)}>
               {testing ? <Square size={15} /> : <Play size={15} />}{testing ? "테스트 중지" : "움직임 테스트"}
             </button>
