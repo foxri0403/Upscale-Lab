@@ -218,6 +218,13 @@ export function Studio({ route }: { route: string }) {
     !picture?.separationDisabled && (!!(picture?.background && picture.foregrounds?.length) ||
     (!cloud && !!picture?.src.endsWith("/fox.png")));
   const isCharacterProject = !!picture?.layers?.length && !picture.layers.some(layer => layer.layerType === "Background");
+  const hasCharacterSeparation = isCharacterProject || (isFox && picture?.features?.includes("Live 2D") &&
+    !picture.features.includes("배경 분리"));
+  const separationConflict = tool === "layers" && hasCharacterSeparation
+    ? "배경 분리를 적용하려면 Live 2D 탭에서 기존 적용을 취소해 주세요."
+    : tool === "live" && isFox && !hasCharacterSeparation
+      ? "Live 2D를 적용하려면 배경 분리 탭에서 기존 적용을 취소해 주세요."
+      : undefined;
   const activeLivePartId = selectedLivePartId(picture?.layers ?? [], requestedLivePartId);
   const characterRig = useCharacterRig(tool === "live" && isCharacterProject && activeLivePartId === null, edit.rig,
     picture ? `${picture.id}:${picture.layers?.map(layer => layer.id).join(",") || "none"}` : undefined);
@@ -228,7 +235,7 @@ export function Studio({ route }: { route: string }) {
   const published = isImageShared(picture);
   const processing = !!job && ["Queued", "Processing"].includes(job.status);
   const separation = useSubjectSeparation(picture && isFox ? { ...picture, foregrounds: foregroundSrcs } : picture,
-    tool === "layers" && !published, published || busy || processing || !isFox, undefined, true);
+    tool === "layers" && !published && !separationConflict, published || busy || processing || !isFox, undefined, true);
   const dirty = cropAutosave.pending || separation.dirty ||
     JSON.stringify(normalizedEdit(edit)) !== JSON.stringify(normalizedEdit(picture?.edit)) ||
     name.trim() !== picture?.name || JSON.stringify(tags) !== JSON.stringify(picture ? imageTags(picture) : []) ||
@@ -292,14 +299,16 @@ export function Studio({ route }: { route: string }) {
     setBusy(true);
     try {
       const nextEdit = feature === "All" ? { ...defaultEdit }
-        : { ...edit, ...(feature === "Upscale" ? { scale: 1 } : { mouseEnabled: false, gyroEnabled: false, foreground: true }) };
+        : { ...edit, ...(feature === "Upscale" ? { scale: 1 } : { mouseEnabled: false, gyroEnabled: false, foreground: true,
+            ...(hasCharacterSeparation ? { liveEnabled: false } : {}) }) };
       const next = cloud && picture.projectId ? await resetProjectEffects(picture, feature)
         : { ...picture, ...(feature !== "Upscale" ? { separationDisabled: true, background: undefined, foregrounds: [], kind: undefined, features: [] } : {}) };
       update(value => ({ ...value, images: value.images.map(p => p.id === picture.id ? next : p),
         assets: value.assets?.map(p => p.id === picture.id ? next : p) }));
       setEdit(nextEdit); setSelectedLayer("all"); setJob(null);
       toast(feature === "All" ? "모든 이미지 편집을 초기화하고 원본으로 복구했습니다."
-        : feature === "Upscale" ? "업스케일 적용을 취소했습니다." : "배경 분리와 움직임 적용을 취소했습니다.");
+        : feature === "Upscale" ? "업스케일 적용을 취소했습니다."
+        : hasCharacterSeparation ? "Live 2D 적용을 취소했습니다." : "배경 분리와 움직임 적용을 취소했습니다.");
     } catch (error) { toast((error as Error).message); }
     finally { setBusy(false); }
   }
@@ -391,7 +400,8 @@ export function Studio({ route }: { route: string }) {
     finally { setCopyingAsset(false); }
   }
   async function startProcessing() {
-    if (!picture || published || busy || processing || checkingJob || cropAutosave.pending || separation.tracing || separation.drawing || separation.polygonPoints) return;
+    if (!picture || published || busy || processing || checkingJob || cropAutosave.pending || separationConflict ||
+        separation.tracing || separation.drawing || separation.polygonPoints) return;
     if (tool === "layers") {
       if (isFox) { await applySubjectEdits(); return; }
       setSelectedLayer("all"); separation.setView("overlay");
@@ -612,11 +622,6 @@ export function Studio({ route }: { route: string }) {
               <div><dt>현재</dt><dd>{sourceWidth && sourceHeight ? `${sourceWidth.toLocaleString()} × ${sourceHeight.toLocaleString()} px` : "확인 중…"}</dd></div>
               <div><dt>결과</dt><dd>{targetDimensions ? `${targetDimensions.width.toLocaleString()} × ${targetDimensions.height.toLocaleString()} px` : "—"}</dd></div>
             </dl>
-            {cloud && picture.projectId && !!picture.jobId && <div className="studio-followup-action">
-              <p>완료된 업스케일 결과를 그대로 Live2D 파츠 분리의 입력으로 사용할 수 있습니다. 먼저 비율을 자르고 싶다면 ‘자르기’ 탭에서 새 Live2D 프로젝트를 만드세요.</p>
-              <button type="button" className="button secondary full" disabled={busy || processing || checkingJob || cropAutosave.pending}
-                onClick={() => setTool("live")}><Layers3 size={16} /> 이 업스케일 결과로 Live2D 진행</button>
-            </div>}
           </>
         )}
         {tool === "live" && <section className="studio-live-intro">
@@ -630,7 +635,7 @@ export function Studio({ route }: { route: string }) {
             <button
               className={`button primary full ${tool === "layers" ? "separation-action" : ""}`}
               disabled={
-                busy || checkingJob || cropAutosave.pending ||
+                busy || checkingJob || cropAutosave.pending || !!separationConflict ||
                 !cloud ||
                 !picture.projectId ||
                 processing ||
@@ -655,11 +660,17 @@ export function Studio({ route }: { route: string }) {
                 : tool === "live" ? "캐릭터 파츠 분리 시작" : isFox ? "피사체 다시 분리" : "피사체 자동 분리"}
             </button>
             <TokenUsageHelp />
+            {separationConflict && <Notice>{separationConflict}</Notice>}
             {tool === "layers" && separation.error && <p className="mask-error" role="alert">{separation.error}</p>}
             {tool === "upscale" && <button className="button secondary full effect-cancel" type="button"
               disabled={busy || processing || !picture.projectId || !picture.jobId}
               onClick={() => void resetEffects("Upscale")}>
               <RotateCcw size={16} />업스케일 적용 취소
+            </button>}
+            {tool === "live" && hasCharacterSeparation && <button className="button secondary full effect-cancel" type="button"
+              disabled={!picture.projectId || checkingJob || cropAutosave.pending || separation.dirty}
+              onClick={() => void resetEffects("Layers")}>
+              <RotateCcw size={16} />Live 2D 적용 취소
             </button>}
             {tool === "layers" && capabilities?.layers === false && <Notice>배경 분리 서비스 연결을 준비하고 있습니다.</Notice>}
             {tool === "live" && capabilities?.characterLayers !== true &&
@@ -676,7 +687,7 @@ export function Studio({ route }: { route: string }) {
           </div>
         )}
         </fieldset>
-        {tool === "layers" && <>
+        {tool === "layers" && !separationConflict && <>
           {!published && <SubjectSeparationControls editor={separation} disabled={busy || processing} hasResult={isFox}
             selectTool={() => { setSelectedLayer("all"); separation.setView("overlay"); }} />}
           <LayerPreviewSelector value={selectedLayer} change={value => { setSelectedLayer(value); if (value !== "background") separation.setView(value === "subject" ? "cutout" : "overlay"); }}

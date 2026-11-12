@@ -107,6 +107,7 @@ type DemoContext = {
   loading: boolean;
 };
 const Demo = createContext<DemoContext | null>(null);
+const likedRecommendationLimit = 5;
 export function useDemo() {
   return useContext(Demo)!;
 }
@@ -771,7 +772,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   }
   selectedPlatforms.forEach(tag => queryParams.append("platformTags", tag));
   const remote = useExploreResults(queryParams.toString(), shared, explore && cloud);
-  const ranked = useExploreResults("sort=likes&limit=8", shared, explore && cloud);
+  const ranked = useExploreResults(`sort=likes&limit=${likedRecommendationLimit}`, shared, explore && cloud);
   function withEngagement(picture: Picture): Picture {
     if (cloud) return { ...picture, ...engagement[picture.id] };
     const entry = localEngagement[picture.id];
@@ -893,7 +894,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     [...all, ...(ranked?.pictures || [])].map(picture => [picture.id, picture]),
   ).values()].map(withEngagement), "likes");
   const hasLikedRecommendations = (rankedRecommendations[0]?.likes ?? 0) > 0;
-  const recommendations = hasLikedRecommendations ? rankedRecommendations.slice(0, 8)
+  const recommendations = hasLikedRecommendations ? rankedRecommendations.slice(0, likedRecommendationLimit)
     : randomRecommendations(all.map(withEngagement), recommendationSeed);
   async function importPicture(p: Picture, open: boolean) {
     if (importing || (open && !isOwnExplorePicture(p, session.id, ownedPictures))) return;

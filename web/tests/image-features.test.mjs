@@ -9,11 +9,11 @@ test('character parts fix the old background-separation label even with motion o
 test('rendered static character exports retain their server Live 2D feature', () => {
   assert.deepEqual(imageFeatures({ features: ['업스케일', 'Live 2D'], edit: { liveEnabled: false } }), ['업스케일', 'Live 2D']);
 });
-test('photo separation retains its label and its independent motion toggle', () => {
+test('photo separation retains only its own label even when legacy motion is enabled', () => {
   const picture = { features: ['배경 분리'], background: '/back.png', foregrounds: ['/front.png'],
     layers: [{ layerType: 'Background' }, { layerType: 'Body' }] };
   assert.deepEqual(imageFeatures({ ...picture, edit: { liveEnabled: false } }), ['배경 분리']);
-  assert.deepEqual(imageFeatures({ ...picture, edit: { liveEnabled: true } }), ['배경 분리', 'Live 2D']);
+  assert.deepEqual(imageFeatures({ ...picture, edit: { liveEnabled: true } }), ['배경 분리']);
 });
 test('unprocessed images have no invented features and upscaled images retain theirs', () => {
   assert.deepEqual(imageFeatures({}), []);

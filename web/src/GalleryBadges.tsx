@@ -56,7 +56,7 @@ export function PlatformTagList({ picture }: { picture: Picture }) {
 export function LowerTagList({ picture }: { picture: Picture }) {
   const tags = imageTags(picture);
   return <ul className="image-tag-list" aria-label="하위 태그">
-    {tags.length ? tags.map(tag => <li key={tag}>{tag}</li>) : <li>하위 태그 없음</li>}
+    {tags.length ? tags.map(tag => <li key={tag}>{tag}</li>) : <li>태그 없음</li>}
   </ul>;
 }
 

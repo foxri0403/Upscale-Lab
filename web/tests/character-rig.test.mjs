@@ -59,7 +59,7 @@ test("character processing and rig options are isolated to the Live tab", () => 
   const source = fs.readFileSync(new URL("../src/Studio.tsx", import.meta.url), "utf8");
   assert.match(source, /tool === "live" \? "CharacterLayers" : "Layers"/);
   assert.match(source, /tool === "live" && <div className="studio-live-controls">/);
-  assert.match(source, /tool === "layers" && <>/);
+  assert.match(source, /tool === "layers" && !separationConflict && <>/);
   assert.doesNotMatch(source, /setSeparationMode/);
 });
 

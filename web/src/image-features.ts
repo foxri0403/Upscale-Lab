@@ -9,8 +9,8 @@ export function imageFeatures(picture: Pick<Picture, "features" | "kind" | "back
     features.add("Live 2D");
   } else {
     if (picture.background && picture.foregrounds?.length) features.add("배경 분리");
-    if (picture.edit?.liveEnabled === true) features.add("Live 2D");
-    if (picture.edit?.liveEnabled === false) features.delete("Live 2D");
+    if (features.has("배경 분리") || picture.edit?.liveEnabled === false) features.delete("Live 2D");
+    else if (picture.edit?.liveEnabled === true) features.add("Live 2D");
   }
   return ["업스케일", "배경 분리", "Live 2D"].filter(feature => features.has(feature));
 }

@@ -10,6 +10,7 @@ using UpscaleLab.Application.Upscaling;
 using UpscaleLab.Domain.Entities;
 using UpscaleLab.Domain.Enums;
 using UpscaleLab.Infrastructure.Database;
+using UpscaleLab.Infrastructure.Projects;
 using UpscaleLab.Infrastructure.Tokens;
 using UpscaleLab.Domain.Tokens;
 
@@ -66,6 +67,7 @@ public sealed class ProjectProcessingService(
                 Math.Max(x.ResultWidth, x.ResultHeight) > edge))
                 throw new ConflictException("더 높은 해상도의 업스케일 결과가 이미 있습니다.");
         }
+        RequireCompatibleSeparation(project, request.Operation);
         if (!processor.Supports(request.Operation))
             throw new ConfigurationException(request.Operation == ProcessingOperation.CharacterLayers
                 ? "캐릭터 파츠 분리 서비스가 아직 연결되지 않았습니다."
@@ -154,6 +156,8 @@ public sealed class ProjectProcessingService(
                         or ProcessingJobStatus.Processing))
                 throw new ConflictException(
                     "이미 처리 중인 프로젝트입니다.");
+
+            RequireCompatibleSeparation(latestProject, request.Operation);
 
             if (request.Operation == ProcessingOperation.Upscale &&
                 request.TargetLongEdge is int targetEdge &&
@@ -616,6 +620,17 @@ public sealed class ProjectProcessingService(
                 logger.LogWarning(exception, "Failed to clean processing workspace {Workspace}", workspace);
             }
         }
+    }
+
+    private static void RequireCompatibleSeparation(LiveLayerProject project, ProcessingOperation operation)
+    {
+        if (project.Layers.Count < 2 || operation == ProcessingOperation.Upscale) return;
+
+        var character = ProjectFeatures.HasCharacterLayers(project);
+        if (operation == ProcessingOperation.CharacterLayers && !character)
+            throw new ConflictException("Live 2D를 적용하려면 기존 배경 분리 적용을 취소해 주세요.");
+        if (character && operation is ProcessingOperation.Layers or ProcessingOperation.UpscaleAndLayers)
+            throw new ConflictException("배경 분리를 적용하려면 기존 Live 2D 적용을 취소해 주세요.");
     }
 
     private static int CalculateTokenCost(

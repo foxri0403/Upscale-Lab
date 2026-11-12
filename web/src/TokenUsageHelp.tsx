@@ -13,7 +13,8 @@ export function TokenUsageHelp() {
     const position = () => {
       const anchor = trigger.current!.getBoundingClientRect();
       const bounds = popup.getBoundingClientRect();
-      const left = Math.max(12, Math.min(anchor.left, innerWidth - bounds.width - 12));
+      const viewportRight = document.documentElement.getBoundingClientRect().right;
+      const left = Math.max(12, Math.min(anchor.left - 12, viewportRight - bounds.width - 12));
       const below = anchor.bottom + 8;
       const top = below + bounds.height <= innerHeight - 12 ? below : anchor.top - bounds.height - 8;
       popup.style.left = `${left}px`;
