@@ -7,7 +7,7 @@
 .separation-controls output { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 .separation-controls input[type="range"] { display: block; width: 100%; margin-top: 10px; }
 .subject-edit-apply { margin-top: 12px; }
-.button.separation-action { font-family: inherit; font-size: 0.8571429rem; font-weight: 600; }
+.button.separation-action, .cloud-processing > .button.primary { font-family: inherit; font-size: 0.8571429rem; font-weight: 600; }
 .button.subject-edit-apply { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
 .separation-tool-hint { margin: 10px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .separation-history { display: grid; grid-template-columns: 38px 38px minmax(0, 1fr); gap: 6px; margin-top: 15px; }

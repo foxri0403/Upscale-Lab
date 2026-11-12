@@ -219,9 +219,10 @@ export function Studio({ route }: { route: string }) {
   const isCharacterProject = !!picture?.layers?.length && !picture.layers.some(layer => layer.layerType === "Background");
   const hasCharacterSeparation = isCharacterProject || (isFox && picture?.features?.includes("Live 2D") &&
     !picture.features.includes("배경 분리"));
+  const hasBackgroundSeparation = isFox && !hasCharacterSeparation;
   const separationConflict = tool === "layers" && hasCharacterSeparation
     ? "배경 분리를 적용하려면 Live 2D 탭에서 기존 적용을 취소해 주세요."
-    : tool === "live" && isFox && !hasCharacterSeparation
+    : tool === "live" && hasBackgroundSeparation
       ? "Live 2D를 적용하려면 배경 분리 탭에서 기존 적용을 취소해 주세요."
       : undefined;
   const activeLivePartId = selectedLivePartId(picture?.layers ?? [], requestedLivePartId);
@@ -565,6 +566,9 @@ export function Studio({ route }: { route: string }) {
   if (picture.isReadOnly) return <Empty text="다른 사용자의 저장 이미지는 편집할 수 없어요">
     <Link to="/app/images" className="button primary">내 이미지로 이동</Link>
   </Empty>;
+  const processingLabel = tool === "upscale" ? "업스케일" : tool === "live" ? "Live 2D 적용"
+    : hasBackgroundSeparation ? "피사체 다시 분리" : "피사체 자동 분리";
+  const isRevision = tool === "upscale" ? !!picture.jobId : tool === "live" ? hasCharacterSeparation : hasBackgroundSeparation;
   return (
     <div className="studio-layout studio-editor">
       <h1 className="visually-hidden">{picture.name} 작업실</h1>
@@ -639,7 +643,7 @@ export function Studio({ route }: { route: string }) {
         {(tool === "upscale" || tool === "layers" || tool === "live") && (
           <div className="cloud-processing">
             <button
-              className={`button primary full ${tool === "layers" ? "separation-action" : ""}`}
+              className="button primary full"
               disabled={
                 busy || checkingJob || cropAutosave.pending || !!separationConflict ||
                 !cloud ||
@@ -661,9 +665,7 @@ export function Studio({ route }: { route: string }) {
               ) : (
                 tool === "layers" ? <Scan size={17} /> : tool === "live" ? <Layers3 size={17} /> : <Expand size={17} />
               )}{" "}
-              {tool === "upscale"
-                ? "업스케일"
-                : tool === "live" ? "파츠 분리 시작" : isFox ? "피사체 다시 분리" : "피사체 자동 분리"}
+              {processingLabel + (isRevision ? " (재수정)" : "")}
             </button>
             <TokenUsageHelp />
             {tool === "layers" && !separationConflict && <button className="button secondary full effect-cancel" type="button"
