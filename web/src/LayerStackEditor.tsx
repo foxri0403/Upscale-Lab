@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Check, Eye, Layers3, RotateCcw, Save, Undo2 } from "lucide-react";
-import { request, type ApiLayer } from "./api";
+import type { ApiLayer } from "./api";
+import { assignableRigParts, rigPart, type RigPart } from "./character-rig";
+import type { HeadRig } from "./model";
 import { Modal, Busy } from "./ui";
 import {
   addLayerToTop, automaticLayerIds, currentLayerIds, isCompleteStack,
@@ -10,37 +12,25 @@ import "./layer-stack-editor.css";
 import { layerLabel } from "./layer-label";
 import { selectedLivePartId } from "./live-layer-preview";
 
-export function LayerStackEditor({ projectId, close, onSaved }: {
-  projectId: string;
+type PartAssignments = HeadRig["partAssignments"];
+
+export function LayerStackEditor({ layers, partAssignments, close, onSave }: {
+  layers: ApiLayer[];
+  partAssignments?: PartAssignments;
   close: () => void;
-  onSaved: () => Promise<void>;
+  onSave: (order?: string[], assignments?: PartAssignments) => Promise<void>;
 }) {
-  const [layers, setLayers] = useState<ApiLayer[]>([]);
-  const [initial, setInitial] = useState<string[]>([]);
-  const [stack, setStack] = useState<LayerStack>({ mode: "automatic", ids: [] });
+  const [initial] = useState(() => currentLayerIds(layers));
+  const [stack, setStack] = useState<LayerStack>(() => ({
+    mode: initial.join(",") === automaticLayerIds(layers).join(",") ? "automatic" : "manual", ids: initial,
+  }));
+  const [assignments, setAssignments] = useState(partAssignments);
   const [history, setHistory] = useState<LayerStack[]>([]);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [stageRatio, setStageRatio] = useState("1 / 1");
   const [stageBackground, setStageBackground] = useState<"checker" | "light">("checker");
   const [requestedPreviewPartId, setRequestedPreviewPartId] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    request<ApiLayer[]>(`/api/projects/${projectId}/layers`)
-      .then(data => {
-        if (!active) return;
-        const ordered = currentLayerIds(data);
-        setLayers(data);
-        setInitial(ordered);
-        setStack({ mode: ordered.join(",") === automaticLayerIds(data).join(",")
-          ? "automatic" : "manual", ids: ordered });
-        setLoading(false);
-      })
-      .catch(e => { if (active) { setError((e as Error).message); setLoading(false); } });
-    return () => { active = false; };
-  }, [projectId]);
 
   const indexed = useMemo(() => new Map(layers.map(layer => [layer.id, layer])), [layers]);
   const previewPartId = selectedLivePartId(layers, requestedPreviewPartId);
@@ -48,7 +38,10 @@ export function LayerStackEditor({ projectId, close, onSaved }: {
   const backgroundLayer = layers.find(layer => layer.layerType === "Background");
   const backgroundCorrect = !backgroundLayer || stack.ids[0] === backgroundLayer.id;
   const complete = isCompleteStack(stack.ids, layers) && backgroundCorrect;
-  const changed = stack.ids.join(",") !== initial.join(",");
+  const orderChanged = stack.ids.join(",") !== initial.join(",");
+  const rolesChanged = assignments !== undefined && layers.some(layer =>
+    rigPart(layer.layerType, layer.id, assignments) !== rigPart(layer.layerType, layer.id, partAssignments));
+  const changed = orderChanged || rolesChanged;
 
   function changeStack(next: LayerStack) {
     setRequestedPreviewPartId(null); // Editing the stack returns to the complete composition.
@@ -58,7 +51,7 @@ export function LayerStackEditor({ projectId, close, onSaved }: {
   }
   function safeClose() {
     if (saving) return;
-    if (changed && !window.confirm("저장하지 않은 레이어 순서 변경을 버릴까요?")) return;
+    if (changed && !window.confirm("적용하지 않은 레이어 변경을 버릴까요?")) return;
     close();
   }
   async function save() {
@@ -66,22 +59,16 @@ export function LayerStackEditor({ projectId, close, onSaved }: {
     setSaving(true);
     setError("");
     try {
-      await request<ApiLayer[]>(`/api/projects/${projectId}/layers/order`, {
-        method: "PUT", body: JSON.stringify({ layerIds: stack.ids }),
-      });
-      // Reload project detail so the main canvas, cached URLs and exports use the
-      // persisted order (the editor is not the source of truth after saving).
-      await onSaved();
+      await onSave(orderChanged ? stack.ids : undefined, rolesChanged ? assignments : undefined);
       close();
     } catch (e) {
       setError((e as Error).message);
     } finally { setSaving(false); }
   }
 
-  return <Modal title="레이어 조합" close={safeClose} wide>
+  return <Modal title="수동 레이어 조합" close={safeClose} wide>
     <div className="layer-stack-editor">
-      <p className="layer-stack-help">자동 합성이 기본값입니다. 직접 수정하려면 <strong>수동 조합</strong>을 선택하고 가장 밑에 둘 파츠부터 차례로 추가하세요.</p>
-      {loading ? <div className="layer-stack-loading"><Busy /> 레이어 불러오는 중…</div> : layers.length < 2 ?
+      {layers.length < 2 ?
         <p role="status">조합할 레이어가 없습니다. 먼저 이미지 분리를 완료해 주세요.</p> : <>
         <div className="layer-stack-tabs" role="group" aria-label="레이어 합성 방식">
           <button type="button" className={stack.mode === "automatic" ? "active" : ""}
@@ -119,8 +106,8 @@ export function LayerStackEditor({ projectId, close, onSaved }: {
               {!stack.ids.length && !previewPartId && <p>맨 아래에 놓을 파츠를 선택하세요.</p>}
             </div>
             <span className="layer-stack-count">{previewPartId
-              ? `${layerLabel(indexed.get(previewPartId)?.layerType ?? "Other")} 파츠만 표시 중 · 순서 저장에는 영향 없음`
-              : `${stack.ids.length}/${layers.length}개 쌓음 · 아래에서 위로 합성`}</span>
+              ? `${layerLabel(indexed.get(previewPartId)?.layerType ?? "Other")} 파츠만 표시 중`
+              : `${stack.ids.length}/${layers.length}개 쌓음`}</span>
           </div>
           <div className="layer-stack-lists">
             <section className="layer-stack-list-section">
@@ -173,6 +160,22 @@ export function LayerStackEditor({ projectId, close, onSaved }: {
             </section>
           </div>
         </div>
+        {assignments && <fieldset className="layer-stack-roles" disabled={saving}>
+          <legend>PNG 파츠 역할</legend>
+          <div>
+            {layers.map((layer, index) => <label key={layer.id}>
+              <span>{layerLabel(layer.layerType)} #{index + 1}</span>
+              <select aria-label={`${layerLabel(layer.layerType)} ${index + 1} 움직임 부위`}
+                value={rigPart(layer.layerType, layer.id, assignments)}
+                onChange={event => {
+                  const part = event.currentTarget.value as RigPart;
+                  setAssignments(previous => ({ ...previous, [layer.id]: part }));
+                }}>
+                {assignableRigParts.map(part => <option key={part.value} value={part.value}>{part.label}</option>)}
+              </select>
+            </label>)}
+          </div>
+        </fieldset>}
         <div className="layer-stack-footer">
           <div className="layer-stack-tools">
             <button type="button" disabled={!history.length || saving}
@@ -190,7 +193,7 @@ export function LayerStackEditor({ projectId, close, onSaved }: {
             <button type="button" className="button primary" onClick={() => void save()}
               disabled={saving || !complete || !changed}>
               {saving ? <Busy /> : <Save size={16} />}
-              {saving ? "저장 중…" : "이 순서로 저장"}
+              {saving ? "저장 중…" : partAssignments ? "레이어 변경 적용" : "이 순서로 저장"}
               {!changed && complete && <Check size={14} />}
             </button>
           </div>

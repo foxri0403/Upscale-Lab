@@ -263,60 +263,27 @@
 .studio-separation-choices button.active strong { color: var(--primary); }
 .studio-separation-choices button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .studio-separation-choices button:disabled { cursor: not-allowed; opacity: .55; }
-.studio-separation-help, .studio-separation-hint { color: #687793; font-size: .7142857rem; line-height: 1.6; margin: 10px 0 0; }
+.studio-separation-hint { color: #687793; font-size: .7142857rem; line-height: 1.6; margin: 10px 0 0; }
 .studio-separation-hint { margin-top: 5px; }
 
 /* Character part processing and preview controls live in the existing Live 2D inspector. */
 .studio-live-controls { margin-top: 18px; }
-.studio-live-intro { padding: 0 0 14px; border-bottom: 1px solid var(--line); }
-.studio-live-intro h3 { margin: 0 0 9px; }
-.studio-live-intro p, .studio-live-limitation, .studio-rig-helper { color: var(--muted); font-size: .7142857rem; line-height: 1.6; margin: 7px 0; }
 .studio-rig-controls { margin-top: 16px; padding-top: 3px; border-top: 1px solid var(--line); }
 .studio-rig-controls fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .studio-rig-controls fieldset:disabled { opacity: .5; }
-.studio-rig-toggle { display: flex; align-items: center; gap: 9px; padding: 10px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: .75rem; }
-.studio-rig-toggle input { accent-color: var(--primary); width: 16px; height: 16px; flex: none; }
-.studio-rig-idle { margin-top: 10px; }
 .studio-rig-slider { display: block; margin: 12px 0; }
-.studio-rig-slider > span { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: .75rem; color: var(--ink); }
-.studio-rig-slider output { color: var(--primary); font-variant-numeric: tabular-nums; }
+.studio-rig-slider > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: .75rem; color: var(--ink); }
+.studio-rig-slider input[type="number"] { width: 4rem; min-height: 34px; padding: 4px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); text-align: center; font-variant-numeric: tabular-nums; }
 .studio-rig-slider > input { display: block; width: 100%; margin: 9px 0 3px; accent-color: var(--primary); }
-.studio-rig-slider small { display: block; color: var(--muted); font-size: .6428571rem; }
-.studio-rig-mouse[aria-pressed="true"] { background: var(--tint); color: var(--primary); border-color: var(--primary); }
 .studio-rig-reset { margin-top: 8px; }
-.studio-live-limitation { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 17px; }
+.studio-rig-controls fieldset > h3 { margin-top: 18px; }
 
 .studio-live-layer-list { margin-bottom: 14px; }
 .studio-live-layer-list h3 { display: flex; justify-content: space-between; align-items: center; }
 .studio-live-layer-list h3 span { color: var(--muted); font-weight: 400; font-size: .7142857rem; }
-.studio-live-layer-list > p { margin: 0 0 9px; font-size: .7142857rem; color: var(--muted); }
-.studio-live-layer-items { max-height: 230px; overflow-y: auto; display: grid; gap: 6px; }
-.studio-live-layer-item { width: 100%; background: var(--surface, #fff); color: inherit; border: 1px solid var(--line); border-radius: 7px; display: flex; gap: 10px; align-items: center; padding: 5px 8px; font-size: .7142857rem; text-align: left; cursor: pointer; }
-.studio-live-layer-item:hover, .studio-live-layer-item.active { border-color: var(--primary); }
-.studio-live-layer-item.active { background: var(--tint); color: var(--primary); font-weight: 700; }
-.studio-live-layer-item > img { width: 45px; height: 37px; object-fit: contain; background: #f0f2f6; border-radius: 5px; flex: none; }
-.studio-live-layer-item > span { flex: 1; min-width: 0; }
-.studio-live-layer-item > small { color: var(--muted); font-variant-numeric: tabular-nums; }
-
-
-/* Live2D parts and body controls integrated from the character rig UI. */
-
-
-
-/* Grouped body rig controls; keep usable on narrow Studio sidebars. */
-.studio-rig-mode { display: flex; flex-wrap: wrap; gap: 7px; margin: 9px 0 14px; }
-.studio-rig-mode label { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-size: .74rem; }
-.studio-rig-mode input { accent-color: var(--primary); }
-.studio-rig-assignments { display: grid; gap: 7px; margin: 10px 0; }
-.studio-rig-assignments label { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; font-size: .74rem; }
-.studio-rig-assignments label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.studio-rig-assignments select { flex-shrink: 0; width: min(60%, 190px); max-width: 100%; background: var(--panel); color: var(--ink); border: 1px solid var(--line); padding: 6px 4px; border-radius: 5px; }
-.studio-rig-controls fieldset > h3 { margin-top: 18px; }
-
-/* Live2D all/part preview toggle. */
-.studio-live-preview-mode { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-bottom: 10px; }
-.studio-live-preview-mode button { display: flex; gap: 5px; align-items: center; justify-content: center; padding: 8px 5px; font-size: .7142857rem; border: 1px solid var(--line); border-radius: 7px; background: var(--surface, #fff); color: inherit; cursor: pointer; }
-.studio-live-preview-mode button.active { border-color: var(--primary); background: var(--tint); color: var(--primary); font-weight: 700; }
+.studio-live-layer-items { max-height: 250px; overflow-y: auto; display: grid; gap: 8px; }
+.studio-editor .studio-live-layer-items .layer-thumb img { object-fit: contain; }
+.studio-live-layer-items small { color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* Follow-on workflow: use an upscaled or baked-crop source for Live2D. */
 .studio-editor .studio-followup-action { margin: 18px 0 6px; border-top: 1px solid var(--line); padding-top: 14px; }

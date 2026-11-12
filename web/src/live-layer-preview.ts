@@ -10,8 +10,3 @@ export function livePreviewLayers(layers: readonly ApiLayer[], selectedId: strin
   const ordered = [...layers].sort((a, b) => a.layerOrder - b.layerOrder);
   return selectedId ? ordered.filter(layer => layer.id === selectedId) : ordered;
 }
-
-/** For the parts-only button, choose the topmost layer by default. */
-export function defaultLivePartId(layers: readonly ApiLayer[]): string | null {
-  return [...layers].sort((a, b) => b.layerOrder - a.layerOrder)[0]?.id ?? null;
-}

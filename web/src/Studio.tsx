@@ -15,8 +15,6 @@ import {
   RotateCcw,
   Info,
   Image as ImageIcon,
-  MousePointer2,
-  Smartphone,
 } from "lucide-react";
 import { useDemo } from "./Workspace";
 import {
@@ -36,7 +34,7 @@ import { processingStatus } from "./processing-status";
 import { TokenUsageHelp } from "./TokenUsageHelp";
 import { useUnsavedWarning } from "./use-unsaved-warning";
 import { LayerPreviewSelector } from "./LayerPreviewSelector";
-import { LayerMotionControls } from "./LayerMotionControls";
+import { LayerMotionControls, MotionInputButtons } from "./LayerMotionControls";
 import { useParallax } from "./use-parallax";
 import type { LayerPreview } from "./layer-preview";
 import { StudioUpload } from "./StudioUpload";
@@ -64,8 +62,9 @@ import { LayerStackEditor } from "./LayerStackEditor";
 import { separationAvailable } from "./character-processing";
 import { CharacterMotionControls } from "./CharacterMotionControls";
 import { layerLabel } from "./layer-label";
-import { defaultLivePartId, selectedLivePartId } from "./live-layer-preview";
+import { livePreviewLayers, selectedLivePartId } from "./live-layer-preview";
 import { useCharacterRig } from "./use-character-rig";
+import { normalizeRig } from "./character-rig";
 
 const tools: {
   id: Tool;
@@ -226,12 +225,10 @@ export function Studio({ route }: { route: string }) {
       ? "Live 2D를 적용하려면 배경 분리 탭에서 기존 적용을 취소해 주세요."
       : undefined;
   const activeLivePartId = selectedLivePartId(picture?.layers ?? [], requestedLivePartId);
-  const characterRig = useCharacterRig(tool === "live" && isCharacterProject && activeLivePartId === null, edit.rig,
-    picture ? `${picture.id}:${picture.layers?.map(layer => layer.id).join(",") || "none"}` : undefined);
-  const backgroundSrc = picture?.background || (cloud ? "" : "/images/fox-background.png");
+  const backgroundSrc = picture?.background || (!cloud && isFox ? "/images/fox-background.png" : "");
   const foregroundSrcs = picture?.foregrounds?.length
     ? picture.foregrounds
-    : ["/images/fox-foreground.png"];
+    : !cloud && isFox ? ["/images/fox-foreground.png"] : [];
   const published = isImageShared(picture);
   const processing = !!job && ["Queued", "Processing"].includes(job.status);
   const separation = useSubjectSeparation(picture && isFox ? { ...picture, foregrounds: foregroundSrcs } : picture,
@@ -263,19 +260,30 @@ export function Studio({ route }: { route: string }) {
   const sourceHeight = dimensions?.height || 0;
   const longest = Math.max(sourceWidth, sourceHeight);
   const targetDimensions = upscaleDimensions(sourceWidth, sourceHeight, resolution);
-  const motion = useParallax(tool === "layers" && !!isFox && selectedLayer !== "background" && (published || separation.view === "motion"), edit.strength,
+  const liveMotion = tool === "live" && isCharacterProject && activeLivePartId === null;
+  const backgroundMotion = tool === "layers" && isFox && !separationConflict && selectedLayer !== "background" && (published || separation.view === "motion");
+  const motion = useParallax(liveMotion || backgroundMotion, edit.strength,
     !!edit.mouseEnabled, !!edit.gyroEnabled, picture?.id);
+  const characterRig = useCharacterRig(liveMotion && motion.active, { ...normalizeRig(edit.rig), enabled: true },
+    picture ? `${picture.id}:${picture.layers?.map(layer => layer.id).join(",") || "none"}` : undefined, motion.position);
   const gyroContext = useRef({ id: picture?.id, editable: !published });
   gyroContext.current = { id: picture?.id, editable: !published };
+  function changeMotionInput(key: "mouseEnabled" | "gyroEnabled", value: boolean) {
+    if (tool !== "live") { change(key, value); return; }
+    if (value) setRequestedLivePartId(null);
+    setEdit(previous => ({ ...previous, [key]: value, rig: { ...normalizeRig(previous.rig), enabled: true } }));
+  }
   async function toggleGyro() {
     if (!picture || published || busy || processing || motion.gyroPending) return;
-    if (edit.gyroEnabled) { change("gyroEnabled", false); return; }
+    if (edit.gyroEnabled) { changeMotionInput("gyroEnabled", false); return; }
     // A desktop browser can configure the phone's wallpaper without owning a tilt sensor.
-    if (!navigator.maxTouchPoints) { change("gyroEnabled", true); return; }
+    if (!navigator.maxTouchPoints && (tool !== "live" || typeof DeviceOrientationEvent === "undefined")) {
+      changeMotionInput("gyroEnabled", true); return;
+    }
     const requestedFor = picture.id;
     try {
       await motion.requestGyro();
-      if (gyroContext.current.id === requestedFor && gyroContext.current.editable) change("gyroEnabled", true);
+      if (gyroContext.current.id === requestedFor && gyroContext.current.editable) changeMotionInput("gyroEnabled", true);
     } catch (error) { toast((error as Error).message); }
   }
   useEffect(() => {
@@ -312,7 +320,9 @@ export function Studio({ route }: { route: string }) {
     } catch (error) { toast((error as Error).message); }
     finally { setBusy(false); }
   }
-  const draft = picture ? { ...picture, name: name.trim(), tags, platformTags, genre: (tags[0] || unspecifiedTag) as Genre, edit } : null;
+  const exportEdit = isCharacterProject && (edit.mouseEnabled || edit.gyroEnabled) && !edit.rig?.enabled
+    ? { ...edit, rig: { ...normalizeRig(edit.rig), enabled: true } } : edit;
+  const draft = picture ? { ...picture, name: name.trim(), tags, platformTags, genre: (tags[0] || unspecifiedTag) as Genre, edit: exportEdit } : null;
   async function save(silent = false) {
     if (!picture || published || saving.current || busy) return false;
     if (cropAutosave.pending) { toast("자르기 자동 저장을 마친 뒤 다시 시도해 주세요."); return false; }
@@ -320,7 +330,7 @@ export function Studio({ route }: { route: string }) {
     if (!name.trim()) { toast("이미지 이름을 입력해 주세요."); return false; }
     saving.current = true;
     setBusy(true);
-    const snapshot = { ...edit };
+    const snapshot = exportEdit;
     try {
       const savedAt = cloud ? (await saveImageEdit({ ...draft!, edit: snapshot })).savedAt : new Date().toISOString();
       const replace = (p: typeof picture) => p.id === picture.id ? { ...p, isDraft: false, name: name.trim(), tags, platformTags, genre: (tags[0] || unspecifiedTag) as Genre,
@@ -329,6 +339,7 @@ export function Studio({ route }: { route: string }) {
         images: value.images.map(replace), assets: value.assets?.map(replace),
       }));
       if (success && !silent) toast(saved ? "기존 이미지에 수정 사항을 저장했습니다." : "보관함에 저장했습니다.");
+      if (success && snapshot !== edit) setEdit(snapshot);
       return success;
     } catch (error) {
       toast((error as Error).message);
@@ -624,12 +635,6 @@ export function Studio({ route }: { route: string }) {
             </dl>
           </>
         )}
-        {tool === "live" && <section className="studio-live-intro">
-          <h3>캐릭터 파츠 분리</h3>
-          <p>이미지 업로드 후 See-through로 머리·눈·의상을 자동 분리하고, 결과를 먼저 자동으로 합성합니다.</p>
-          <p>16MB 이하 캐릭터 이미지를 지원하며 처리 시간이 걸릴 수 있습니다.</p>
-          <p>업스케일을 완료했다면 해당 결과를 사용합니다. 단, 자르기 설정만 저장한 경우 AI 입력 이미지에는 잘림이 반영되지 않습니다. 원하는 비율로 먼저 분리하려면 ‘자르기’ 탭에서 새 프로젝트를 만드세요.</p>
-        </section>}
         {(tool === "upscale" || tool === "layers" || tool === "live") && (
           <div className="cloud-processing">
             <button
@@ -653,11 +658,11 @@ export function Studio({ route }: { route: string }) {
               (job && ["Queued", "Processing"].includes(job.status)) ? (
                 <Busy />
               ) : (
-                tool === "layers" ? <Scan size={17} /> : <Expand size={17} />
+                tool === "layers" ? <Scan size={17} /> : tool === "live" ? <Layers3 size={17} /> : <Expand size={17} />
               )}{" "}
               {tool === "upscale"
                 ? "업스케일"
-                : tool === "live" ? "캐릭터 파츠 분리 시작" : isFox ? "피사체 다시 분리" : "피사체 자동 분리"}
+                : tool === "live" ? "파츠 분리 시작" : isFox ? "피사체 다시 분리" : "피사체 자동 분리"}
             </button>
             <TokenUsageHelp />
             {separationConflict && <Notice>{separationConflict}</Notice>}
@@ -673,15 +678,9 @@ export function Studio({ route }: { route: string }) {
               <RotateCcw size={16} />Live 2D 적용 취소
             </button>}
             {tool === "layers" && capabilities?.layers === false && <Notice>배경 분리 서비스 연결을 준비하고 있습니다.</Notice>}
-            {tool === "live" && capabilities?.characterLayers !== true &&
-              <Notice>캐릭터 파츠 분리 서비스가 연결되지 않았습니다. 서버의 SeeThrough 설정을 확인해 주세요.</Notice>}
-            {tool === "live" && capabilities?.characterLayers === true &&
-              <p className="studio-separation-help">캐릭터용 분리는 완료까지 시간이 걸릴 수 있습니다. 기존 배경 분리와 다른 AI 서비스로 처리합니다.</p>}
             {job && job.status !== "Completed" && (
               <div className="job-state" role="status" aria-live="polite">
                 <p>{processingStatus(job)}</p>
-                {processing && job.operation === "CharacterLayers" &&
-                  <p className="studio-separation-help">표시되는 퍼센트는 처리 단계의 표시입니다. GPU 모델 내부의 정확한 연산 완료율은 제공되지 않습니다.</p>}
               </div>
             )}
           </div>
@@ -694,7 +693,7 @@ export function Studio({ route }: { route: string }) {
             ready={isFox} original={picture.src} background={backgroundSrc} foregrounds={foregroundSrcs} layers={picture.layers}
             edit={edit} width={sourceWidth} height={sourceHeight} />
           <fieldset className="photo-settings layer-motion-settings" disabled={published || busy || processing || separation.dirty}>
-            <LayerMotionControls edit={edit} ready={isFox} change={(key, value) => { change(key, value); separation.setView("motion"); }} gyroReady={motion.gyroReady}
+            <LayerMotionControls edit={edit} ready={isFox} change={(key, value) => { change(key, value); separation.setView("motion"); }}
               gyroPending={motion.gyroPending} toggleGyro={() => { separation.setView("motion"); void toggleGyro(); }} />
             <button className="button secondary full effect-cancel" type="button"
               disabled={!picture.projectId || !isFox || separation.dirty} onClick={() => void resetEffects("Layers")}>
@@ -702,56 +701,39 @@ export function Studio({ route }: { route: string }) {
             </button>
           </fieldset>
         </>}
-        {tool === "live" && <h3>Live 2D</h3>}
         {tool === "live" && <div className="studio-live-controls">
           {isCharacterProject && <section className="studio-live-layer-list">
             <h3>분리된 레이어 <span>{picture.layers?.length ?? 0}개</span></h3>
-            <div className="studio-live-preview-mode" role="group" aria-label="Live2D 레이어 미리보기 방식">
-              <button type="button" className={activeLivePartId === null ? "active" : ""}
-                aria-pressed={activeLivePartId === null} onClick={() => setRequestedLivePartId(null)}>
-                <Layers3 size={15} /> 전체 합성 보기
-              </button>
-              <button type="button" className={activeLivePartId !== null ? "active" : ""}
-                aria-pressed={activeLivePartId !== null}
-                onClick={() => setRequestedLivePartId(activeLivePartId ?? defaultLivePartId(picture.layers ?? []))}>
-                <ImageIcon size={15} /> 파츠별 보기
-              </button>
-            </div>
-            <p role="status" aria-live="polite">{activeLivePartId
-              ? `선택한 ${layerLabel(picture.layers?.find(layer => layer.id === activeLivePartId)?.layerType ?? "Other")} 파츠만 표시 중`
-              : "전체 합성 중 · 아래 레이어를 누르면 해당 파츠만 볼 수 있어요."}</p>
             <div className="studio-live-layer-items" role="group" aria-label="캐릭터 레이어 선택">
-              {[...(picture.layers || [])].sort((a, b) => b.layerOrder - a.layerOrder).map(layer =>
-                <button type="button" className={`studio-live-layer-item ${activeLivePartId === layer.id ? "active" : ""}`}
+              <button type="button" className={`layer-row layer-choice ${activeLivePartId === null ? "active" : ""}`}
+                aria-pressed={activeLivePartId === null} onClick={() => setRequestedLivePartId(null)}>
+                <span className="layer-thumb checker">{livePreviewLayers(picture.layers ?? [], null).map(layer =>
+                  <img key={layer.id} src={layer.imageUrl} alt="" />)}</span>
+                <span>전체</span>
+                {activeLivePartId === null && <Check size={17} aria-hidden="true" />}
+              </button>
+              {livePreviewLayers(picture.layers ?? [], null).reverse().map(layer =>
+                <button type="button" className={`layer-row layer-choice ${activeLivePartId === layer.id ? "active" : ""}`}
                   aria-pressed={activeLivePartId === layer.id} key={layer.id}
                   onClick={() => setRequestedLivePartId(layer.id)} title={`${layerLabel(layer.layerType)} 파츠만 보기`}>
-                  <img src={layer.imageUrl} alt="" loading="lazy" />
+                  <span className="layer-thumb checker"><img src={layer.imageUrl} alt="" loading="lazy" /></span>
                   <span>{layerLabel(layer.layerType)}</span><small>{layer.layerOrder + 1}</small>
-                  {activeLivePartId === layer.id && <Check size={15} aria-hidden="true" />}
+                  {activeLivePartId === layer.id && <Check size={17} aria-hidden="true" />}
                 </button>)}
             </div>
           </section>}
-          {cloud && picture.projectId && (isFox || isCharacterProject) && <section className="studio-layer-stack-entry">
-            <h3>레이어 조합</h3>
-            <p>AI 자동 합성이 기본입니다. 겹침이 어색할 때만 맨 아래부터 파츠를 직접 쌓아 보세요.</p>
+          {((isCharacterProject && !cloud) || (picture.projectId && (isCharacterProject || isFox))) && <div className="studio-layer-stack-entry">
             <button type="button" className="button secondary full" disabled={busy || processing || published}
               onClick={() => setDialog("layerStack")}><Layers3 size={17} /> 수동 레이어 조합</button>
-          </section>}
+            <p>레이어 겹침이 어색하다면 파츠를 직접 수정해보세요.</p>
+          </div>}
           {isCharacterProject && <section className="studio-rig-controls" aria-label="기기별 Live2D 움직임 입력">
             <h3>배경화면 움직임 입력</h3>
-            <p className="studio-rig-helper">PC에서는 마우스로, Android 앱에서는 기울기 센서로 각 PNG 파츠를 움직입니다. 적용 전에 원하는 기기 입력을 켜고 보관함에 저장하세요.</p>
-            <div className="motion-input-options" role="group" aria-label="Live2D 기기별 움직임">
-              <button type="button" aria-pressed={!!edit.mouseEnabled} disabled={published || busy || processing}
-                onClick={() => change("mouseEnabled", !edit.mouseEnabled)}><MousePointer2 size={19} aria-hidden="true" /> PC 마우스</button>
-              <button type="button" aria-pressed={!!edit.gyroEnabled} disabled={published || busy || processing}
-                onClick={() => change("gyroEnabled", !edit.gyroEnabled)}><Smartphone size={19} aria-hidden="true" /> Android 기울기 센서</button>
-            </div>
-            <p className="studio-rig-helper">휴대폰에서 움직이려면 ‘Android 기울기 센서’와 아래 ‘PNG 파츠 움직임 사용’을 모두 켜야 합니다. 센서가 없는 기기는 정지 화면으로 표시됩니다.</p>
+            <MotionInputButtons edit={edit} ready={!published && !busy && !processing}
+              change={changeMotionInput} gyroPending={motion.gyroPending} toggleGyro={() => void toggleGyro()} />
           </section>}
-          {isCharacterProject ? <CharacterMotionControls rig={edit.rig} onChange={next => change("rig", next)}
-            disabled={published || busy || processing} stage={characterRig} layers={picture.layers} />
-            : <Notice>분리된 캐릭터가 나타나면 고개·눈·머리카락 움직임을 설정할 수 있습니다. 기존 배경 분리는 왼쪽 배경 분리 탭에서 사용하세요.</Notice>}
-          {isCharacterProject && <p className="studio-live-limitation">비율은 ‘자르기’ 탭의 16:9 PC / 9:16 모바일 / 사용자 비율 설정을 따르며, 배경화면 생성 시 모든 PNG 파츠에 동일하게 적용됩니다. 실제 기기에는 업데이트된 연결 앱이 필요합니다.</p>}
+          {isCharacterProject && <CharacterMotionControls rig={edit.rig} onChange={next => change("rig", next)}
+            disabled={published || busy || processing} />}
         </div>}
         <fieldset className="photo-settings" disabled={published || busy || processing}>
         {tool === "crop" && (
@@ -867,17 +849,31 @@ export function Studio({ route }: { route: string }) {
       </Modal>}
       {shareFeedback && <div className="studio-share-feedback" role="status" aria-live="polite"
         style={{ left: shareFeedback.x, top: shareFeedback.y - 18 }}>{shareFeedback.text}</div>}
-      {dialog === "layerStack" && picture.projectId && <LayerStackEditor
-        projectId={picture.projectId}
+      {dialog === "layerStack" && <LayerStackEditor
+        layers={picture.layers ?? []}
+        partAssignments={isCharacterProject ? normalizeRig(edit.rig).partAssignments : undefined}
         close={() => setDialog(null)}
-        onSaved={async () => {
-          const refreshed = await detailPicture(picture);
-          update(value => ({ ...value,
-            images: value.images.map(item => item.id === refreshed.id ? refreshed : item),
-            assets: value.assets?.map(item => item.id === refreshed.id ? refreshed : item),
-          }));
-          setSelectedLayer("all");
-          toast("레이어 합성 순서를 저장했어요.");
+        onSave={async (order, assignments) => {
+          if (order) {
+            let refreshed = picture;
+            if (cloud && picture.projectId) {
+              await request(`/api/projects/${picture.projectId}/layers/order`, {
+                method: "PUT", body: JSON.stringify({ layerIds: order }),
+              });
+              refreshed = await detailPicture(picture);
+            } else {
+              const byId = new Map(picture.layers?.map(layer => [layer.id, layer]));
+              refreshed = { ...picture, layers: order.map((id, layerOrder) => ({ ...byId.get(id)!, layerOrder })) };
+            }
+            if (!update(value => ({ ...value,
+              images: value.images.map(item => item.id === refreshed.id ? refreshed : item),
+              assets: value.assets?.map(item => item.id === refreshed.id ? refreshed : item),
+            }))) throw new Error("레이어 합성 순서를 표시하지 못했습니다.");
+            setSelectedLayer("all");
+          }
+          if (assignments) setEdit(previous => ({ ...previous, rig: { ...normalizeRig(previous.rig), partAssignments: assignments } }));
+          setRequestedLivePartId(null);
+          if (order) toast("레이어 합성 순서를 저장했어요.");
         }} />}
       {dialog === "info" && <ImageInformation picture={picture}
         layerCount={picture.layers?.length ?? (isFox ? foregroundSrcs.length + 1 : 1)} close={() => setDialog(null)} />}

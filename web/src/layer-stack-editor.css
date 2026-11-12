@@ -3,7 +3,6 @@
 .layer-stack-editor { display: grid; gap: 14px; font-size: 0.86rem; }
 .layer-stack-editor button { cursor: pointer; }
 .layer-stack-editor button:disabled { opacity: .42; cursor: not-allowed; }
-.layer-stack-help { color: var(--muted, #58677c); line-height: 1.65; margin: 0; }
 .layer-stack-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .layer-stack-tabs button { display: flex; gap: 8px; justify-content: center; align-items: center; border: 1px solid var(--line, #dce2eb); border-radius: 8px; padding: 11px 8px; background: transparent; color: inherit; }
 .layer-stack-tabs button.active { background: var(--tint, #eaf0ff); border-color: var(--primary, #4c69c8); color: var(--primary, #4c69c8); font-weight: 700; }
@@ -38,16 +37,21 @@
 .layer-stack-save-actions .button { display: inline-flex; gap: 7px; align-items: center; justify-content: center; padding: 9px 13px; }
 .layer-stack-warning { color: #a15d12; margin: 0; }
 .layer-stack-error { color: #c52b3b; margin: 0; }
-.layer-stack-loading { display: flex; gap: 8px; align-items: center; padding: 25px 0; }
+.layer-stack-roles { min-width: 0; padding: 8px 12px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.layer-stack-roles legend { font-weight: 700; padding-inline: 4px; }
+.layer-stack-roles > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; max-height: 180px; overflow-y: auto; }
+.layer-stack-roles label { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.layer-stack-roles select { width: min(60%, 190px); min-height: 34px; padding: 4px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--ink); }
 .studio-layer-stack-entry { margin: 16px 0; padding: 13px 0; border-block: 1px solid var(--line, #dce2eb); }
-.studio-layer-stack-entry h3 { margin: 0 0 7px; }
-.studio-layer-stack-entry p { color: #687793; font-size: .78rem; line-height: 1.6; margin-bottom: 10px; }
+.studio-layer-stack-entry .button { font-size: 0.8571429rem; }
+.studio-layer-stack-entry p { color: var(--muted); font-size: .78rem; line-height: 1.6; margin: 8px 0 0; }
 @media (max-width: 650px) {
   .modal.wide:has(.layer-stack-editor) { padding: 12px; }
   .layer-stack-columns { grid-template-columns: 1fr; }
   .layer-stack-stage { max-width: min(60vw, 250px); max-height: 250px; }
   .layer-stack-lists { max-height: min(38dvh, 290px); }
   .layer-stack-tabs button { font-size: .8rem; }
+  .layer-stack-roles > div { grid-template-columns: 1fr; }
 }
 
 /* Layer inspection is preview-only: part selection never mutates the stack. */

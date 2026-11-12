@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { normalizeRig, rigTargets, type RigPart } from "./character-rig";
 import type { HeadRig } from "./model";
 
@@ -6,11 +6,6 @@ import type { HeadRig } from "./model";
 export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: string, externalMotion?: RefObject<{ x: number; y: number }>) {
   const stage = useRef<HTMLDivElement>(null);
   const layers = useRef<HTMLDivElement>(null);
-  const [tilt, setTilt] = useState(0);
-  const [look, setLook] = useState(0);
-  const [tiltY, setTiltY] = useState(0);
-  const [lookY, setLookY] = useState(0);
-  const [mouse, setMouse] = useState(false);
   const settings = normalizeRig(value);
   useEffect(() => {
     const plane = layers.current;
@@ -20,26 +15,14 @@ export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: s
     let head = 0, eye = 0, headY = 0, eyeY = 0, front = 0, back = 0;
     let frontVelocity = 0, backVelocity = 0;
     const bodyAngles: Record<string, number> = {};
-    let pointerTilt = 0, pointerLook = 0, pointerY = 0;
     const images = Array.from(plane.querySelectorAll<HTMLImageElement>("img[data-rig-part]"));
-    const move = (event: PointerEvent) => {
-      if (!mouse || event.pointerType !== "mouse") return;
-      const rect = box.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      pointerTilt = Math.max(-1, Math.min(1, (event.clientX - rect.left) / rect.width * 2 - 1));
-      pointerLook = pointerTilt;
-      pointerY = Math.max(-1, Math.min(1, (event.clientY - rect.top) / rect.height * 2 - 1));
-    };
-    const leave = () => { pointerTilt = 0; pointerLook = 0; pointerY = 0; };
     const step = (time: number) => {
       const dt = last ? Math.min(.05, Math.max(0, (time - last) / 1000)) : 1 / 60;
       last = time;
       phase += dt;
-      const inputX = externalMotion?.current?.x ?? (mouse ? pointerTilt : tilt / 100);
-      const inputY = externalMotion?.current?.y ?? (mouse ? pointerY : tiltY / 100);
-      const target = rigTargets(inputX, inputY,
-        externalMotion?.current?.x ?? (mouse ? pointerLook : look / 100),
-        externalMotion?.current?.y ?? (mouse ? pointerY : lookY / 100), phase, settings);
+      const inputX = externalMotion?.current.x ?? 0;
+      const inputY = externalMotion?.current.y ?? 0;
+      const target = rigTargets(inputX, inputY, inputX, inputY, phase, settings);
       const smooth = (v: number, t: number, speed: number) => v + (t - v) * (1 - Math.exp(-speed * dt));
       head = smooth(head, target.head, 9);
       eye = smooth(eye, target.eye, 11);
@@ -77,23 +60,17 @@ export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: s
       for (const img of images) { img.style.removeProperty("transform"); img.style.removeProperty("transform-origin"); }
     };
     const reconcile = () => { stop(); if (!document.hidden) frame = requestAnimationFrame(step); };
-    if (!externalMotion) {
-      box.addEventListener("pointermove", move, { passive: true });
-      box.addEventListener("pointerleave", leave, { passive: true });
-    }
     reconcile();
     document.addEventListener("visibilitychange", reconcile);
     return () => {
       stop();
       document.removeEventListener("visibilitychange", reconcile);
-      box.removeEventListener("pointermove", move);
-      box.removeEventListener("pointerleave", leave);
     };
   }, [visible, sourceKey, settings.enabled, settings.headTilt, settings.eyeMove, settings.hairSway,
     settings.pivotX, settings.pivotY, settings.idle, settings.bodyMode, settings.upperBody, settings.lowerBody,
     settings.torso, settings.leftArm, settings.rightArm, settings.leftHand, settings.rightHand,
     settings.leftLeg, settings.rightLeg, settings.torsoPivotY, settings.lowerPivotY,
-    JSON.stringify(settings.partAssignments), mouse, tilt, tiltY, look, lookY, externalMotion]);
-  return { stage, layers, active: visible && settings.enabled, tilt, setTilt, tiltY, setTiltY, look, setLook, lookY, setLookY, mouse, setMouse };
+    JSON.stringify(settings.partAssignments), externalMotion]);
+  return { stage, layers, active: visible && settings.enabled };
 }
 export type CharacterRigController = ReturnType<typeof useCharacterRig>;

@@ -38,6 +38,10 @@ pnpm build는 TypeScript 검사와 일반 Vite 빌드를 수행한다. build:clo
 
 `pnpm dev` 실행 후 [작업실 샘플](http://localhost:5173/tests/studio-restoration.html)을 연다. 로그인이나 API 없이 실제 작업실 컴포넌트로 확인할 수 있다. 업스케일·배경 분리·Live 2D 도구에서 실행 버튼 바로 아래 왼쪽에 정렬된 회색 밑줄 **소모 토큰량 확인**을 클릭하면, 내 계정 메뉴처럼 링크 근처에 요금제 화면과 같은 5행 표가 펼쳐진다. 링크를 다시 클릭하거나 Escape·바깥 클릭·외부로 초점 이동으로 닫을 수 있다. 설정 패널 스크롤 시에도 닫히며 화면 크기를 바꾸면 위치를 맞춘다. 조회에는 토큰이 들지 않으며 실제 GPU 작업도 생성하지 않는다.
 
+## Live 2D 작업실 로컬 테스트
+
+`pnpm dev` 실행 후 [Live 2D 작업실 샘플](http://localhost:5173/tests/studio-restoration.html?character)을 연다. 저장된 PNG 예시로 전체·개별 레이어 미리보기, 마우스·자이로센서 입력, 움직임 숫자 편집, 수동 레이어 조합을 확인할 수 있다. 자이로 미리보기에는 브라우저에서 지원하는 센서 입력이 필요하다. 수동 조합에서 적용한 파츠 역할은 작업실의 저장 버튼을 누르면 브라우저에 저장된다. 샘플은 로그인, API 또는 GPU 작업 없이 동작한다.
+
 ## 회원가입 로컬 테스트
 
 `pnpm dev:production-ui`의 [회원가입 화면](http://localhost:5173/signup)은 운영 UI와 같은 입력·인증·동의 절차를 사용한다. 실제 메일은 로컬 API와 Cognito 설정, `AddPendingRegistrationConsent` DB 마이그레이션 적용이 필요하다. 회원 생성 시점과 수동 전환 절차는 [인증 API](../docs/auth-api.md)를 따른다.
