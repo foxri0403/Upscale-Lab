@@ -5,6 +5,8 @@ using UpscaleLab.Application.Images;
 namespace UpscaleLab.Application.Projects;
 
 public sealed record RenameProjectRequest([param: Required, MaxLength(160)] string Title);
+public sealed record UpdateProjectMetadataRequest([param: Required, MaxLength(160)] string Title,
+    string[]? Tags = null, string[]? PlatformTags = null);
 public sealed record ResetProjectEffectsRequest(string Feature = "All");
 
 public sealed record CreateProjectCommand(

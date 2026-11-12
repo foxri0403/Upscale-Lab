@@ -1,4 +1,5 @@
-import { Download, Heart, Monitor, Smartphone, Tablet, type LucideProps } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, Download, Heart, Monitor, Smartphone, Tablet, type LucideProps } from "lucide-react";
 import type { Picture } from "./model";
 import { imageTags } from "./image-tags";
 import { platformTags, selectPlatform, type PlatformTag } from "./platform-tags";
@@ -58,6 +59,44 @@ export function LowerTagList({ picture }: { picture: Picture }) {
   return <ul className="image-tag-list" aria-label="하위 태그">
     {tags.length ? tags.map(tag => <li key={tag}>{tag}</li>) : <li>태그 없음</li>}
   </ul>;
+}
+
+export function CardTagPreview({ picture }: { picture: Picture }) {
+  const tags = imageTags(picture);
+  const disclosure = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: Event) => {
+      if (disclosure.current && !disclosure.current.contains(event.target as Node)) disclosure.current.open = false;
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("focusin", closeOutside);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("focusin", closeOutside);
+    };
+  }, [open]);
+  if (!tags.length) return <span className="image-tag-trigger image-tag-empty">태그 없음</span>;
+
+  return <details className="image-tag-preview" ref={disclosure} onToggle={event => {
+    const details = event.currentTarget;
+    setOpen(details.open);
+    if (!details.open) return;
+    const trigger = details.querySelector("summary")!.getBoundingClientRect();
+    const height = details.querySelector("ul")!.offsetHeight;
+    details.dataset.side = trigger.bottom + height + 8 > innerHeight && trigger.top >= height + 8 ? "above" : "below";
+  }} onKeyDown={event => {
+    if (event.key !== "Escape" || !event.currentTarget.open) return;
+    event.stopPropagation();
+    event.currentTarget.open = false;
+    event.currentTarget.querySelector("summary")?.focus();
+  }}>
+    <summary className="image-tag-trigger" aria-label="전체 태그 보기">
+      <span>{tags.join(" · ")}</span><ChevronDown size={14} aria-hidden="true" />
+    </summary>
+    <LowerTagList picture={picture} />
+  </details>;
 }
 
 export function GalleryLikeButton({ liked, disabled, toggle }: {

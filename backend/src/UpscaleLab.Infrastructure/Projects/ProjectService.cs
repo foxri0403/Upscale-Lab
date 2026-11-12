@@ -72,6 +72,53 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
         await dbContext.SaveChangesAsync(ct);
     }
 
+    public async Task UpdateMetadataAsync(Guid userId, Guid projectId, UpdateProjectMetadataRequest request, CancellationToken ct)
+    {
+        var project = await dbContext.LiveLayerProjects.SingleOrDefaultAsync(x => x.Id == projectId && x.UserId == userId, ct)
+            ?? throw new NotFoundException("프로젝트를 찾을 수 없습니다.");
+        if (ProjectDraftState.IsDiscarded(project.SavedEditJson))
+            throw new NotFoundException("폐기된 임시 이미지입니다.");
+        if (ProjectDraftState.IsDraft(project.SavedEditJson))
+            throw new ConflictException("이미지를 보관함에 저장한 뒤 이름과 태그를 변경해 주세요.");
+        var title = request.Title?.Trim();
+        if (string.IsNullOrWhiteSpace(title) || title.Length > 160)
+            throw new ValidationException("이미지 이름은 1~160자로 입력해 주세요.");
+
+        var edit = ImageEditState.RequireEditable(project.SavedEditJson) ?? ImageEditState.Original();
+        var tags = request.Tags is null ? null : GalleryTagCatalog.NormalizeMany(request.Tags);
+        var platforms = request.PlatformTags is null ? null : GalleryPlatformTags.Normalize(request.PlatformTags);
+        var now = DateTime.UtcNow;
+        project.Title = title;
+        project.SavedEditJson = edit.WithTags(tags, platforms).ToJson();
+        project.UpdatedAt = now;
+
+        var posts = await dbContext.GalleryPosts.Where(x => x.ProjectId == projectId && x.UserId == userId && x.IsPublic).ToListAsync(ct);
+        foreach (var post in posts)
+        {
+            post.Title = title;
+            if (tags is not null)
+            {
+                post.Tags = tags;
+                post.Tag = tags[0];
+                post.Description = GalleryTagCompatibility.WithoutMetadata(post.Description);
+            }
+            if (platforms is not null) post.PlatformTags = platforms;
+            post.UpdatedAt = now;
+        }
+
+        var assets = await dbContext.WallpaperAssets.Where(x => x.SourceProjectId == projectId && x.UserId == userId &&
+            x.IsPublic && !x.IsArchived).ToListAsync(ct);
+        foreach (var asset in assets)
+        {
+            var assetEdit = ImageEditState.FromJson(asset.SavedEditJson) ?? ImageEditState.Original();
+            if (assetEdit.IsReadOnly) continue;
+            asset.Title = title;
+            asset.SavedEditJson = assetEdit.WithTags(tags, platforms).ToJson();
+            asset.UpdatedAt = now;
+        }
+        await dbContext.SaveChangesAsync(ct);
+    }
+
     public async Task<ProjectDetailResponse> CreateAsync(
         Guid userId,
         CreateProjectCommand command,

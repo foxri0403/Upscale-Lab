@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ImageMagick;
 using UpscaleLab.Application.Common;
+using UpscaleLab.Application.Images;
 using UpscaleLab.Application.Projects;
 using UpscaleLab.Application.Storage;
 using UpscaleLab.Domain.Entities;
@@ -13,6 +14,66 @@ namespace UpscaleLab.Tests;
 
 public sealed class ProjectServiceTests
 {
+    [Fact]
+    public async Task UpdateMetadata_SynchronizesOwnedPublicationsAndPreservesImageEdits()
+    {
+        await using var db = WorkflowData.Db();
+        var owner = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        var project = WorkflowData.Project(owner);
+        project.SavedEditJson = (ImageEditState.Original() with { Filter = "warm", Crop = "portrait", Tags = ["동물"] }).ToJson();
+        var post = new GalleryPost { UserId = owner, Project = project, Image = project.OriginalImage, Title = "Published", IsPublic = true };
+        var foreignPost = new GalleryPost { UserId = other, Project = project, Image = project.OriginalImage, Title = "Other user", IsPublic = true };
+        var asset = new WallpaperAsset { UserId = owner, SourceProject = project, Title = "Wallpaper", IsPublic = true,
+            ManifestJson = "{\"Files\":[]}", SavedEditJson = (ImageEditState.Original() with { GyroEnabled = true }).ToJson() };
+        var privateAsset = new WallpaperAsset { UserId = owner, SourceProject = project, Title = "Saved version" };
+        db.AddRange(project, post, foreignPost, asset, privateAsset);
+        await db.SaveChangesAsync();
+        var service = new ProjectService(db, new WorkflowStore());
+
+        await Assert.ThrowsAsync<NotFoundException>(() => service.UpdateMetadataAsync(other, project.Id,
+            new("Other user"), CancellationToken.None));
+        await Assert.ThrowsAsync<ValidationException>(() => service.UpdateMetadataAsync(owner, project.Id,
+            new("Invalid tags", ["unknown"]), CancellationToken.None));
+        await service.UpdateMetadataAsync(owner, project.Id, new("  New title  ", ["게임", "게임"], ["mobile"]), CancellationToken.None);
+        db.ChangeTracker.Clear();
+
+        var edited = await db.LiveLayerProjects.SingleAsync();
+        Assert.Equal("New title", edited.Title);
+        var edit = ImageEditState.FromJson(edited.SavedEditJson)!;
+        Assert.Equal("warm", edit.Filter);
+        Assert.Equal("portrait", edit.Crop);
+        Assert.Equal(new[] { "게임" }, edit.Tags);
+        Assert.Equal(new[] { "mobile" }, edit.PlatformTags);
+        var published = await db.GalleryPosts.SingleAsync(x => x.Id == post.Id);
+        Assert.True(published.IsPublic);
+        Assert.Equal("New title", published.Title);
+        Assert.Equal("게임", published.Tag);
+        Assert.Equal(new[] { "mobile" }, published.PlatformTags);
+        var wallpaper = await db.WallpaperAssets.SingleAsync(x => x.Id == asset.Id);
+        Assert.True(wallpaper.IsPublic);
+        Assert.Equal("New title", wallpaper.Title);
+        Assert.Equal(asset.ManifestJson, wallpaper.ManifestJson);
+        Assert.True(ImageEditState.FromJson(wallpaper.SavedEditJson)!.GyroEnabled);
+        Assert.Equal(new[] { "게임" }, ImageEditState.FromJson(wallpaper.SavedEditJson)!.Tags);
+        Assert.Equal("Other user", (await db.GalleryPosts.SingleAsync(x => x.Id == foreignPost.Id)).Title);
+        Assert.Equal("Saved version", (await db.WallpaperAssets.SingleAsync(x => x.Id == privateAsset.Id)).Title);
+    }
+
+    [Fact]
+    public async Task UpdateMetadata_RejectsReadOnlySavedImages()
+    {
+        await using var db = WorkflowData.Db();
+        var project = WorkflowData.Project(Guid.NewGuid());
+        project.SavedEditJson = (ImageEditState.Original() with { IsReadOnly = true }).ToJson();
+        db.Add(project);
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<ConflictException>(() => new ProjectService(db, new WorkflowStore()).UpdateMetadataAsync(
+            project.UserId, project.Id, new("Changed", ["풍경"]), CancellationToken.None));
+        Assert.Equal("Source", project.Title);
+    }
+
     [Fact]
     public async Task LibraryAndDetailKeepTheLatestSuccessfulUpscaleAfterReloadOrALaterFailure()
     {
