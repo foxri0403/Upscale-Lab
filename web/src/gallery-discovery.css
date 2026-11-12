@@ -44,7 +44,7 @@
   margin: 0;
   list-style: none;
 }
-.image-tag-list > li {
+.image-tag-list > li, .image-tag-chip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -77,15 +77,17 @@
 .image-card-heading .card-menu > div { top: calc(100% + 4px); max-width: calc(100vw - 24px); }
 .image-card-footer { position: relative; display: flex; align-items: center; gap: 6px; padding-top: 8px; margin-top: auto; }
 .image-card-footer > .image-tag-preview, .image-card-footer > .image-tag-empty { flex: 1; min-width: 0; }
-.image-tag-trigger { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 30px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: #65738d; font-size: .7857143rem; line-height: 1.35; }
+.image-tag-trigger { display: flex; align-items: center; width: 100%; min-height: 30px; padding: 0; border: 0; background: transparent; }
 summary.image-tag-trigger { cursor: pointer; list-style: none; }
 summary.image-tag-trigger::-webkit-details-marker { display: none; }
-.image-tag-trigger > span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.image-tag-trigger > svg { flex: none; }
-.image-tag-preview[open] .image-tag-trigger > svg { transform: rotate(180deg); }
+.image-tag-row { display: flex; gap: 6px; width: 100%; overflow: hidden; white-space: nowrap; }
+.image-tag-row > .image-tag-chip { flex: none; display: block; overflow: hidden; text-overflow: ellipsis; }
 .image-tag-preview > .image-tag-list { position: absolute; z-index: 16; inset-inline: 0; top: calc(100% + 4px); max-height: min(40dvh, 240px); overflow-y: auto; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: white; box-shadow: 0 8px 20px #17203318; }
 .image-tag-preview[data-side="above"] > .image-tag-list { top: auto; bottom: calc(100% - 4px); }
+.image-tag-preview[open]::after { content: ""; position: absolute; z-index: 16; inset-inline: 0; top: 100%; height: 4px; }
+.image-tag-preview[data-side="above"][open]::after { top: 4px; }
 .image-card-footer .mobile-shared-badge { align-self: center; }
+.image-card-footer .image-source-badge { display: block; max-width: 55%; overflow: hidden; text-overflow: ellipsis; }
 .shared-image-settings fieldset { min-width: 0; padding: 0; margin: 0; border: 0; }
 .shared-image-settings h3 { margin: 12px 0 6px; font-size: .9rem; }
 .saved-image-preview .picture-view { aspect-ratio: 3 / 2; }

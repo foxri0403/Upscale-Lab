@@ -147,7 +147,12 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             ?? throw new NotFoundException("공유 배경화면을 찾을 수 없습니다.");
         var manifest = ReadManifest(source);
         var edit = EffectiveEdit(source);
-        if (source.UserId != userId) edit = (edit ?? ImageEditState.Original()) with { IsReadOnly = true };
+        var countSave = source.UserId != userId;
+        if (countSave)
+        {
+            var uploaderName = await db.Users.Where(x => x.Id == source.UserId).Select(x => x.Username).SingleOrDefaultAsync(ct);
+            edit = (edit ?? ImageEditState.Original()) with { IsReadOnly = true, SourceUploaderName = uploaderName };
+        }
         var asset = new WallpaperAsset { UserId = userId, Title = source.Title, Mode = source.Mode, SavedEditJson = edit?.ToJson() };
         var copied = new List<string>();
         try
@@ -164,7 +169,6 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             stored["_features"] = JsonSerializer.SerializeToNode(Features(source));
             if (source.UserId == userId && edit?.IsReadOnly != true) stored["_ownerSnapshot"] = true;
             asset.ManifestJson = stored.ToJsonString();
-            var countSave = source.UserId != userId;
             await using var transaction = countSave && db.Database.IsRelational()
                 ? await db.Database.BeginTransactionAsync(ct) : null;
             if (transaction is not null)

@@ -55,6 +55,7 @@ export function projectPicture(p: Project): Picture {
     projectId: p.id,
     isDraft: p.isDraft ?? false,
     isReadOnly: p.edit?.isReadOnly ?? false,
+    creator: p.edit?.sourceUploaderName,
     detailsUntil: p.layers !== undefined ? Date.now() + 5 * 60000 : undefined,
     edit: p.edit ? { strength: p.edit.strength, motionDefaultsVersion: p.edit.motionDefaultsVersion, filter: p.edit.filter, crop: p.edit.crop,
       cropRegion: p.edit.cropRegion || undefined,
@@ -90,12 +91,15 @@ export function projectPicture(p: Project): Picture {
 }
 export async function assetPicture(a: Asset, fresh = false, signal?: AbortSignal): Promise<Picture> {
   const cached = manifests.get(a.id);
+  const isReadOnly = a.edit?.isReadOnly ?? false;
+  const creator = isReadOnly ? a.edit?.sourceUploaderName : a.username;
+  const creatorAvatar = isReadOnly ? undefined : a.profileImageUrl || undefined;
   if (!fresh && cached && cached.until > Date.now())
     return {
       ...cached.picture,
       sourceProjectId: a.sourceProjectId ?? undefined,
       isDeviceVariant: a.isDeviceVariant,
-      isReadOnly: a.edit?.isReadOnly ?? false,
+      isReadOnly,
       name: a.title,
       edit: a.edit ? { strength: a.edit.strength, motionDefaultsVersion: a.edit.motionDefaultsVersion, filter: a.edit.filter, crop: a.edit.crop,
         cropRegion: a.edit.cropRegion || undefined,
@@ -104,7 +108,7 @@ export async function assetPicture(a: Asset, fresh = false, signal?: AbortSignal
       tags: a.edit?.tags || [], platformTags: a.edit?.platformTags || [], features: a.features,
       likes: a.likeCount ?? 0, liked: a.isLikedByCurrentUser ?? false, downloads: a.downloadCount ?? 0,
       savedAt: a.edit?.savedAt,
-      creator: a.username, creatorAvatar: a.profileImageUrl || undefined, ownerId: a.userId,
+      creator, creatorAvatar, ownerId: a.userId,
       sharedId: a.isPublic ? a.id : undefined,
     };
   const m = await request<Manifest>(`/api/wallpapers/${a.id}/manifest`, { signal });
@@ -113,7 +117,7 @@ export async function assetPicture(a: Asset, fresh = false, signal?: AbortSignal
     id: `asset:${a.id}`,
     assetId: a.id,
     isDeviceVariant: a.isDeviceVariant,
-    isReadOnly: a.edit?.isReadOnly ?? false,
+    isReadOnly,
     legacyMotion: !!m.motionEnabled && m.mouseEnabled == null && m.gyroEnabled == null,
     edit: a.edit ? { strength: a.edit.strength, motionDefaultsVersion: a.edit.motionDefaultsVersion, filter: a.edit.filter, crop: a.edit.crop,
       cropRegion: a.edit.cropRegion || undefined,
@@ -122,7 +126,7 @@ export async function assetPicture(a: Asset, fresh = false, signal?: AbortSignal
       a.mode === "Live2D" ? { ...defaultEdit, liveEnabled: m.motionEnabled, mouseEnabled: m.mouseEnabled ?? false,
         gyroEnabled: m.gyroEnabled ?? false, rig: m.rig } : undefined,
     savedAt: a.edit?.savedAt,
-    creator: a.username, creatorAvatar: a.profileImageUrl || undefined, ownerId: a.userId,
+    creator, creatorAvatar, ownerId: a.userId,
     sourceProjectId: a.sourceProjectId ?? undefined,
     name: a.title,
     src: files[0]?.source || "",

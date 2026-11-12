@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Download, Heart, Monitor, Smartphone, Tablet, type LucideProps } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Download, Heart, Monitor, Smartphone, Tablet, type LucideProps } from "lucide-react";
 import type { Picture } from "./model";
 import { imageTags } from "./image-tags";
 import { platformTags, selectPlatform, type PlatformTag } from "./platform-tags";
@@ -63,12 +63,25 @@ export function LowerTagList({ picture }: { picture: Picture }) {
 
 export function CardTagPreview({ picture }: { picture: Picture }) {
   const tags = imageTags(picture);
+  if (!tags.length) return <span className="image-tag-trigger image-tag-empty"><span className="image-tag-chip">태그 없음</span></span>;
+  return <TagDisclosure picture={picture} tags={tags} />;
+}
+
+function TagDisclosure({ picture, tags }: { picture: Picture; tags: string[] }) {
   const disclosure = useRef<HTMLDetailsElement>(null);
-  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"closed" | "hover" | "pinned">("closed");
+  const open = mode !== "closed";
+  useLayoutEffect(() => {
+    const details = disclosure.current;
+    if (!open || !details) return;
+    const trigger = details.querySelector("summary")!.getBoundingClientRect();
+    const height = details.querySelector("ul")!.offsetHeight;
+    details.dataset.side = trigger.bottom + height + 8 > innerHeight && trigger.top >= height + 8 ? "above" : "below";
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const closeOutside = (event: Event) => {
-      if (disclosure.current && !disclosure.current.contains(event.target as Node)) disclosure.current.open = false;
+      if (disclosure.current && !disclosure.current.contains(event.target as Node)) setMode("closed");
     };
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("focusin", closeOutside);
@@ -77,23 +90,27 @@ export function CardTagPreview({ picture }: { picture: Picture }) {
       document.removeEventListener("focusin", closeOutside);
     };
   }, [open]);
-  if (!tags.length) return <span className="image-tag-trigger image-tag-empty">태그 없음</span>;
 
-  return <details className="image-tag-preview" ref={disclosure} onToggle={event => {
-    const details = event.currentTarget;
-    setOpen(details.open);
-    if (!details.open) return;
-    const trigger = details.querySelector("summary")!.getBoundingClientRect();
-    const height = details.querySelector("ul")!.offsetHeight;
-    details.dataset.side = trigger.bottom + height + 8 > innerHeight && trigger.top >= height + 8 ? "above" : "below";
-  }} onKeyDown={event => {
-    if (event.key !== "Escape" || !event.currentTarget.open) return;
-    event.stopPropagation();
-    event.currentTarget.open = false;
-    event.currentTarget.querySelector("summary")?.focus();
-  }}>
-    <summary className="image-tag-trigger" aria-label="전체 태그 보기">
-      <span>{tags.join(" · ")}</span><ChevronDown size={14} aria-hidden="true" />
+  return <details className="image-tag-preview" ref={disclosure} open={open}
+    onPointerEnter={event => {
+      if (event.pointerType === "mouse") setMode(current => current === "closed" ? "hover" : current);
+    }}
+    onPointerLeave={event => {
+      if (event.pointerType === "mouse") setMode(current => current === "hover" ? "closed" : current);
+    }}
+    onKeyDown={event => {
+      if (event.key !== "Escape" || !event.currentTarget.open) return;
+      event.stopPropagation();
+      setMode("closed");
+      event.currentTarget.querySelector("summary")?.focus();
+    }}>
+    <summary className="image-tag-trigger" aria-label="전체 태그 보기" onClick={event => {
+      event.preventDefault();
+      setMode(current => current === "pinned" ? "closed" : "pinned");
+    }}>
+      <span className="image-tag-row" aria-hidden="true">
+        {tags.map(tag => <span className="image-tag-chip" key={tag}>{tag}</span>)}
+      </span>
     </summary>
     <LowerTagList picture={picture} />
   </details>;

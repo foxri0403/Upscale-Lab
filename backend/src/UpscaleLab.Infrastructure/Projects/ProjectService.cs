@@ -138,6 +138,11 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
                 (x.IsPublic || x.UserId == userId));
             var source = command.SourceGalleryPostId is null ? null : await gallery.SingleOrDefaultAsync(cancellationToken)
                 ?? throw new NotFoundException("공유 게시물을 찾을 수 없습니다.");
+            var uploaderId = source?.UserId;
+            var countSave = uploaderId.HasValue && uploaderId != userId;
+            var uploaderName = countSave
+                ? await dbContext.Users.Where(x => x.Id == uploaderId).Select(x => x.Username).SingleOrDefaultAsync(cancellationToken)
+                : null;
             var image = new Image
             {
                 UserId = userId,
@@ -157,10 +162,9 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
                 SavedEditJson = command.IsDraft ? ProjectDraftState.Pending : source is null ? null :
                     (ImageEditState.Original().WithTags(
                         GalleryTagCompatibility.Resolve(source.Tag, source.Tags, source.Description).ToArray(), source.PlatformTags)
-                        with { IsReadOnly = source.UserId != userId }).ToJson()
+                        with { IsReadOnly = countSave, SourceUploaderName = uploaderName }).ToJson()
             };
 
-            var countSave = source is not null && source.UserId != userId;
             await using var transaction = countSave && dbContext.Database.IsRelational()
                 ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
             if (transaction is not null)

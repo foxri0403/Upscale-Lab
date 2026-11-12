@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using UpscaleLab.Application.Common;
 using UpscaleLab.Application.Gallery;
 
@@ -34,7 +35,8 @@ public sealed record HeadRigSettings(bool Enabled, int HeadTilt, int EyeMove, in
 // Non-destructive library edits are separate from immutable device wallpaper files.
 public sealed record ImageEditState(int Strength, string Filter, string Crop, int Scale, bool Foreground, DateTime SavedAt,
     string[]? Tags = null, bool LiveEnabled = false, bool MouseEnabled = false, bool GyroEnabled = false, ImageCropRegion? CropRegion = null, int MotionDefaultsVersion = 0, HeadRigSettings? Rig = null,
-    string[]? PlatformTags = null, bool IsReadOnly = false)
+    string[]? PlatformTags = null, bool IsReadOnly = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourceUploaderName = null)
 {
     public const int DefaultMotionStrength = 50;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);

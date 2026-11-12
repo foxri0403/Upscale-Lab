@@ -64,6 +64,8 @@ export function ImageCard({
         : "해상도 확인 중…";
   const shared = isImageShared(picture);
   const showMenu = !explore || !!unpublish;
+  const creator = picture.creator?.trim();
+  const sourceLabel = creator ? `${creator}의 이미지` : "공유 이미지";
   function runMenuAction(action: () => void) {
     if (menu.current) menu.current.open = false;
     action();
@@ -143,7 +145,7 @@ export function ImageCard({
         <ImageFeatureBadges picture={picture} />
         <div className="image-card-footer">
           <CardTagPreview picture={picture} />
-          {!explore && (picture.isReadOnly ? <span className="mobile-shared-badge">유저의 이미지</span> : shared && <span className="mobile-shared-badge" aria-label="업로드된 이미지">
+          {!explore && (picture.isReadOnly ? <span className="mobile-shared-badge image-source-badge" title={sourceLabel}>{sourceLabel}</span> : shared && <span className="mobile-shared-badge" aria-label="업로드된 이미지">
             업로드 <span><Check size={11} strokeWidth={3} /></span>
           </span>)}
         </div>
