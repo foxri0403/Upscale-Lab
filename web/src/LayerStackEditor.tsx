@@ -47,9 +47,9 @@ export function LayerStackEditor({ layers, rig, close, onSave }: {
   const automatic = automaticLayerIds(layers);
   const groupById = new Map(layers.map(layer => [layer.id, rigMovementGroup(rigPart(layer.layerType, layer.id, assignments))]));
   const selectedGroup = rigMovementGroups.find(group => group.id === activeGroup);
-  const previewIds = selectedLayer && !selectedGroup ? [selectedLayer.id] : order;
+  const previewIds = selectedLayer && !selectedGroup && !testing ? [selectedLayer.id] : order;
   const topFirst = [...order].reverse();
-  const motion = useCharacterRig(testing && !!selectedGroup && !saving, rig && { ...rig, enabled: true, partAssignments: assignments ?? {} },
+  const motion = useCharacterRig(testing && !saving, rig && { ...rig, enabled: true, partAssignments: assignments ?? {} },
     `${activeGroup ?? ""}:${previewIds.join(",")}`, undefined, true);
 
   useLayoutEffect(() => {
@@ -85,7 +85,7 @@ export function LayerStackEditor({ layers, rig, close, onSave }: {
   }
   function selectGroup(group: RigMovementGroup | null) {
     setActiveGroup(group);
-    if (!group) setTesting(false);
+    if (!group) setRequestedPreviewPartId(null);
   }
   function safeClose() {
     if (saving) return;
@@ -111,14 +111,14 @@ export function LayerStackEditor({ layers, rig, close, onSave }: {
         <div className={`layer-stack-columns${assignments ? " with-groups" : ""}`}>
           <div className="layer-stack-stage checker" role="img" ref={motion.stage}
             style={{ aspectRatio: stageRatio, "--layer-stack-ratio": stageRatio } as CSSProperties}
-            aria-label={selectedGroup ? `${selectedGroup.label} 그룹 미리보기` : selectedLayer ? `${selectedName} 파츠 미리보기` : "레이어 합성 미리보기"}>
+            aria-label={selectedGroup ? `${selectedGroup.label} 그룹 미리보기` : selectedLayer && !testing ? `${selectedName} 파츠 미리보기` : "레이어 합성 미리보기"}>
             <div className="layer-stack-preview-plane" ref={motion.layers}>
               {previewIds.map(id => {
                 const layer = indexed.get(id);
-                const inGroup = selectedGroup && groupById.get(id) === selectedGroup.id;
+                const visibleInGroup = !selectedGroup || groupById.get(id) === selectedGroup.id;
                 return layer && <img key={id} src={layer.imageUrl} alt="" draggable={false}
-                  className={selectedGroup && !inGroup ? "layer-stack-dimmed" : undefined}
-                  data-rig-part={inGroup ? rigPart(layer.layerType, id, assignments) : undefined}
+                  className={visibleInGroup ? undefined : "layer-stack-dimmed"}
+                  data-rig-part={rig && visibleInGroup ? rigPart(layer.layerType, id, assignments) : undefined}
                   onLoad={event => {
                     const { naturalWidth, naturalHeight } = event.currentTarget;
                     if (id === previewIds[0] && naturalHeight) setStageRatio(naturalWidth / naturalHeight);
@@ -130,10 +130,7 @@ export function LayerStackEditor({ layers, rig, close, onSave }: {
             <h3>파츠 선택</h3>
             <div className="layer-stack-items" ref={partsList} role="group" aria-label="레이어 목록">
               <button type="button" className="layer-stack-item layer-stack-all" ref={allLayersRow}
-                aria-pressed={!selectedLayer && !selectedGroup} disabled={saving} onClick={() => {
-                  setRequestedPreviewPartId(null);
-                  selectGroup(null);
-                }}>
+                aria-pressed={!selectedLayer && !selectedGroup} disabled={saving} onClick={() => selectGroup(null)}>
                 <span className="layer-stack-thumb layer-stack-composite checker">{order.map(id => {
                   const layer = indexed.get(id);
                   return layer && <img key={id} src={layer.imageUrl} alt="" />;
@@ -167,6 +164,10 @@ export function LayerStackEditor({ layers, rig, close, onSave }: {
           {assignments && <section className="layer-stack-groups" aria-label="움직임 그룹 수정">
             <h3>움직임 그룹 수정</h3>
             <div className="layer-stack-group-options" role="group" aria-label="미리 볼 움직임 그룹">
+              <button type="button" aria-pressed={activeGroup === null} disabled={saving} onClick={() => selectGroup(null)}>
+                <span>전체</span>
+                <small>{order.length}개</small>
+              </button>
               {rigMovementGroups.map(group => <button key={group.id} type="button" aria-pressed={activeGroup === group.id}
                 disabled={saving} onClick={() => selectGroup(activeGroup === group.id ? null : group.id)}>
                 <span>{group.label}</span>
@@ -202,8 +203,7 @@ export function LayerStackEditor({ layers, rig, close, onSave }: {
                 </optgroup>)}
               </select>
             </label>}
-            <button className="button secondary layer-stack-motion-test" type="button" aria-pressed={testing} disabled={saving || !selectedGroup}
-              title={!selectedGroup ? "움직임 그룹을 먼저 선택해 주세요" : undefined}
+            <button className="button secondary layer-stack-motion-test" type="button" aria-pressed={testing} disabled={saving}
               onClick={() => setTesting(value => !value)}>
               {testing ? <Square size={15} /> : <Play size={15} />}{testing ? "테스트 중지" : "움직임 테스트"}
             </button>
