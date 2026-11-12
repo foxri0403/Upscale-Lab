@@ -852,7 +852,7 @@ export function Studio({ route }: { route: string }) {
         style={{ left: shareFeedback.x, top: shareFeedback.y - 18 }}>{shareFeedback.text}</div>}
       {dialog === "layerStack" && <LayerStackEditor
         layers={picture.layers ?? []}
-        partAssignments={isCharacterProject ? normalizeRig(edit.rig).partAssignments : undefined}
+        rig={isCharacterProject ? normalizeRig(edit.rig) : undefined}
         close={() => setDialog(null)}
         onSave={async (order, assignments) => {
           if (order) {

@@ -4,9 +4,11 @@ export type RigPart = "fixed" | "head" | "frontHair" | "backHair" | "eye" |
   "torso" | "leftArm" | "rightArm" | "leftHand" | "rightHand" |
   "lowerBody" | "leftLeg" | "rightLeg";
 export const rigMovementGroups = [
-  { id: "head", label: "머리·얼굴", parts: [
-    { value: "head", label: "머리·얼굴" }, { value: "eye", label: "눈" },
+  { id: "hair", label: "머리", parts: [
     { value: "frontHair", label: "앞머리" }, { value: "backHair", label: "뒷머리" },
+  ] },
+  { id: "face", label: "얼굴", parts: [
+    { value: "head", label: "얼굴" }, { value: "eye", label: "눈" },
   ] },
   { id: "upperBody", label: "상체", parts: [
     { value: "torso", label: "몸통·의상" },
@@ -24,6 +26,17 @@ const groupsByPart = new Map<RigPart, RigMovementGroup>(rigMovementGroups.flatMa
 
 export function rigMovementGroup(part: RigPart): RigMovementGroup {
   return groupsByPart.get(part) ?? "fixed";
+}
+
+export function toggleRigMovementGroup(group: RigMovementGroup, current: RigPart, original: RigPart, inferred: RigPart): RigPart {
+  if (rigMovementGroup(current) === group) {
+    if (group !== "fixed") return "fixed";
+    if (original !== "fixed") return original;
+    return inferred !== "fixed" ? inferred : "head";
+  }
+  if (rigMovementGroup(original) === group) return original;
+  if (rigMovementGroup(inferred) === group) return inferred;
+  return rigMovementGroups.find(item => item.id === group)!.parts[0].value;
 }
 /** See-through currently has no guaranteed separate arm/hand/leg segmentation.
  * Never infer nonexistent independent PNG parts. Users can map actual layer IDs.

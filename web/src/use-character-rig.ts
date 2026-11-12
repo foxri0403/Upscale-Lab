@@ -3,7 +3,7 @@ import { normalizeRig, rigTargets, type RigPart } from "./character-rig";
 import type { HeadRig } from "./model";
 
 /** PNG motion editor; each independent motion requires an actual separate transparent PNG. */
-export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: string, externalMotion?: RefObject<{ x: number; y: number }>) {
+export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: string, externalMotion?: RefObject<{ x: number; y: number }>, automatic = false) {
   const stage = useRef<HTMLDivElement>(null);
   const layers = useRef<HTMLDivElement>(null);
   const settings = normalizeRig(value);
@@ -20,8 +20,8 @@ export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: s
       const dt = last ? Math.min(.05, Math.max(0, (time - last) / 1000)) : 1 / 60;
       last = time;
       phase += dt;
-      const inputX = externalMotion?.current.x ?? 0;
-      const inputY = externalMotion?.current.y ?? 0;
+      const inputX = automatic ? Math.sin(phase * 2.4) * .9 : externalMotion?.current.x ?? 0;
+      const inputY = automatic ? Math.sin(phase * 1.5) * .65 : externalMotion?.current.y ?? 0;
       const target = rigTargets(inputX, inputY, inputX, inputY, phase, settings);
       const smooth = (v: number, t: number, speed: number) => v + (t - v) * (1 - Math.exp(-speed * dt));
       head = smooth(head, target.head, 9);
@@ -70,7 +70,7 @@ export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: s
     settings.pivotX, settings.pivotY, settings.idle, settings.bodyMode, settings.upperBody, settings.lowerBody,
     settings.torso, settings.leftArm, settings.rightArm, settings.leftHand, settings.rightHand,
     settings.leftLeg, settings.rightLeg, settings.torsoPivotY, settings.lowerPivotY,
-    JSON.stringify(settings.partAssignments), externalMotion]);
+    JSON.stringify(settings.partAssignments), externalMotion, automatic]);
   return { stage, layers, active: visible && settings.enabled };
 }
 export type CharacterRigController = ReturnType<typeof useCharacterRig>;

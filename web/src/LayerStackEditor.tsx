@@ -1,22 +1,24 @@
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ArrowDown, ArrowUp, Layers3, RotateCcw, Save, Undo2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Play, RotateCcw, Save, Square, Undo2 } from "lucide-react";
 import type { ApiLayer } from "./api";
-import { rigMovementGroup, rigMovementGroups, rigPart, type RigMovementGroup, type RigPart } from "./character-rig";
+import { rigMovementGroup, rigMovementGroups, rigPart, toggleRigMovementGroup, type RigMovementGroup, type RigPart } from "./character-rig";
 import type { HeadRig } from "./model";
 import { Modal, Busy } from "./ui";
 import { automaticLayerIds, currentLayerIds, isCompleteStack, moveLayer } from "./layer-stack";
 import "./layer-stack-editor.css";
 import { layerLabel } from "./layer-label";
 import { selectedLivePartId } from "./live-layer-preview";
+import { useCharacterRig } from "./use-character-rig";
 
 type PartAssignments = HeadRig["partAssignments"];
 
-export function LayerStackEditor({ layers, partAssignments, close, onSave }: {
+export function LayerStackEditor({ layers, rig, close, onSave }: {
   layers: ApiLayer[];
-  partAssignments?: PartAssignments;
+  rig?: HeadRig;
   close: () => void;
   onSave: (order?: string[], assignments?: PartAssignments) => Promise<void>;
 }) {
+  const partAssignments = rig?.partAssignments;
   const [initial] = useState(() => currentLayerIds(layers));
   const [order, setOrder] = useState(initial);
   const [assignments, setAssignments] = useState(partAssignments);
@@ -26,9 +28,10 @@ export function LayerStackEditor({ layers, partAssignments, close, onSave }: {
   const [stageRatio, setStageRatio] = useState(1);
   const [requestedPreviewPartId, setRequestedPreviewPartId] = useState<string | null>(null);
   const [activeGroup, setActiveGroup] = useState<RigMovementGroup | null>(null);
+  const [testing, setTesting] = useState(false);
   const partsList = useRef<HTMLDivElement>(null);
   const allLayersRow = useRef<HTMLButtonElement>(null);
-  const selectedPartRow = useRef<HTMLButtonElement>(null);
+  const movedPart = useRef<string | null>(null);
 
   const indexed = useMemo(() => new Map(layers.map(layer => [layer.id, layer])), [layers]);
   const previewPartId = selectedLivePartId(layers, requestedPreviewPartId);
@@ -44,12 +47,16 @@ export function LayerStackEditor({ layers, partAssignments, close, onSave }: {
   const automatic = automaticLayerIds(layers);
   const groupById = new Map(layers.map(layer => [layer.id, rigMovementGroup(rigPart(layer.layerType, layer.id, assignments))]));
   const selectedGroup = rigMovementGroups.find(group => group.id === activeGroup);
-  const previewIds = selectedLayer && !selectedGroup ? [selectedLayer.id] : order;
+  const previewIds = selectedLayer && !selectedGroup && !testing ? [selectedLayer.id] : order;
+  const topFirst = [...order].reverse();
+  const motion = useCharacterRig(testing && !saving, rig && { ...rig, enabled: true, partAssignments: assignments ?? {} }, previewIds.join(","), undefined, true);
 
   useLayoutEffect(() => {
     const list = partsList.current;
     const all = allLayersRow.current;
-    const row = selectedPartRow.current;
+    const id = movedPart.current ?? previewPartId;
+    movedPart.current = null;
+    const row = id ? list?.querySelector(`[data-layer-id="${CSS.escape(id)}"]`) : null;
     if (!list || !all || !row) return;
     const item = row.getBoundingClientRect();
     const top = all.getBoundingClientRect().bottom;
@@ -65,6 +72,15 @@ export function LayerStackEditor({ layers, partAssignments, close, onSave }: {
   function changeOrder(next: string[]) {
     setHistory(previous => [...previous.slice(-63), order]);
     showOrder(next);
+  }
+  function move(id: string, offset: -1 | 1) {
+    movedPart.current = id;
+    if (!selectedGroup) setRequestedPreviewPartId(null);
+    changeOrder(moveLayer(order, id, offset));
+  }
+  function toggleGroupPart(layer: ApiLayer, group: RigMovementGroup) {
+    setAssignments(previous => ({ ...previous, [layer.id]: toggleRigMovementGroup(group,
+      rigPart(layer.layerType, layer.id, previous), rigPart(layer.layerType, layer.id, partAssignments), rigPart(layer.layerType)) }));
   }
   function safeClose() {
     if (saving) return;
@@ -88,18 +104,21 @@ export function LayerStackEditor({ layers, partAssignments, close, onSave }: {
       {layers.length < 2 ?
         <p role="status">조합할 레이어가 없습니다. 먼저 이미지 분리를 완료해 주세요.</p> : <>
         <div className={`layer-stack-columns${assignments ? " with-groups" : ""}`}>
-          <div className="layer-stack-stage checker" role="img"
+          <div className="layer-stack-stage checker" role="img" ref={motion.stage}
             style={{ aspectRatio: stageRatio, "--layer-stack-ratio": stageRatio } as CSSProperties}
-            aria-label={selectedGroup ? `${selectedGroup.label} 그룹 미리보기` : selectedLayer ? `${selectedName} 파츠 미리보기` : "레이어 합성 미리보기"}>
-            {previewIds.map(id => {
-              const layer = indexed.get(id);
-              return layer && <img key={id} src={layer.imageUrl} alt="" draggable={false}
-                className={selectedGroup && groupById.get(id) !== selectedGroup.id ? "layer-stack-dimmed" : undefined}
-                onLoad={event => {
-                  const { naturalWidth, naturalHeight } = event.currentTarget;
-                  if (id === previewIds[0] && naturalHeight) setStageRatio(naturalWidth / naturalHeight);
-                }} />;
-            })}
+            aria-label={selectedGroup ? `${selectedGroup.label} 그룹 미리보기` : selectedLayer && !testing ? `${selectedName} 파츠 미리보기` : "레이어 합성 미리보기"}>
+            <div className="layer-stack-preview-plane" ref={motion.layers}>
+              {previewIds.map(id => {
+                const layer = indexed.get(id);
+                return layer && <img key={id} src={layer.imageUrl} alt="" draggable={false}
+                  className={selectedGroup && groupById.get(id) !== selectedGroup.id ? "layer-stack-dimmed" : undefined}
+                  data-rig-part={rig ? rigPart(layer.layerType, id, assignments) : undefined}
+                  onLoad={event => {
+                    const { naturalWidth, naturalHeight } = event.currentTarget;
+                    if (id === previewIds[0] && naturalHeight) setStageRatio(naturalWidth / naturalHeight);
+                  }} />;
+              })}
+            </div>
           </div>
           <section className="layer-stack-parts" aria-label="파츠 선택">
             <h3>파츠 선택</h3>
@@ -109,27 +128,34 @@ export function LayerStackEditor({ layers, partAssignments, close, onSave }: {
                   setRequestedPreviewPartId(null);
                   setActiveGroup(null);
                 }}>
-                <span className="layer-stack-thumb"><Layers3 size={20} aria-hidden="true" /></span>
+                <span className="layer-stack-thumb layer-stack-composite checker">{order.map(id => {
+                  const layer = indexed.get(id);
+                  return layer && <img key={id} src={layer.imageUrl} alt="" />;
+                })}</span>
                 <span>전체 레이어</span>
               </button>
-              {[...order].reverse().map((id, index) => {
+              {topFirst.map((id, index) => {
                 const layer = indexed.get(id);
                 if (!layer) return null;
-                return <button type="button" className="layer-stack-item" key={id} aria-pressed={previewPartId === id}
-                  ref={previewPartId === id ? selectedPartRow : null}
-                  disabled={saving} onClick={() => setRequestedPreviewPartId(previewPartId === id ? null : id)}>
-                  <span className="layer-stack-thumb checker"><img src={layer.imageUrl} alt="" loading="lazy" /></span>
-                  <span>{layerLabel(layer.layerType)} · {order.length - index}</span>
-                </button>;
+                const position = order.length - index;
+                const name = `${layerLabel(layer.layerType)} ${position}`;
+                return <div className="layer-stack-part-row" key={id} data-layer-id={id}>
+                  <span className="layer-stack-position">{position}</span>
+                  <button type="button" className="layer-stack-item" aria-label={`${name} 파츠 미리보기`} aria-pressed={previewPartId === id}
+                    disabled={saving} onClick={() => setRequestedPreviewPartId(previewPartId === id ? null : id)}>
+                    <span className="layer-stack-thumb checker"><img src={layer.imageUrl} alt="" loading="lazy" /></span>
+                    <span>{layerLabel(layer.layerType)}</span>
+                  </button>
+                  <div className="layer-stack-order" role="group" aria-label={`${name} 순서`}>
+                    <button type="button" aria-label={`${name} 앞쪽으로 한 칸`} title="앞쪽으로 한 칸"
+                      disabled={saving || index === 0 || id === background?.id}
+                      onClick={() => move(id, 1)}><ArrowUp size={14} /></button>
+                    <button type="button" aria-label={`${name} 뒤쪽으로 한 칸`} title="뒤쪽으로 한 칸"
+                      disabled={saving || position <= (background ? 2 : 1)}
+                      onClick={() => move(id, -1)}><ArrowDown size={14} /></button>
+                  </div>
+                </div>;
               })}
-            </div>
-            <div className="layer-stack-order" role="group" aria-label="선택한 파츠의 순서">
-              <button type="button" aria-label="앞쪽으로 한 칸" title="앞쪽으로 한 칸"
-                disabled={!selectedLayer || saving || selectedIndex >= order.length - 1 || selectedLayer.id === background?.id}
-                onClick={() => { if (selectedLayer) changeOrder(moveLayer(order, selectedLayer.id, 1)); }}><ArrowUp size={16} /></button>
-              <button type="button" aria-label="뒤쪽으로 한 칸" title="뒤쪽으로 한 칸"
-                disabled={!selectedLayer || saving || selectedIndex <= (background ? 1 : 0)}
-                onClick={() => { if (selectedLayer) changeOrder(moveLayer(order, selectedLayer.id, -1)); }}><ArrowDown size={16} /></button>
             </div>
           </section>
           {assignments && <section className="layer-stack-groups" aria-label="움직임 그룹 수정">
@@ -141,32 +167,51 @@ export function LayerStackEditor({ layers, partAssignments, close, onSave }: {
                 <small>{[...groupById.values()].filter(groupId => groupId === group.id).length}개</small>
               </button>)}
             </div>
-            <label>
-              {selectedLayer && <span>{selectedName}</span>}
-              <select aria-label={`${selectedName} 움직임 그룹 배정`} disabled={!selectedLayer || saving}
-                value={selectedLayer ? rigPart(selectedLayer.layerType, selectedLayer.id, assignments) : ""}
+            {selectedGroup && <section className="layer-stack-members" aria-label={`${selectedGroup.label} 그룹 파츠 선택`}>
+              <h3>파츠 선택</h3>
+              <div className="layer-stack-member-list" role="group" aria-label={`${selectedGroup.label} 그룹 포함 여부`}>
+                {topFirst.map((id, index) => {
+                  const layer = indexed.get(id);
+                  if (!layer) return null;
+                  const name = `${layerLabel(layer.layerType)} ${order.length - index}`;
+                  const included = groupById.get(id) === selectedGroup.id;
+                  return <button type="button" key={id} title={name} aria-label={name} aria-pressed={included}
+                    disabled={saving} onClick={() => toggleGroupPart(layer, selectedGroup.id)}>
+                    <span className="layer-stack-thumb checker"><img src={layer.imageUrl} alt="" loading="lazy" /></span>
+                    {included && <Check size={12} aria-hidden="true" />}
+                  </button>;
+                })}
+              </div>
+            </section>}
+            {selectedLayer && !selectedGroup && <label>
+              <span>{selectedName}</span>
+              <select aria-label={`${selectedName} 움직임 그룹 배정`} disabled={saving}
+                value={rigPart(selectedLayer.layerType, selectedLayer.id, assignments)}
                 onChange={event => {
-                  if (!selectedLayer) return;
                   const part = event.currentTarget.value as RigPart;
                   setAssignments(previous => ({ ...previous, [selectedLayer.id]: part }));
                 }}>
-                <option value="" disabled>파츠 선택</option>
                 {rigMovementGroups.map(group => <optgroup key={group.id} label={group.label}>
                   {group.parts.map(part => <option key={part.value} value={part.value}>{part.label}</option>)}
                 </optgroup>)}
               </select>
-            </label>
+            </label>}
+            <button className="button secondary layer-stack-motion-test" type="button" aria-pressed={testing} disabled={saving}
+              onClick={() => setTesting(value => !value)}>
+              {testing ? <Square size={15} /> : <Play size={15} />}{testing ? "테스트 중지" : "움직임 테스트"}
+            </button>
           </section>}
         </div>
         <div className="layer-stack-footer">
           <div className="layer-stack-tools">
-            <button type="button" disabled={!history.length || saving}
+            <button type="button" aria-label="되돌리기" title="되돌리기" disabled={!history.length || saving}
               onClick={() => {
                 showOrder(history[history.length - 1]);
                 setHistory(previous => previous.slice(0, -1));
-              }}><Undo2 size={16} /> 되돌리기</button>
-            <button type="button" disabled={saving || automatic.join(",") === order.join(",")}
-              onClick={() => changeOrder(automatic)}><RotateCcw size={16} /> AI 순서로 복원</button>
+              }}><Undo2 size={16} /><span>되돌리기</span></button>
+            <button type="button" aria-label="AI 순서로 복원" title="AI 순서로 복원"
+              disabled={saving || automatic.join(",") === order.join(",")}
+              onClick={() => changeOrder(automatic)}><RotateCcw size={16} /><span>AI 순서로 복원</span></button>
           </div>
           <div className="layer-stack-save-actions">
             <button type="button" className="button secondary" onClick={safeClose} disabled={saving}>취소</button>

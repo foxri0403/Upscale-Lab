@@ -10,16 +10,24 @@ const raw = fs.readFileSync(new URL("../src/character-rig.ts", import.meta.url),
     enabled: false, headTilt: 60, eyeMove: 35, hairSway: 55, pivotX: 50, pivotY: 16, idle: true, bodyMode: "fixed", upperBody: 40, lowerBody: 20, torso: 50, leftArm: 35, rightArm: 35, leftHand: 25, rightHand: 25, leftLeg: 20, rightLeg: 20, torsoPivotY: 40, lowerPivotY: 68, partAssignments: {},
   };`);
 const js = stripTypeScriptTypes(raw, { mode: "strip" });
-const { rigPart, rigMovementGroup, rigTargets, normalizeRig } = await import(`data:text/javascript,${encodeURIComponent(js)}`);
+const { rigPart, rigMovementGroup, rigTargets, normalizeRig, toggleRigMovementGroup } = await import(`data:text/javascript,${encodeURIComponent(js)}`);
 
 test("movement groups follow the effective roles while preserving head and body subroles", () => {
   const groupOf = (layerType, assignments = {}) => rigMovementGroup(rigPart(layerType, "part", assignments));
-  for (const part of ["Face", "Eye", "FrontHair", "BackHair", "Nose", "Mouth", "Eyebrow"])
-    assert.equal(groupOf(part), "head");
+  for (const part of ["Face", "Eye", "Nose", "Mouth", "Eyebrow"])
+    assert.equal(groupOf(part), "face");
+  for (const part of ["FrontHair", "BackHair"]) assert.equal(groupOf(part), "hair");
   assert.equal(groupOf("Clothes"), "upperBody");
   assert.equal(groupOf("Face", { part: "leftArm" }), "upperBody");
   assert.equal(groupOf("Body", { part: "rightLeg" }), "lowerBody");
   assert.equal(groupOf("Accessory"), "fixed");
+});
+
+test("group toggling keeps matching roles and restores a moving role when leaving fixed", () => {
+  assert.equal(toggleRigMovementGroup("face", "head", "head", "eye"), "fixed");
+  assert.equal(toggleRigMovementGroup("face", "fixed", "head", "eye"), "head");
+  assert.equal(toggleRigMovementGroup("fixed", "fixed", "backHair", "frontHair"), "backHair");
+  assert.equal(toggleRigMovementGroup("upperBody", "frontHair", "frontHair", "frontHair"), "torso");
 });
 
 test("semantic rig roles keep unmatched parts fixed and allow body assignments", () => {
