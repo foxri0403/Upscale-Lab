@@ -881,11 +881,11 @@ export function Studio({ route }: { route: string }) {
       {dialog === "info" && <ImageInformation picture={picture}
         layerCount={picture.layers?.length ?? (isFox ? foregroundSrcs.length + 1 : 1)} close={() => setDialog(null)} />}
       {dialog === "apply" && draft && <ApplyWallpaperDialog picture={draft} devices={library.devices}
-        busy={busy} pcMotionAvailable close={() => setDialog(null)}
-        confirm={async ({ picture: ready, deviceId, displayId, frame, pcMotion }) => {
+        busy={busy} close={() => setDialog(null)}
+        confirm={async ({ picture: ready, deviceId, displayId, frame }) => {
           setBusy(true);
           try {
-            if (await apply(ready, deviceId, displayId, { frame, enablePcLiveMotion: pcMotion })) setDialog(null);
+            if (await apply(ready, deviceId, displayId, { frame })) setDialog(null);
           } finally { setBusy(false); }
         }} />}
     </div>

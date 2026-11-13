@@ -18,12 +18,15 @@ internal sealed class ParallaxView : Grid, IDisposable
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private TimeSpan lastFrame;
     private double lastTime, x, y;
+    private bool playbackPaused;
     private readonly Func<System.Drawing.Point> pointer;
 
-    public ParallaxView(MonitorInfo monitor, WallpaperManifest manifest, Func<System.Drawing.Point>? pointer = null)
+    public ParallaxView(MonitorInfo monitor, WallpaperManifest manifest, Func<System.Drawing.Point>? pointer = null,
+        bool playbackPaused = false)
     {
         this.monitor = monitor; this.manifest = manifest;
         this.pointer = pointer ?? (() => System.Windows.Forms.Cursor.Position);
+        this.playbackPaused = playbackPaused;
         ClipToBounds = true; Background = System.Windows.Media.Brushes.Black; Children.Add(canvas);
         canvas.HorizontalAlignment = System.Windows.HorizontalAlignment.Left;
         canvas.VerticalAlignment = System.Windows.VerticalAlignment.Top;
@@ -56,9 +59,23 @@ internal sealed class ParallaxView : Grid, IDisposable
             plane.RenderTransform = transforms; canvas.Children.Add(plane); planes.Add((file, translation, rotation));
         }
         SizeChanged += (_, _) => Fit();
-        Loaded += (_, _) => { lastTime = clock.Elapsed.TotalSeconds; CompositionTarget.Rendering -= Render;
-            if (manifest.UsesMouse) CompositionTarget.Rendering += Render; };
+        Loaded += (_, _) => UpdateRenderingSubscription();
         Unloaded += (_, _) => CompositionTarget.Rendering -= Render;
+    }
+
+    internal void SetPlaybackPaused(bool paused)
+    {
+        if (playbackPaused == paused) return;
+        playbackPaused = paused;
+        UpdateRenderingSubscription();
+    }
+
+    private void UpdateRenderingSubscription()
+    {
+        CompositionTarget.Rendering -= Render;
+        if (playbackPaused || !IsLoaded || !manifest.UsesMouse) return;
+        lastTime = clock.Elapsed.TotalSeconds;
+        CompositionTarget.Rendering += Render;
     }
 
     private void Fit()

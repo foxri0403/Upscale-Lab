@@ -11,6 +11,9 @@ internal sealed class MainForm : Form
     private readonly CheckBox saveIdentifier = new() { Text = "아이디 저장", AutoSize = true, Margin = new(0, 8, 22, 8) };
     private readonly CheckBox remember = new() { Text = "자동 로그인", AutoSize = true, Margin = new(0, 8, 0, 8) };
     private readonly CheckBox startup = new() { Text = "Windows 시작 시 실행", AutoSize = true, Anchor = AnchorStyles.Left };
+    private readonly System.Windows.Forms.Timer playbackTimer = new() { Interval = 250 };
+    private readonly DisplayPowerNotifications displayPower = new();
+    private PlaybackRules playbackRules = PlaybackRules.Load();
     private readonly BrandButton login = new() { Text = "로그인", Primary = true, CornerRadius = 0, Dock = DockStyle.Top };
     private readonly BrandButton logout = new() { Text = "로그아웃", AutoSize = true, Margin = new(16, 0, 0, 0) };
     private readonly Label status = new() { AutoSize = true, ForeColor = AppBrand.Muted, Margin = new(0, 12, 0, 0) };
@@ -75,6 +78,9 @@ internal sealed class MainForm : Form
         var privacy = new LinkLabel { Text = "수집 정보 안내", AutoSize = true, LinkColor = AppBrand.Muted, Margin = new(0, 14, 0, 0) };
         privacy.LinkClicked += (_, _) => MessageBox.Show(this, PrivacyConsent.Details, PrivacyConsent.Title);
         actions.Controls.Add(privacy); actions.Controls.Add(logout); footer.Controls.Add(actions); connected.Controls.Add(footer);
+        connected.Controls.Add(PlaybackSettings());
+        playbackTimer.Tick += (_, _) => UpdatePlayback();
+        UpdatePlayback();
         connected.Controls.Add(Copy("창을 닫아도 트레이에서 동기화합니다."));
         content.Controls.Add(connected); content.Controls.Add(status); scroll.Controls.Add(content); Controls.Add(scroll);
         content.SizeChanged += (_, _) => {
@@ -95,12 +101,71 @@ internal sealed class MainForm : Form
             var saved = SecureStore.Read(); if (saved != null && saved.Remember) SecureStore.Write(saved with { Enabled = restore }); Close(); });
         tray.ContextMenuStrip = menu;
         FormClosing += (_, e) => { SaveIdentity(); if (!quitting && controller.LoggedIn) { e.Cancel = true; Hide(); } };
-        FormClosed += (_, _) => { var icon = tray.Icon; tray.Dispose(); icon?.Dispose(); avatar.Image?.Dispose(); controller.Dispose(); };
+        FormClosed += (_, _) => { playbackTimer.Dispose(); var icon = tray.Icon; tray.Dispose(); icon?.Dispose(); avatar.Image?.Dispose(); controller.Dispose(); };
         Shown += async (_, _) => { RoundWindow(); await Operation(controller.Restore); };
         SizeChanged += (_, _) => { if (IsHandleCreated) RoundWindow(); };
         Activated += async (_, _) => { if (controller.LoggedIn && !busy && DateTime.UtcNow - lastProfileRefresh > TimeSpan.FromMinutes(1)) {
             lastProfileRefresh = DateTime.UtcNow; await controller.RefreshProfile(); } };
         RefreshState();
+    }
+
+    private GroupBox PlaybackSettings()
+    {
+        var group = new GroupBox { Text = "재생", Dock = DockStyle.Top, AutoSize = true,
+            Margin = new(0, 12, 0, 14), Padding = new(14, 6, 14, 10) };
+        var rows = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2 };
+        rows.ColumnStyles.Add(new(SizeType.Percent, 50));
+        rows.ColumnStyles.Add(new(SizeType.Percent, 50));
+        AddRow("타 응용 프로그램 활성화", playbackRules.PauseWhenActive, paused => playbackRules with { PauseWhenActive = paused });
+        AddRow("타 응용 프로그램 최대화", playbackRules.PauseWhenMaximized, paused => playbackRules with { PauseWhenMaximized = paused });
+        AddRow("타 응용 프로그램 전체 화면", playbackRules.PauseWhenFullScreen, paused => playbackRules with { PauseWhenFullScreen = paused });
+        AddRow("디스플레이 절전 상태", playbackRules.PauseWhenDisplaySleeps, paused => playbackRules with { PauseWhenDisplaySleeps = paused });
+        group.Controls.Add(rows);
+        return group;
+
+        void AddRow(string title, bool paused, Func<bool, PlaybackRules> change)
+        {
+            var label = new Label { Text = title, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new(0, 3, 12, 3) };
+            var choices = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = title,
+                Dock = DockStyle.Fill, Margin = new(0, 3, 0, 3) };
+            choices.Items.AddRange(["재생", "일시정지"]);
+            choices.SelectedIndex = paused ? 1 : 0;
+            choices.SelectionChangeCommitted += (_, _) =>
+            {
+                var next = change(choices.SelectedIndex == 1);
+                try { next.Save(); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                    choices.SelectedIndex = choices.SelectedIndex == 1 ? 0 : 1;
+                    MessageBox.Show(this, "재생 설정을 저장하지 못했습니다.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                playbackRules = next;
+                UpdatePlayback();
+            };
+            rows.Controls.Add(label);
+            rows.Controls.Add(choices);
+        }
+    }
+
+    private void UpdatePlayback() => controller.UpdatePlayback(playbackRules, displayPower.Sleeping);
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        displayPower.Register(Handle);
+    }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        displayPower.Unregister();
+        base.OnHandleDestroyed(e);
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (displayPower.HandleMessage(m)) UpdatePlayback();
+        base.WndProc(ref m);
     }
     internal void ShowMain() { if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal; Show(); Activate(); }
     private async Task Operation(Func<Task> operation) {
@@ -116,6 +181,7 @@ internal sealed class MainForm : Form
         AcceptButton = controller.LoggedIn ? null : login;
         login.Enabled = identifier.Enabled = password.Enabled = remember.Enabled = saveIdentifier.Enabled = !busy;
         logout.Enabled = startup.Enabled = !busy;
+        playbackTimer.Enabled = controller.LoggedIn;
         if (replaceStatus) status.Text = "";
         status.Visible = status.Text.Length > 0;
         username.Text = controller.Username; email.Text = controller.Account; plan.Text = controller.Plan + " 플랜";

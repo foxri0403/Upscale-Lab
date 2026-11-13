@@ -1,17 +1,19 @@
-import type { HeadRig, Picture } from "./model";
+import { defaultEdit, type HeadRig, type Picture } from "./model";
 import { PictureView } from "./ui";
 import { frameLayout, wallpaperCrop, type ScreenSize, type WallpaperFrame } from "./wallpaper-frame";
 import { rigPart } from "./character-rig";
 import { useCharacterRig } from "./use-character-rig";
 import type { ParallaxMotion } from "./use-parallax";
+import { wallpaperExportPolicy } from "./wallpaper-export-policy";
 
 export function FramedWallpaper({ picture, size, frame, motion, rig }: {
   picture: Picture; size: ScreenSize; frame: WallpaperFrame; motion?: ParallaxMotion; rig?: HeadRig;
 }) {
   const crop = wallpaperCrop(picture, size);
   const layout = frameLayout(frame, crop);
-  const character = !picture.background && (picture.foregrounds?.length ?? 0) >= 2;
-  const characterRig = useCharacterRig(character && !!motion?.active, rig, picture.id, motion?.position);
+  const { characterParts: character } = wallpaperExportPolicy(picture, picture.edit ?? defaultEdit);
+  const layerKey = JSON.stringify([picture.id, picture.foregrounds, picture.layers?.map(layer => layer.id)]);
+  const characterRig = useCharacterRig(character && picture.edit?.foreground !== false && !!motion?.active, rig, layerKey, motion?.position);
   const partForSource = characterRig.active ? (source: string) => {
     const layer = picture.layers?.find(value => value.imageUrl === source);
     const file = picture.wallpaperParts?.find(value => value.source === source);

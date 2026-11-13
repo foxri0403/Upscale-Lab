@@ -7,14 +7,27 @@ namespace UpscaleLab.Companion;
 internal sealed class WallpaperEngine : IDisposable
 {
     private readonly Dictionary<string, LiveDesktop> live = new();
+    private PlaybackRules playbackRules = new();
+    private bool displaySleeping;
     public bool SupportsLive => DesktopHost.Find(true) != IntPtr.Zero;
     public bool IsLive(string nativeId) => live.TryGetValue(nativeId, out var value) && !value.IsDisposed && value.Attached;
+    public void UpdatePlayback(PlaybackRules rules, bool sleeping)
+    {
+        playbackRules = rules;
+        displaySleeping = sleeping;
+        if (live.Count == 0) return;
+        var foreground = ForegroundWindow.Read();
+        foreach (var desktop in live.Values)
+            desktop.SetPlaybackPaused(rules.ShouldPause(desktop.MonitorBounds, foreground, sleeping));
+    }
+
     public void Apply(MonitorInfo monitor, WallpaperManifest manifest)
     {
         LiveDesktop? next = null;
         if (manifest.Mode == "Live2D")
         {
-            next = new LiveDesktop(monitor, manifest);
+            var paused = playbackRules.ShouldPause(monitor.Bounds, ForegroundWindow.Read(), displaySleeping);
+            next = new LiveDesktop(monitor, manifest, paused);
             if (!next.Attach()) { next.Dispose(); throw new InvalidOperationException("Windows 바탕화면에 Live 2D를 연결하지 못했습니다."); }
         }
         var path = Path.Combine(Path.GetDirectoryName(manifest.Files[0].Source)!, $"desktop-{monitor.Width}x{monitor.Height}.png");
@@ -90,7 +103,7 @@ internal sealed class WallpaperEngine : IDisposable
         public bool Attached => DesktopHost.IsAttached(Handle);
         protected override bool ShowWithoutActivation => true;
         protected override CreateParams CreateParams { get { var value = base.CreateParams; value.ExStyle |= 0x080800a0; return value; } }
-        public LiveDesktop(MonitorInfo monitor, WallpaperManifest manifest)
+        public LiveDesktop(MonitorInfo monitor, WallpaperManifest manifest, bool playbackPaused)
         {
             this.monitor = monitor; this.manifest = manifest;
             FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; DoubleBuffered = true;
@@ -110,10 +123,12 @@ internal sealed class WallpaperEngine : IDisposable
                 }
             }
             catch { foreach (var layer in layers) layer.Image.Dispose(); throw; }
-            view = new ParallaxView(monitor, manifest);
+            view = new ParallaxView(monitor, manifest, playbackPaused: playbackPaused);
             host = new System.Windows.Forms.Integration.ElementHost { Dock = DockStyle.Fill, Child = view };
             Controls.Add(host);
         }
+        public Rectangle MonitorBounds => monitor.Bounds;
+        public void SetPlaybackPaused(bool paused) => view.SetPlaybackPaused(paused);
         public bool Attach()
         {
             var host = DesktopHost.Find(true); if (host == IntPtr.Zero) return false;

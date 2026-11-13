@@ -54,6 +54,8 @@ internal sealed class CompanionController : IDisposable
     public MonitorInfo[] Monitors { get; private set; } = [];
     private string AppliedFile => Path.Combine(SecureStore.Root, $"applied-{api!.Session!.User.Id:N}-{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(api.Server)))[..12]}.json");
     private void Notify(string status) { Status = status; Changed?.Invoke(); }
+    public void UpdatePlayback(PlaybackRules rules, bool displaySleeping) => engine.UpdatePlayback(rules, displaySleeping);
+
     private void Persist() { if (api != null) writeCredentials(new(api.Server, api.Session, api.Device, Enabled, remember)); }
     private void SetApi(string server, Login? session, Binding? binding)
     {

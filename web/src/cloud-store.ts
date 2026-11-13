@@ -111,13 +111,19 @@ export async function assetPicture(a: Asset, fresh = false, signal?: AbortSignal
       creator, creatorAvatar, ownerId: a.userId,
       sharedId: a.isPublic ? a.id : undefined,
     };
-  const m = await request<Manifest>(`/api/wallpapers/${a.id}/manifest`, { signal });
+  const m = await request<Manifest>(`/api/wallpapers/${a.id}/manifest`, { signal, cache: "no-store" });
+  const picture = { ...manifestPicture(m, a), creator, creatorAvatar };
+  manifests.set(a.id, { picture, until: Date.now() + 5 * 60000 });
+  return picture;
+}
+
+function manifestPicture(m: Manifest, a: Asset): Picture {
   const files = [...m.files].sort((a, b) => a.order - b.order);
-  const picture: Picture = {
+  return {
     id: `asset:${a.id}`,
     assetId: a.id,
     isDeviceVariant: a.isDeviceVariant,
-    isReadOnly,
+    isReadOnly: a.edit?.isReadOnly ?? false,
     legacyMotion: !!m.motionEnabled && m.mouseEnabled == null && m.gyroEnabled == null,
     edit: a.edit ? { strength: a.edit.strength, motionDefaultsVersion: a.edit.motionDefaultsVersion, filter: a.edit.filter, crop: a.edit.crop,
       cropRegion: a.edit.cropRegion || undefined,
@@ -126,7 +132,7 @@ export async function assetPicture(a: Asset, fresh = false, signal?: AbortSignal
       a.mode === "Live2D" ? { ...defaultEdit, liveEnabled: m.motionEnabled, mouseEnabled: m.mouseEnabled ?? false,
         gyroEnabled: m.gyroEnabled ?? false, rig: m.rig } : undefined,
     savedAt: a.edit?.savedAt,
-    creator, creatorAvatar, ownerId: a.userId,
+    ownerId: a.userId,
     sourceProjectId: a.sourceProjectId ?? undefined,
     name: a.title,
     src: files[0]?.source || "",
@@ -158,8 +164,6 @@ export async function assetPicture(a: Asset, fresh = false, signal?: AbortSignal
         ? files.filter((f) => f.role !== "Background").map((f) => f.source)
         : undefined,
   };
-  manifests.set(a.id, { picture, until: Date.now() + 5 * 60000 });
-  return picture;
 }
 export function clearCloudCache() {
   manifests.clear();
@@ -346,9 +350,9 @@ export function discardDraft(picture: Picture) {
     ? request(`/api/projects/${picture.projectId}/draft`, { method: "DELETE", keepalive: true })
     : Promise.resolve();
 }
-export async function detailPicture(p: Picture): Promise<Picture> {
+export async function detailPicture(p: Picture, signal?: AbortSignal): Promise<Picture> {
   if (!p.projectId) return p;
-  const detail = await request<Project>(`/api/projects/${p.projectId}`);
+  const detail = await request<Project>(`/api/projects/${p.projectId}`, { signal, cache: "no-store" });
   const result = {
     ...p,
     ...projectPicture(detail),
@@ -374,6 +378,18 @@ export async function detailPicture(p: Picture): Promise<Picture> {
     result.contentType = "image/png";
   }
   return result;
+}
+
+export async function refreshWallpaperPreview(picture: Picture, signal: AbortSignal): Promise<Picture> {
+  if (picture.projectId) return detailPicture(picture, signal);
+  if (!picture.assetId) return picture;
+  const manifest = await request<Manifest>(`/api/wallpapers/${picture.assetId}/manifest`, { signal, cache: "no-store" });
+  const files = manifestPicture(manifest, {
+    id: picture.assetId, title: picture.name, mode: manifest.mode, isPublic: !!picture.sharedId, createdAt: picture.created,
+  });
+  return { ...picture, src: files.src, background: files.background, foregrounds: files.foregrounds,
+    wallpaperParts: files.wallpaperParts, exportSources: files.exportSources, width: files.width, height: files.height,
+    contentType: files.contentType, edit: picture.edit ?? files.edit, legacyMotion: files.legacyMotion };
 }
 export async function createAsset(picture: Picture, frame?: WallpaperFrame): Promise<Asset> {
   if (picture.isReadOnly && !frame) throw new Error("다른 사용자의 저장 이미지는 기기 배경화면에만 적용할 수 있습니다.");

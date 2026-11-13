@@ -30,8 +30,6 @@ import {
   write,
   sampleLibrary,
   community,
-  defaultEdit,
-  defaultHeadRig,
   uuid,
   type Library,
   type Picture,
@@ -87,7 +85,7 @@ import { displaySize, type WallpaperFrame } from "./wallpaper-frame";
 import { SharedImageSettings, type SharedImageMetadata } from "./SharedImageSettings";
 
 type SharedPicture = Picture & { ownerId: string };
-type ApplyOptions = { useExistingAsset?: boolean; enablePcLiveMotion?: boolean; frame?: WallpaperFrame };
+type ApplyOptions = { useExistingAsset?: boolean; frame?: WallpaperFrame };
 type DemoContext = {
   session: Session;
   library: Library;
@@ -277,6 +275,8 @@ export function Workspace({
               src: previous.src,
               background: previous.background,
               foregrounds: previous.foregrounds,
+              layers: previous.layers,
+              subjectLayerId: previous.subjectLayerId,
               jobId: previous.jobId,
               width: previous.width,
               height: previous.height,
@@ -519,17 +519,8 @@ export function Workspace({
     if (cloud) {
       let sent = false;
       try {
-        // Explicit PC motion opt-in creates a NEW private wallpaper snapshot.
-        // Do not reuse or modify a published/immutable asset or the author's project.
-        const movingPicture: Picture = options?.enablePcLiveMotion ? {
-          ...picture,
-          edit: { ...defaultEdit, ...picture.edit, foreground: true, liveEnabled: true,
-            mouseEnabled: true, gyroEnabled: picture.edit?.gyroEnabled ?? false,
-            rig: { ...defaultHeadRig, ...picture.edit?.rig, enabled: true, bodyMode: "follow" },
-          },
-        } : picture;
-        const asset: Asset = frame || options?.enablePcLiveMotion
-          ? await createAsset(movingPicture, frame)
+        const asset: Asset = frame
+          ? await createAsset(picture, frame)
           : options?.useExistingAsset && picture.assetId ? {
             id: picture.assetId, title: picture.name,
             mode: picture.background && picture.foregrounds?.length ? "Live2D" : "Static",
@@ -929,8 +920,9 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     try {
       if (!wallpaperTargets(library.devices, explore).some(target => target.deviceId === deviceId && target.displayId === displayId))
         throw new Error("연결된 화면을 선택해 주세요.");
-      const saved = explore ? await ensureOwnPicture(applyingPicture) : applyingPicture;
-      if (await apply({ ...saved, width: picture.width, height: picture.height }, deviceId, displayId,
+      const owned = explore && ownedExplorePicture(applyingPicture, session.id, ownedPictures);
+      const source = explore && !owned ? { ...await ensureOwnPicture(applyingPicture), width: picture.width, height: picture.height } : picture;
+      if (await apply(source, deviceId, displayId,
         { useExistingAsset: explore, frame })) setApplyingPicture(null);
     } catch (error) { toast((error as Error).message); }
     finally { applying.current = false; setImporting(false); }
@@ -1092,7 +1084,10 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           setViewing(null);
         }}><Monitor size={18} /> 연결된 기기에 적용</button>
       </Modal>}
-      {applyingPicture && <ApplyWallpaperDialog picture={applyingPicture} devices={library.devices} fromExplore={explore}
+      {applyingPicture && <ApplyWallpaperDialog
+        picture={(explore ? ownedExplorePicture(applyingPicture, session.id, ownedPictures)
+          : ownedPictures.find(item => item.id === applyingPicture.id)) ?? applyingPicture}
+        devices={library.devices} fromExplore={explore}
         busy={importing} close={() => setApplyingPicture(null)}
         confirm={applyExplorePicture} />}
       {editing && <SharedImageSettings picture={editing} close={() => setEditing(null)}

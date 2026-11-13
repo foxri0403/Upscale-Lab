@@ -1,28 +1,29 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { Images, Monitor, Mouse, Smartphone } from "lucide-react";
-import { defaultEdit, defaultHeadRig, type Device, type Display, type Picture } from "./model";
+import { defaultEdit, type Device, type Display, type Picture } from "./model";
 import { wallpaperTargets } from "./explore-actions";
 import { Busy, Empty, Link, Modal, Notice } from "./ui";
 import { cloud } from "./api";
-import { detailPicture } from "./cloud-store";
+import { refreshWallpaperPreview } from "./cloud-store";
 import { FramedWallpaper } from "./FramedWallpaper";
 import { OptionPicker } from "./OptionPicker";
 import { useParallax } from "./use-parallax";
 import { defaultDemoInput } from "./demo-input";
 import { wallpaperExportPolicy } from "./wallpaper-export-policy";
+import { normalizeRig } from "./character-rig";
+import { motionStrength } from "./editor-defaults";
 import { defaultFrame, displaySize, dragFrame, frameLayout, wallpaperCrop, type ScreenSize, type WallpaperFrame } from "./wallpaper-frame";
 
 type Target = ReturnType<typeof wallpaperTargets>[number] & { display: Display; platform: Device["platform"] };
-export type WallpaperSelection = { picture: Picture; deviceId: string; displayId: string; frame: WallpaperFrame; pcMotion: boolean };
+export type WallpaperSelection = { picture: Picture; deviceId: string; displayId: string; frame: WallpaperFrame };
 
-export function ApplyWallpaperDialog({ picture, pictures, currentPicture, devices, fixedTarget, fromExplore, pcMotionAvailable, busy, close, confirm }: {
+export function ApplyWallpaperDialog({ picture, pictures, currentPicture, devices, fixedTarget, fromExplore, busy, close, confirm }: {
   picture?: Picture;
   pictures?: Picture[];
   currentPicture?: Picture;
   devices: Device[];
   fixedTarget?: string;
   fromExplore?: boolean;
-  pcMotionAvailable?: boolean;
   busy: boolean;
   close: () => void;
   confirm: (selection: WallpaperSelection) => Promise<void>;
@@ -50,55 +51,61 @@ export function ApplyWallpaperDialog({ picture, pictures, currentPicture, device
       {!fixedTarget && <Link to="/app/devices" className="button secondary">기기 관리로 이동</Link>}
     </Empty> : !selectedPicture ? <Empty text={choices ? "이미지 정보 없음" : "먼저 내 이미지에 사진을 추가해 주세요"} />
       : <WallpaperApplyPreview key={`${selectedPicture.id}/${selected.id}/${selected.display.resolution}`}
-        picture={selectedPicture} target={selected} fromExplore={fromExplore} pcMotionAvailable={pcMotionAvailable}
+        picture={selectedPicture} target={selected} fromExplore={fromExplore}
         busy={busy} confirm={confirm} />}
   </Modal>;
 }
 
-function WallpaperApplyPreview({ picture, target, fromExplore, pcMotionAvailable, busy, confirm }: {
-  picture: Picture; target: Target; fromExplore?: boolean; pcMotionAvailable?: boolean; busy: boolean;
+function WallpaperApplyPreview({ picture, target, fromExplore, busy, confirm }: {
+  picture: Picture; target: Target; fromExplore?: boolean; busy: boolean;
   confirm: (selection: WallpaperSelection) => Promise<void>;
 }) {
-  const [prepared, setPrepared] = useState<Picture>();
-  const [measured, setMeasured] = useState<{ src: string; size: ScreenSize }>();
-  const [error, setError] = useState("");
-  const needsDetail = cloud && !!picture.projectId && !picture.layers;
-  const preview = needsDetail ? prepared : picture;
-  const source = preview?.background || preview?.src;
+  const [prepared, setPrepared] = useState<{ revision: string; value?: Picture; error?: string }>();
+  const [measured, setMeasured] = useState<{ src: string; size?: ScreenSize; error?: string }>();
+  const needsDetail = cloud && !!(picture.projectId || picture.assetId);
+  const revision = JSON.stringify([picture.projectId, picture.assetId, picture.savedAt, picture.jobId,
+    picture.name, picture.edit, picture.layers?.map(layer => layer.id)]);
+  const input = useRef(picture);
+  input.current = picture;
+  const result = prepared?.revision === revision ? prepared : undefined;
+  const preview = needsDetail ? result?.value : picture;
+  const source = preview?.background || preview?.foregrounds?.[0] || preview?.src;
   useEffect(() => {
     if (!needsDetail) return;
-    let active = true;
-    detailPicture(picture).then(value => { if (active) setPrepared(value); },
-      (err: Error) => { if (active) setError(err.message); });
-    return () => { active = false; };
-  }, [needsDetail, picture]);
+    const request = new AbortController();
+    refreshWallpaperPreview(input.current, AbortSignal.any([request.signal, AbortSignal.timeout(30000)])).then(
+      value => { if (!request.signal.aborted) setPrepared({ revision, value }); },
+      (err: Error) => { if (!request.signal.aborted) setPrepared({ revision, error: err.message }); });
+    return () => request.abort();
+  }, [needsDetail, revision]);
   useEffect(() => {
     if (!source) return;
     const image = new Image();
     image.onload = () => setMeasured({ src: source, size: { width: image.naturalWidth, height: image.naturalHeight } });
-    image.onerror = () => setError("이미지를 불러오지 못했습니다.");
+    image.onerror = () => setMeasured({ src: source, error: "이미지를 불러오지 못했습니다." });
     image.src = source;
     return () => { image.onload = image.onerror = null; };
   }, [source]);
   const size = measured?.src === source ? measured?.size : undefined;
+  const error = (needsDetail ? result?.error : undefined) ?? (measured?.src === source ? measured?.error : undefined);
   const screen = displaySize(target.display);
   if (!screen) return <Notice>기기에서 화면 해상도를 확인한 뒤 다시 시도해 주세요.</Notice>;
   if (error) return <Notice>{error}</Notice>;
   if (!preview || !size) return <p className="explore-result-status" role="status"><Busy /> 적용 미리보기를 불러오는 중…</p>;
   return <WallpaperFrameControls key={source} picture={preview} target={target} size={size} screen={screen}
-    busy={busy} confirm={confirm} fromExplore={fromExplore} pcMotionAvailable={pcMotionAvailable} />;
+    busy={busy} confirm={confirm} fromExplore={fromExplore} />;
 }
 
-function WallpaperFrameControls({ picture, target, size, screen, fromExplore, pcMotionAvailable, busy, confirm }: {
+function WallpaperFrameControls({ picture, target, size, screen, fromExplore, busy, confirm }: {
   picture: Picture; target: Target; size: ScreenSize; screen: ScreenSize; fromExplore?: boolean;
-  pcMotionAvailable?: boolean; busy: boolean; confirm: (selection: WallpaperSelection) => Promise<void>;
+  busy: boolean; confirm: (selection: WallpaperSelection) => Promise<void>;
 }) {
   const crop = wallpaperCrop(picture, size);
   const [frame, setFrame] = useState(() => {
     const previous = picture.wallpaperFrame;
     return previous?.width === screen.width && previous.height === screen.height ? previous : defaultFrame(screen, crop);
   });
-  const [pcMotion, setPcMotion] = useState(true);
+  const [mouseChoice, setMouseChoice] = useState<boolean>();
   const [testing, setTesting] = useState(false);
   const [testError, setTestError] = useState("");
   const [testInput] = useState(() => defaultDemoInput(matchMedia("(pointer: coarse)").matches,
@@ -106,16 +113,18 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, pc
   const drag = useRef<{ id: number; x: number; y: number; frame: WallpaperFrame } | null>(null);
   const submitting = useRef(false);
   const layout = frameLayout(frame, crop);
-  const edit = picture.edit ?? defaultEdit;
-  const { characterParts } = wallpaperExportPolicy(picture, edit);
+  const edit = { ...defaultEdit, ...picture.edit, strength: motionStrength(picture.edit), motionDefaultsVersion: 1 };
+  const { characterParts, layered } = wallpaperExportPolicy(picture, edit);
   const windows = target.platform === "Windows";
-  const showPcMotion = pcMotionAvailable && windows && characterParts;
-  const enablePcMotion = !!showPcMotion && pcMotion;
-  const { layered } = wallpaperExportPolicy(picture, enablePcMotion ? { ...edit, foreground: true } : edit);
+  const showMouseChoice = windows && layered && !fromExplore && !picture.isReadOnly;
+  const mouseEnabled = mouseChoice ?? (edit.mouseEnabled || !!picture.legacyMotion);
+  const rig = characterParts ? { ...normalizeRig(edit.rig), enabled: true } : edit.rig;
+  const appliedPicture = { ...picture, edit: { ...edit, rig,
+    mouseEnabled: showMouseChoice ? mouseEnabled : edit.mouseEnabled },
+    legacyMotion: mouseChoice === undefined && picture.legacyMotion };
   const gyro = testInput === "gyro";
   const motion = useParallax(layered && testing && !busy, edit.strength, !gyro, gyro);
   const MotionIcon = gyro ? Smartphone : Mouse;
-  const rig = enablePcMotion ? { ...defaultHeadRig, ...edit.rig, enabled: true, bodyMode: "follow" as const } : edit.rig;
 
   useEffect(() => {
     if (!gyro || !motion.active) return;
@@ -148,8 +157,7 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, pc
     if (submitting.current) return;
     submitting.current = true;
     try {
-      await confirm({ picture: { ...picture, ...size }, deviceId: target.deviceId, displayId: target.displayId,
-        frame, pcMotion: enablePcMotion });
+      await confirm({ picture: { ...appliedPicture, ...size }, deviceId: target.deviceId, displayId: target.displayId, frame });
     } finally { submitting.current = false; }
   }
   return <>
@@ -161,7 +169,7 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, pc
         drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, frame };
         event.currentTarget.setPointerCapture(event.pointerId);
       }} onPointerMove={move} onLostPointerCapture={() => { drag.current = null; }}>
-      <FramedWallpaper picture={enablePcMotion ? { ...picture, edit: { ...edit, foreground: true } } : picture}
+      <FramedWallpaper picture={appliedPicture}
         size={size} frame={frame} motion={motion} rig={rig} />
     </div>
     <fieldset className="wallpaper-frame-settings" disabled={busy}>
@@ -190,9 +198,9 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, pc
           disabled={Math.abs(layout.travelY) < 1}
           onChange={event => setFrame({ ...frame, y: layout.travelY < 0 ? 1 - event.target.valueAsNumber : event.target.valueAsNumber })} />
       </label>
-      {showPcMotion && <label className="studio-rig-toggle">
-        <input type="checkbox" checked={pcMotion} onChange={event => setPcMotion(event.target.checked)} />
-        <span>PC에서 Live 2D 파츠 움직임 켜고 적용</span>
+      {showMouseChoice && <label className="studio-rig-toggle">
+        <input type="checkbox" checked={mouseEnabled} onChange={event => setMouseChoice(event.target.checked)} />
+        <span>PC에서 마우스 움직임 적용</span>
       </label>}
     </fieldset>
     {testError && <p className="wallpaper-motion-status" role="status">{testError}</p>}
