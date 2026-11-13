@@ -1,4 +1,10 @@
-import type { Device } from "./model";
+import type { Device, Picture } from "./model";
+
+export function wallpaperSourceForDisplay(current: Picture | undefined, images: Picture[]): Picture | undefined {
+  if (!current?.isDeviceVariant || !current.sourceProjectId) return current;
+  return images.find(image => image.projectId === current.sourceProjectId && !image.isDraft && !image.isReadOnly)
+    ?? current;
+}
 
 // Use the built-in display's logical short edge; external monitors must not
 // turn a phone into a tablet. Older agents without density remain phones.

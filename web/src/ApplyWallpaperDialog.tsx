@@ -118,6 +118,7 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, bu
   const windows = target.platform === "Windows";
   const showMouseChoice = windows && layered && !fromExplore && !picture.isReadOnly;
   const mouseEnabled = mouseChoice ?? (edit.mouseEnabled || !!picture.legacyMotion);
+  const appliedMouseEnabled = showMouseChoice ? mouseEnabled : edit.mouseEnabled || !!picture.legacyMotion;
   const rig = characterParts ? { ...normalizeRig(edit.rig), enabled: true } : edit.rig;
   const appliedPicture = { ...picture, edit: { ...edit, rig,
     mouseEnabled: showMouseChoice ? mouseEnabled : edit.mouseEnabled },
@@ -203,6 +204,11 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, bu
         <span>PC에서 마우스 움직임 적용</span>
       </label>}
     </fieldset>
+    {windows && layered && !appliedMouseEnabled && <Notice>
+      {showMouseChoice
+        ? "이 설정으로 적용하면 Windows 배경화면은 정지 상태로 표시됩니다."
+        : "이 이미지에 저장된 마우스 움직임이 꺼져 있어 Windows 배경화면은 정지 상태로 표시됩니다."}
+    </Notice>}
     {testError && <p className="wallpaper-motion-status" role="status">{testError}</p>}
     {fromExplore && <Notice>이미지를 내 이미지에 저장한 뒤 적용 요청을 전송합니다.</Notice>}
     <button className="button primary full" disabled={busy} onClick={() => void submit()}>

@@ -225,7 +225,7 @@ internal sealed class CompanionController : IDisposable
                     foreach (var (native, saved) in applied.Where(pair => pair.Value.Mode == "Live2D").ToArray())
                     {
                         var monitor = Monitors.FirstOrDefault(m => m.NativeId == native);
-                        if (monitor == null || !engine.Matches(monitor, saved)) continue;
+                        if (monitor == null || !engine.Matches(monitor, saved) || engine.IsLive(native)) continue;
                         try { var manifest = await api.Call<WallpaperManifest>($"/api/agent/commands/{saved.CommandId}/manifest", agent: true, ct: ct);
                             engine.Apply(monitor, await cache.Download(manifest, ct)); }
                         catch (ApiFailure error) when (error.Status is 404 or 409) { }
@@ -299,7 +299,13 @@ internal sealed class CompanionController : IDisposable
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (ApiFailure error) when (error.Status == 401)
             { Enabled = false; Connection = ConnectionState.Disconnected; cancellation?.Cancel(); engine.Dispose(); Persist(); Notify("연결이 만료되었습니다. 웹의 기기 관리 또는 다시 로그인하여 확인해 주세요."); return; }
-            catch (Exception error) { Connection = ConnectionState.Disconnected; engine.Dispose(); restore = true; Notify("연결 재시도 중: " + error.Message); }
+            catch (Exception error)
+            {
+                // The desktop is rendered from local layers. Keep it running while sync retries.
+                Connection = ConnectionState.Disconnected;
+                inventoryDirty = true;
+                Notify("연결 재시도 중: " + error.Message);
+            }
             await wake.WaitAsync(TimeSpan.FromSeconds(15), ct);
         }
     }
