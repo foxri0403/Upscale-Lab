@@ -24,7 +24,11 @@ public sealed class ParallaxRenderingTests
                 var manifest=new WallpaperManifest(1,Guid.NewGuid(),"Live2D",64,64,
                     [new(file,"image/png",0,character ? "BackHair" : "Background"),new(file,"image/png",1,character ? "Face" : "Body",MovementX:10,MovementY:10)],
                     Rig:character ? new CharacterRig(Enabled:true) : null);
-                using var view=new ParallaxView(monitor,manifest,()=>{reads++;return input;},playbackPaused:true);
+                var layers=Task.Run(()=>WallpaperLayers.Load(manifest,monitor,Path.Combine(directory,"neutral.png"))).GetAwaiter().GetResult();
+                Assert.All(layers,layer=>Assert.True(layer.Image.IsFrozen));
+                using var neutral=new Bitmap(Path.Combine(directory,"neutral.png"));
+                Assert.Equal(System.Drawing.Color.Blue.ToArgb(),neutral.GetPixel(160,120).ToArgb());
+                using var view=new ParallaxView(monitor,manifest,layers,()=>{reads++;return input;},playbackPaused:true);
                 using var form=new Form {ShowInTaskbar=false,StartPosition=FormStartPosition.Manual,Location=new Point(-4000,-4000),Size=new Size(320,240)};
                 using var host=new ElementHost {Dock=DockStyle.Fill,Child=view};form.Controls.Add(host);
                 if(desktopChild){var worker=DesktopHost.Find(true);Assert.NotEqual(IntPtr.Zero,worker);DesktopHost.Parent(form.Handle,worker,new Rectangle(-4000,-4000,320,240));}

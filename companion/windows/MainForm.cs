@@ -23,7 +23,7 @@ internal sealed class MainForm : Form
     private readonly Label plan = new() { AutoSize = true, ForeColor = AppBrand.Primary, Margin = new(0, 4, 0, 0) };
     private readonly CircularAvatar avatar = new() { Size = new(64, 64), Margin = new(0, 0, 14, 0) };
     private readonly TableLayoutPanel account = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Top | AnchorStyles.Right, ColumnCount = 2, Margin = Padding.Empty };
-    private readonly Label screens = new() { AutoSize = true, Font = new("맑은 고딕", 11), Margin = new(0, 16, 0, 10) };
+    private readonly Label screens = new() { AutoSize = true, Font = new("맑은 고딕", 11), Margin = new(0, 8, 0, 6) };
     private readonly TableLayoutPanel credentials = Stack();
     private readonly TableLayoutPanel connected = Stack();
     private readonly NotifyIcon tray = new() { Icon = AppBrand.Icon(), Text = "Upscale Lab Connect", Visible = true };
@@ -47,9 +47,8 @@ internal sealed class MainForm : Form
         Font = new("맑은 고딕", 10); AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new(1000, 660); MinimumSize = new(820, 540);
         ForeColor = AppBrand.Ink; BackColor = AppBrand.Background; StartPosition = FormStartPosition.CenterScreen;
-        var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-        var content = Stack(); content.Padding = new(28);
-        var header = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, Height = 100, Margin = new(0, 0, 0, 22) };
+        var content = Stack(); content.Padding = new(24);
+        var header = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, Height = 82, Margin = new(0, 0, 0, 10) };
         header.ColumnStyles.Add(new(SizeType.Percent, 57)); header.ColumnStyles.Add(new(SizeType.Percent, 43));
         header.Controls.Add(new Label { Text = "Upscale Lab Connect", Font = new(Font.FontFamily, 22, FontStyle.Bold), Dock = DockStyle.Fill, TextAlign = ContentAlignment.TopLeft, Margin = Padding.Empty });
         account.ColumnStyles.Add(new(SizeType.Absolute, 82)); account.ColumnStyles.Add(new(SizeType.AutoSize));
@@ -71,7 +70,7 @@ internal sealed class MainForm : Form
         deviceHeader.Controls.Add(Copy("내 Windows PC", 17, true)); deviceHeader.Controls.Add(connection); deviceContent.Controls.Add(deviceHeader);
         deviceContent.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Color.FromArgb(220, 224, 235), Margin = new(0, 0, 0, 18) });
         deviceContent.Controls.Add(Copy("연결된 화면", 13, true)); deviceContent.Controls.Add(screens);
-        var deviceCard = new BrandPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new(22), CornerRadius = 2 }; deviceCard.Controls.Add(deviceContent); connected.Controls.Add(deviceCard);
+        var deviceCard = new BrandPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new(14), CornerRadius = 2, Margin = new(0, 0, 0, 6) }; deviceCard.Controls.Add(deviceContent); connected.Controls.Add(deviceCard);
         var footer = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = new(0, 12, 0, 0) };
         footer.ColumnStyles.Add(new(SizeType.Percent, 48)); footer.ColumnStyles.Add(new(SizeType.Percent, 52)); footer.Controls.Add(startup);
         var actions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right, Margin = Padding.Empty };
@@ -82,11 +81,16 @@ internal sealed class MainForm : Form
         playbackTimer.Tick += (_, _) => UpdatePlayback();
         UpdatePlayback();
         connected.Controls.Add(Copy("창을 닫아도 트레이에서 동기화합니다."));
-        content.Controls.Add(connected); content.Controls.Add(status); scroll.Controls.Add(content); Controls.Add(scroll);
+        content.Controls.Add(connected); content.Controls.Add(status); Controls.Add(content);
         content.SizeChanged += (_, _) => {
             var width = Math.Max(300, content.ClientSize.Width - content.Padding.Horizontal);
             status.MaximumSize = new(width, 0); screens.MaximumSize = new(width - 48, 0);
             username.MaximumSize = email.MaximumSize = plan.MaximumSize = new(Math.Max(180, (int)(width * .43) - 90), 0);
+        };
+        content.Layout += (_, _) => {
+            var requiredHeight = SizeFromClientSize(new Size(ClientSize.Width, content.Height)).Height;
+            var minimum = new Size(MinimumSize.Width, Math.Min(requiredHeight, Screen.FromControl(this).WorkingArea.Height));
+            if (MinimumSize != minimum) MinimumSize = minimum;
         };
         identifier.Text = LoginPreferences.Current.Read(); saveIdentifier.Checked = identifier.Text.Length > 0;
         void SaveIdentity() { try { LoginPreferences.Current.Save(saveIdentifier.Checked, identifier.Text); } catch (Exception e) { status.Text = "아이디 저장 실패: " + e.Message; } }
@@ -187,7 +191,7 @@ internal sealed class MainForm : Form
         username.Text = controller.Username; email.Text = controller.Account; plan.Text = controller.Plan + " 플랜";
         connection.Text = controller.Connection switch { ConnectionState.Connected => "● 연결됨", ConnectionState.Connecting => "● 연결중", _ => "● 연결안됨" };
         connection.ForeColor = controller.Connection switch { ConnectionState.Connected => Color.FromArgb(38, 153, 83), ConnectionState.Connecting => Color.FromArgb(230, 139, 32), _ => Color.FromArgb(208, 64, 64) };
-        screens.Text = controller.Monitors.Length == 0 ? "화면 정보를 확인하고 있습니다." : string.Join("\n\n", controller.Monitors.Select(FormatMonitor));
+        screens.Text = controller.Monitors.Length == 0 ? "화면 정보를 확인하고 있습니다." : string.Join("\n", controller.Monitors.Select(FormatMonitor));
         _ = RefreshAvatar();
     }
     internal static string FormatMonitor(MonitorInfo m) => $"{m.Name} | {m.Width} × {m.Height} | {(m.RefreshRateHz?.ToString("0.##") ?? "—")} Hz{(m.IsPrimary ? " - 주 화면" : "")}";

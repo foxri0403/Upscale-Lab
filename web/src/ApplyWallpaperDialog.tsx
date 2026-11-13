@@ -105,7 +105,6 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, bu
     const previous = picture.wallpaperFrame;
     return previous?.width === screen.width && previous.height === screen.height ? previous : defaultFrame(screen, crop);
   });
-  const [mouseChoice, setMouseChoice] = useState<boolean>();
   const [testing, setTesting] = useState(false);
   const [testError, setTestError] = useState("");
   const [testInput] = useState(() => defaultDemoInput(matchMedia("(pointer: coarse)").matches,
@@ -116,13 +115,8 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, bu
   const edit = { ...defaultEdit, ...picture.edit, strength: motionStrength(picture.edit), motionDefaultsVersion: 1 };
   const { characterParts, layered } = wallpaperExportPolicy(picture, edit);
   const windows = target.platform === "Windows";
-  const showMouseChoice = windows && layered && !fromExplore && !picture.isReadOnly;
-  const mouseEnabled = mouseChoice ?? (edit.mouseEnabled || !!picture.legacyMotion);
-  const appliedMouseEnabled = showMouseChoice ? mouseEnabled : edit.mouseEnabled || !!picture.legacyMotion;
   const rig = characterParts ? { ...normalizeRig(edit.rig), enabled: true } : edit.rig;
-  const appliedPicture = { ...picture, edit: { ...edit, rig,
-    mouseEnabled: showMouseChoice ? mouseEnabled : edit.mouseEnabled },
-    legacyMotion: mouseChoice === undefined && picture.legacyMotion };
+  const appliedPicture = { ...picture, edit: { ...edit, rig } };
   const gyro = testInput === "gyro";
   const motion = useParallax(layered && testing && !busy, edit.strength, !gyro, gyro);
   const MotionIcon = gyro ? Smartphone : Mouse;
@@ -199,15 +193,9 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, bu
           disabled={Math.abs(layout.travelY) < 1}
           onChange={event => setFrame({ ...frame, y: layout.travelY < 0 ? 1 - event.target.valueAsNumber : event.target.valueAsNumber })} />
       </label>
-      {showMouseChoice && <label className="studio-rig-toggle">
-        <input type="checkbox" checked={mouseEnabled} onChange={event => setMouseChoice(event.target.checked)} />
-        <span>PC에서 마우스 움직임 적용</span>
-      </label>}
     </fieldset>
-    {windows && layered && !appliedMouseEnabled && <Notice>
-      {showMouseChoice
-        ? "이 설정으로 적용하면 Windows 배경화면은 정지 상태로 표시됩니다."
-        : "이 이미지에 저장된 마우스 움직임이 꺼져 있어 Windows 배경화면은 정지 상태로 표시됩니다."}
+    {windows && layered && !edit.mouseEnabled && !picture.legacyMotion && <Notice>
+      이 이미지에 저장된 마우스 움직임이 꺼져 있어 Windows 배경화면은 정지 상태로 표시됩니다.
     </Notice>}
     {testError && <p className="wallpaper-motion-status" role="status">{testError}</p>}
     {fromExplore && <Notice>이미지를 내 이미지에 저장한 뒤 적용 요청을 전송합니다.</Notice>}
