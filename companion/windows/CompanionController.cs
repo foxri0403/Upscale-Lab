@@ -54,6 +54,8 @@ internal sealed class CompanionController : IDisposable
     public MonitorInfo[] Monitors { get; private set; } = [];
     private string AppliedFile => Path.Combine(SecureStore.Root, $"applied-{api!.Session!.User.Id:N}-{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(api.Server)))[..12]}.json");
     private void Notify(string status) { Status = status; Changed?.Invoke(); }
+    public void UpdatePlayback(PlaybackRules rules, bool displaySleeping) => engine.UpdatePlayback(rules, displaySleeping);
+
     private void Persist() { if (api != null) writeCredentials(new(api.Server, api.Session, api.Device, Enabled, remember)); }
     private void SetApi(string server, Login? session, Binding? binding)
     {
@@ -223,9 +225,15 @@ internal sealed class CompanionController : IDisposable
                     foreach (var (native, saved) in applied.Where(pair => pair.Value.Mode == "Live2D").ToArray())
                     {
                         var monitor = Monitors.FirstOrDefault(m => m.NativeId == native);
-                        if (monitor == null || !engine.Matches(monitor, saved)) continue;
-                        try { var manifest = await api.Call<WallpaperManifest>($"/api/agent/commands/{saved.CommandId}/manifest", agent: true, ct: ct);
-                            engine.Apply(monitor, await cache.Download(manifest, ct)); }
+                        if (monitor == null || !engine.Matches(monitor, saved) || engine.IsLive(native)) continue;
+                        try
+                        {
+                            var manifestPath = $"/api/agent/commands/{saved.CommandId}/manifest";
+                            var manifest = await api.Call<WallpaperManifest>(manifestPath, agent: true, ct: ct);
+                            var local = await cache.Download(manifest, ct);
+                            await engine.Apply(monitor, local, () => api.Call<DeviceCommand>(
+                                $"/api/agent/commands/{saved.CommandId}", agent: true, ct: ct), ct);
+                        }
                         catch (ApiFailure error) when (error.Status is 404 or 409) { }
                     }
                     restore = false;
@@ -268,15 +276,17 @@ internal sealed class CompanionController : IDisposable
                         if (!display.Wallpapers.Any(a => a.Target == "Desktop" && a.Sequence == command.Sequence && a.DesiredAssetId == command.AssetId)) continue;
                         var monitor = Monitors.SingleOrDefault(m => m.NativeId == display.NativeId)
                             ?? throw new InvalidOperationException("연결된 모니터를 찾지 못했습니다.");
-                        // Revalidate expiration/revocation after downloading; state alone retains expired desired assignments.
-                        await api.Call<WallpaperManifest>($"/api/agent/commands/{command.Id}/manifest", agent: true, ct: ct);
-                        ct.ThrowIfCancellationRequested();
-                        if (!applied.TryGetValue(monitor.NativeId, out var old) || old.CommandId != command.Id || !engine.Matches(monitor, old))
+                        var alreadyApplied = applied.TryGetValue(monitor.NativeId, out var old) && old.CommandId == command.Id &&
+                            engine.Matches(monitor, old) && (manifest.Mode != "Live2D" || engine.IsLive(monitor.NativeId));
+                        // Check the command again after the layers are ready.
+                        Task ConfirmCommand() => api.Call<WallpaperManifest>($"/api/agent/commands/{command.Id}/manifest", agent: true, ct: ct);
+                        if (!alreadyApplied)
                         {
-                            engine.Apply(monitor, local);
+                            await engine.Apply(monitor, local, ConfirmCommand, ct);
                             didApply = true;
                             applied[monitor.NativeId] = new(command.AssetId.Value, command.Id, engine.CurrentPath, manifest.Mode); SaveApplied();
                         }
+                        else await ConfirmCommand();
                         didApply = true; await api.Report(command.Id, "Applied", null, ct); Notify("배경화면을 적용했습니다. " + DateTime.Now.ToString("HH:mm:ss"));
                     }
                     catch (ApiFailure error) when (error.Status is 404 or 409) { }
@@ -297,7 +307,13 @@ internal sealed class CompanionController : IDisposable
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (ApiFailure error) when (error.Status == 401)
             { Enabled = false; Connection = ConnectionState.Disconnected; cancellation?.Cancel(); engine.Dispose(); Persist(); Notify("연결이 만료되었습니다. 웹의 기기 관리 또는 다시 로그인하여 확인해 주세요."); return; }
-            catch (Exception error) { Connection = ConnectionState.Disconnected; engine.Dispose(); restore = true; Notify("연결 재시도 중: " + error.Message); }
+            catch (Exception error)
+            {
+                // The desktop is rendered from local layers. Keep it running while sync retries.
+                Connection = ConnectionState.Disconnected;
+                inventoryDirty = true;
+                Notify("연결 재시도 중: " + error.Message);
+            }
             await wake.WaitAsync(TimeSpan.FromSeconds(15), ct);
         }
     }

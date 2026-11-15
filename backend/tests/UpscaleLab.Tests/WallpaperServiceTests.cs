@@ -177,10 +177,11 @@ public sealed class WallpaperServiceTests
     {
         await using var db = WorkflowData.Db();
         var store = new WorkflowStore();
-        var project = WorkflowData.Project(Guid.NewGuid());
+        var author = new User { Username = "WallpaperAuthor", Email = "author@example.invalid", PasswordHash = "test-only" };
+        var project = WorkflowData.Project(author.Id);
         using var source = new MagickImage(MagickColors.Red, 10, 10);
         store.Files["source.png"] = source.ToByteArray(MagickFormat.Png);
-        db.Add(project);
+        db.AddRange(author, project);
         await db.SaveChangesAsync();
         var service = new WallpaperService(db, store, store);
         var original = await service.CreateAsync(project.UserId, new(project.Id, "Original", WallpaperMode.Static), Ct);
@@ -199,13 +200,16 @@ public sealed class WallpaperServiceTests
 
         var imported = await service.ImportAsync(viewer, original.Id, Ct);
         Assert.True(imported.Edit!.IsReadOnly);
+        Assert.Equal(author.Username, imported.Edit.SourceUploaderName);
         if (legacyCopy)
         {
             var oldAsset = (await db.WallpaperAssets.FindAsync(imported.Id))!;
-            oldAsset.SavedEditJson = (imported.Edit with { IsReadOnly = false }).ToJson();
+            oldAsset.SavedEditJson = (imported.Edit with { IsReadOnly = false, SourceUploaderName = null }).ToJson();
             await db.SaveChangesAsync(Ct);
         }
-        Assert.True(Assert.Single(await service.ListAsync(viewer, false, Ct)).Edit!.IsReadOnly);
+        var listedEdit = Assert.Single(await service.ListAsync(viewer, false, Ct)).Edit!;
+        Assert.True(listedEdit.IsReadOnly);
+        Assert.Equal(legacyCopy ? null : author.Username, listedEdit.SourceUploaderName);
         await Assert.ThrowsAsync<ConflictException>(() => service.SaveEditAsync(viewer, imported.Id, new(50, "mono", "original", 1, true), Ct));
         await Assert.ThrowsAsync<ConflictException>(() => service.SetSharingAsync(viewer, imported.Id, true, Ct));
         await Assert.ThrowsAsync<ConflictException>(() => service.UpdateMetadataAsync(viewer, imported.Id, new("Edit"), Ct));

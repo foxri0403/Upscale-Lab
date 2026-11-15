@@ -13,6 +13,24 @@ test("character-only PNG layers stay Live2D when cropped for mobile", () => {
 test("background/subject retains existing Live2D path", () => {
   assert.equal(wallpaperExportPolicy({ background: "bg", foregrounds: ["fg"] }, base).mode, "Live2D");
 });
+test("See-through with Background and face/hair layers keeps its character rig", () => {
+  const result = wallpaperExportPolicy({
+    background: "bg", foregrounds: ["face", "hair"],
+    layers: [{ layerType: "Background" }, { layerType: "Face" }, { layerType: "FrontHair" }],
+  }, base);
+  assert.equal(result.mode, "Live2D");
+  assert.equal(result.layered, true);
+  assert.equal(result.characterParts, true);
+});
+test("ordinary background/subject split does not enable the character rig", () => {
+  const result = wallpaperExportPolicy({
+    background: "bg", foregrounds: ["body"],
+    layers: [{ layerType: "Background" }, { layerType: "Body" }],
+  }, base);
+  assert.equal(result.mode, "Live2D");
+  assert.equal(result.layered, true);
+  assert.equal(result.characterParts, false);
+});
 test("disabling foreground deliberately creates a static export", () => {
   assert.equal(wallpaperExportPolicy({ layers: [{ layerType: "Face" }, { layerType: "Eye" }] },
     { ...base, foreground: false }).mode, "Static");

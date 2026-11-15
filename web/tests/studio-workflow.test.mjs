@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { imageFeatures } from "../src/image-features.ts";
 import { imageAccept, maxImageBytes, validateImageUpload, validateStudioImageUpload } from "../src/image-upload.ts";
 
-test("all applied features coexist and a disabled animation remains separated", () => {
+test("upscaling can coexist with either separation technique and legacy badges never show both", () => {
   const picture = { features: ["업스케일", "배경 분리"], edit: { liveEnabled: true } };
-  assert.deepEqual(imageFeatures(picture), ["업스케일", "배경 분리", "Live 2D"]);
-  assert.deepEqual(imageFeatures({ ...picture, features: ["업스케일", "배경 분리", "Live 2D"], edit: { liveEnabled: false } }), ["업스케일", "배경 분리"]);
+  assert.deepEqual(imageFeatures(picture), ["업스케일", "배경 분리"]);
+  assert.deepEqual(imageFeatures({ ...picture, features: ["업스케일", "배경 분리", "Live 2D"] }), ["업스케일", "배경 분리"]);
+  assert.deepEqual(imageFeatures({ ...picture, features: ["업스케일", "Live 2D"], edit: { liveEnabled: false } }), ["업스케일", "Live 2D"]);
 });
 
 test("background mouse and gyro selections do not identify the separate Live 2D feature", () => {

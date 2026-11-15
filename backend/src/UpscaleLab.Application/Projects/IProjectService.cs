@@ -8,6 +8,7 @@ public interface IProjectService
     Task<ImageEditState> SaveEditAsync(Guid userId, Guid projectId,
         SaveImageEditRequest request, CancellationToken cancellationToken);
     Task RenameAsync(Guid userId, Guid projectId, RenameProjectRequest request, CancellationToken cancellationToken);
+    Task UpdateMetadataAsync(Guid userId, Guid projectId, UpdateProjectMetadataRequest request, CancellationToken cancellationToken);
     Task<ProjectDetailResponse> CreateAsync(Guid userId, CreateProjectCommand command, CancellationToken cancellationToken);
     Task<IReadOnlyList<ProjectSummaryResponse>> GetAllAsync(Guid userId, CancellationToken cancellationToken);
     Task<ProjectDetailResponse> GetAsync(Guid userId, Guid projectId, CancellationToken cancellationToken);

@@ -73,9 +73,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
                 MouseEnabled = request.MouseEnabled ?? manifest.MouseEnabled, GyroEnabled = request.GyroEnabled ?? manifest.GyroEnabled,
                 Rig = presentation?.TransformRig(request.Rig ?? manifest.Rig ?? edit?.Rig) ??
                     request.Rig ?? manifest.Rig ?? edit?.Rig })!.AsObject();
-            var features = Features(source).Where(feature => independentMotion || feature != "Live 2D").ToList();
-            if (!independentMotion && request.MotionEnabled) features.Add("Live 2D");
-            stored["_features"] = JsonSerializer.SerializeToNode(features);
+            stored["_features"] = JsonSerializer.SerializeToNode(Features(source));
             if (request.Render?.Frame is not null) stored["_deviceVariant"] = true;
             else stored["_ownerSnapshot"] = true;
             asset.ManifestJson = stored.ToJsonString(); db.WallpaperAssets.Add(asset); await db.SaveChangesAsync(ct);
@@ -149,7 +147,12 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             ?? throw new NotFoundException("공유 배경화면을 찾을 수 없습니다.");
         var manifest = ReadManifest(source);
         var edit = EffectiveEdit(source);
-        if (source.UserId != userId) edit = (edit ?? ImageEditState.Original()) with { IsReadOnly = true };
+        var countSave = source.UserId != userId;
+        if (countSave)
+        {
+            var uploaderName = await db.Users.Where(x => x.Id == source.UserId).Select(x => x.Username).SingleOrDefaultAsync(ct);
+            edit = (edit ?? ImageEditState.Original()) with { IsReadOnly = true, SourceUploaderName = uploaderName };
+        }
         var asset = new WallpaperAsset { UserId = userId, Title = source.Title, Mode = source.Mode, SavedEditJson = edit?.ToJson() };
         var copied = new List<string>();
         try
@@ -166,7 +169,6 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             stored["_features"] = JsonSerializer.SerializeToNode(Features(source));
             if (source.UserId == userId && edit?.IsReadOnly != true) stored["_ownerSnapshot"] = true;
             asset.ManifestJson = stored.ToJsonString();
-            var countSave = source.UserId != userId;
             await using var transaction = countSave && db.Database.IsRelational()
                 ? await db.Database.BeginTransactionAsync(ct) : null;
             if (transaction is not null)
@@ -482,8 +484,18 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
     private static IReadOnlyList<string> Features(WallpaperAsset asset)
     {
         using var json = JsonDocument.Parse(asset.ManifestJson);
-        return json.RootElement.TryGetProperty("_features", out var value)
-            ? value.Deserialize<string[]>() ?? []
-            : asset.Mode == WallpaperMode.Live2D ? ["배경 분리", "Live 2D"] : [];
+        if (json.RootElement.TryGetProperty("_features", out var value))
+        {
+            var features = value.Deserialize<string[]>() ?? [];
+            return features.Contains("배경 분리") ? features.Where(feature => feature != "Live 2D").ToArray() : features;
+        }
+        if (asset.Mode != WallpaperMode.Live2D) return [];
+
+        if (json.RootElement.TryGetProperty(nameof(WallpaperManifest.Files), out var files) &&
+            files.ValueKind == JsonValueKind.Array && files.GetArrayLength() >= 2 &&
+            files.EnumerateArray().All(file => file.TryGetProperty(nameof(WallpaperFile.Role), out var role) &&
+                role.GetString() != nameof(LayerType.Background)))
+            return ["Live 2D"];
+        return ["배경 분리"];
     }
 }

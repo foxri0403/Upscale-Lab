@@ -65,16 +65,19 @@ public sealed class StudioWorkflowTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task BothProcessingOrdersPreserveUpscaleSeparationAnimationAndDeviceFiles(bool layersFirst)
+    [InlineData(ProcessingOperation.Layers, false, "배경 분리")]
+    [InlineData(ProcessingOperation.Layers, true, "배경 분리")]
+    [InlineData(ProcessingOperation.CharacterLayers, false, "Live 2D")]
+    [InlineData(ProcessingOperation.CharacterLayers, true, "Live 2D")]
+    public async Task BothProcessingOrdersPreserveUpscaleSeparationAnimationAndDeviceFiles(
+        ProcessingOperation separation, bool layersFirst, string separationFeature)
     {
         await using var db = WorkflowData.Db(); var store = new WorkflowStore();
         var project = WorkflowData.Project(Guid.NewGuid()); db.Add(project); await db.SaveChangesAsync();
         using (var image = new MagickImage(MagickColors.Blue, 10, 10)) store.Files["source.png"] = image.ToByteArray(MagickFormat.Png);
         var processor = new PipelineProcessor();
         var processing = new ProjectProcessingService(db, store, processor, new ProcessingJobQueue(), NullLogger<ProjectProcessingService>.Instance, new FakeTokenService());
-        foreach (var operation in layersFirst ? new[] { ProcessingOperation.Layers, ProcessingOperation.Upscale } : new[] { ProcessingOperation.Upscale, ProcessingOperation.Layers })
+        foreach (var operation in layersFirst ? new[] { separation, ProcessingOperation.Upscale } : new[] { ProcessingOperation.Upscale, separation })
         {
             var job = await processing.StartAsync(project.UserId, project.Id, new(operation, 2), Ct);
             await processing.ExecuteAsync(job.JobId, Ct);
@@ -85,7 +88,7 @@ public sealed class StudioWorkflowTests
         db.ChangeTracker.Clear();
         var detail = await projects.GetAsync(project.UserId, project.Id, Ct);
         Assert.Equal(20, detail.ImageResult!.Width);
-        Assert.Equal(new[] { "업스케일", "배경 분리", "Live 2D" }, detail.Features);
+        Assert.Equal(new[] { "업스케일", separationFeature }, detail.Features);
         Assert.Equal(2, detail.Layers.Count);
         foreach (var layer in await db.ImageLayers.AsNoTracking().ToArrayAsync())
         {
@@ -94,10 +97,21 @@ public sealed class StudioWorkflowTests
         }
         if (!layersFirst) Assert.Equal(20u, processor.SeparationInputWidth);
         var wallpapers = new WallpaperService(db, store, store);
-        var asset = await wallpapers.CreateAsync(project.UserId, new(project.Id, "All features", WallpaperMode.Live2D), Ct);
+        var asset = await wallpapers.CreateAsync(project.UserId, new(project.Id, "Upscaled layers", WallpaperMode.Live2D), Ct);
         var manifest = await wallpapers.GetManifestAsync(project.UserId, asset.Id, false, Ct);
         Assert.Equal(20, manifest.Width); Assert.Equal(2, manifest.Files.Count);
-        Assert.Equal(new[] { "업스케일", "배경 분리", "Live 2D" }, asset.Features);
+        Assert.Equal(new[] { "업스케일", separationFeature }, asset.Features);
+
+        var other = separation == ProcessingOperation.Layers ? ProcessingOperation.CharacterLayers : ProcessingOperation.Layers;
+        var conflict = await Assert.ThrowsAsync<ConflictException>(() => processing.StartAsync(project.UserId, project.Id, new(other), Ct));
+        Assert.Contains("기존", conflict.Message);
+        Assert.Equal(2, await db.ProcessingJobs.CountAsync());
+
+        var reset = await projects.ResetEffectsAsync(project.UserId, project.Id, new("Layers"), Ct);
+        Assert.Equal(20, reset.ImageResult!.Width);
+        Assert.Empty(reset.Layers);
+        var replacement = await processing.StartAsync(project.UserId, project.Id, new(other), Ct);
+        Assert.Equal(ProcessingJobStatus.Queued, replacement.Status);
     }
 
     private sealed class PipelineProcessor : IProjectImageProcessor
@@ -108,14 +122,15 @@ public sealed class StudioWorkflowTests
         {
             var info = new MagickImageInfo(request.InputPath);
             var edge = request.Operation == ProcessingOperation.Upscale ? info.Width * 2 : info.Width;
-            using var background = new MagickImage(MagickColors.Blue, edge, edge);
+            var character = request.Operation == ProcessingOperation.CharacterLayers;
+            using var background = new MagickImage(character ? MagickColors.Transparent : MagickColors.Blue, edge, edge);
             var path = Path.Combine(request.OutputDirectory, "background.png"); background.Write(path, MagickFormat.Png);
             if (request.Operation == ProcessingOperation.Upscale) return Task.FromResult(new ProjectProcessingResult([], path, (int)edge, (int)edge));
             SeparationInputWidth = info.Width;
             var foreground = Path.Combine(request.OutputDirectory, "foreground.png");
             using var transparent = new MagickImage(MagickColors.Transparent, edge, edge); transparent.Write(foreground, MagickFormat.Png);
             return Task.FromResult(new ProjectProcessingResult([
-                new(path, LayerType.Background, 0, 0, 0, 0, 0, 1, 0, 0),
+                new(path, character ? LayerType.BackPart : LayerType.Background, 0, 0, 0, 0, 0, 1, 0, 0),
                 new(foreground, LayerType.Body, 1, 1, 0, 0, 0, 1, 2, 2)], null, (int)edge, (int)edge));
         }
     }

@@ -62,7 +62,7 @@ public sealed class ProjectEffectResetTests
         await using var db = WorkflowData.Db(); var store = new WorkflowStore(); var p = await Seed(db, store);
         var result = await new ProjectService(db, store).ResetEffectsAsync(p.UserId, p.Id, new("Upscale"), Ct);
         Assert.Null(result.ImageResult); Assert.Equal(2, result.Layers.Count);
-        Assert.Equal(new[] { "배경 분리", "Live 2D" }, result.Features);
+        Assert.Equal(new[] { "배경 분리" }, result.Features);
         Assert.Equal("warm", result.Edit!.Filter); Assert.True(result.Edit.LiveEnabled); Assert.Equal(1, result.Edit.Scale);
         var subject = await db.ImageLayers.SingleAsync(x => x.LayerType == LayerType.Body);
         Assert.Equal(2, subject.MovementX); Assert.Equal(3, subject.MovementY); Assert.Equal(1, subject.PositionX);

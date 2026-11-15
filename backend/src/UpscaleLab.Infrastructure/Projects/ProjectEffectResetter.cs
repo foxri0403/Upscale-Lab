@@ -28,6 +28,7 @@ internal static class ProjectEffectResetter
 
         var upscale = feature is "All" or "Upscale";
         var layers = feature is "All" or "Layers";
+        var character = layers && ProjectFeatures.HasCharacterLayers(project);
         var obsolete = new HashSet<string>();
         var uploaded = new List<string>();
         var committed = false;
@@ -87,6 +88,7 @@ internal static class ProjectEffectResetter
                 project.SavedEditJson = (feature == "All"
                     ? new ImageEditState(70, "original", "original", 1, true, DateTime.UtcNow, edit.Tags)
                     : edit with { Scale = upscale ? 1 : edit.Scale,
+                        LiveEnabled = !character && edit.LiveEnabled,
                         MouseEnabled = !layers && edit.MouseEnabled, GyroEnabled = !layers && edit.GyroEnabled,
                         Foreground = layers || edit.Foreground, SavedAt = DateTime.UtcNow }).ToJson();
             project.Status = project.Layers.Count > 0 || project.ProcessingJobs.Any(x => x.ResultObjectKey != null)

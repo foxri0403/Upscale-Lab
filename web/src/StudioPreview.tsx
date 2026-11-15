@@ -17,5 +17,5 @@ export type PreviewPalette = { dark: boolean; toggle: () => void };
 
 export function PreviewPaletteButton({ dark, toggle }: PreviewPalette) {
   return <button type="button" className="studio-palette-toggle" aria-label="미리보기 배경 전환"
-    aria-pressed={dark} title={dark ? "밝은 배경으로 전환" : "짙은 회색 배경으로 전환"} onClick={toggle} />;
+    aria-pressed={dark} title={dark ? "밝은 배경으로 전환" : "어두운 배경으로 전환"} onClick={toggle} />;
 }

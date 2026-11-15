@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { androidFormFactor, registeredDevices, deviceDisplays } from "../src/device-layout.ts";
+import { androidFormFactor, registeredDevices, deviceDisplays, wallpaperSourceForDisplay } from "../src/device-layout.ts";
 import { mapDeviceLibrary } from "../src/device-state.ts";
 test("registration order survives refresh order and uses stable ID ties", () => {
   const devices = [{id:'b',created:'2026-10-28T00:00:00Z'}, {id:'c',created:'2026-10-29T00:00:00Z'}, {id:'a',created:'2026-10-28T00:00:00Z'}];
@@ -12,6 +12,17 @@ test("Android always shows lock then home even when the agent only reports home"
   const device = mapDeviceLibrary([{id:'phone',name:'Phone',platform:'Android',displays:[{id:'screen',width:1080,height:2220,isConnected:true,wallpapers:[{target:'Home',observation:'Unknown'}]}]}], [], []).devices[0];
   assert.deepEqual(deviceDisplays(device).map(d=>d.target),['Lock','Home']);
   assert.equal(device.physicalDisplayCount,1);
+});
+
+test("reapplying a device wallpaper selects its latest editable project instead of the old device copy", () => {
+  const copy = { id: "asset:display", isDeviceVariant: true, sourceProjectId: "source",
+    edit: { mouseEnabled: false, gyroEnabled: false } };
+  const original = { id: "source", projectId: "source", edit: { mouseEnabled: true, gyroEnabled: true } };
+  assert.equal(wallpaperSourceForDisplay(copy, [{ id: "unrelated" }, original]), original);
+  assert.equal(wallpaperSourceForDisplay(copy, [{ ...original, isDraft: true }]), copy);
+  assert.equal(wallpaperSourceForDisplay(copy, [{ ...original, isReadOnly: true }]), copy);
+  assert.equal(wallpaperSourceForDisplay({ ...copy, isDeviceVariant: false }, [original]).id, copy.id);
+  assert.equal(wallpaperSourceForDisplay(undefined, [original]), undefined);
 });
 
 test("tablet uses logical short edge, independent of rotation and physical pixel count", () => {

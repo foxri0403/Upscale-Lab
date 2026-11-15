@@ -10,6 +10,7 @@ import { previewStageStyle, PreviewPaletteButton } from "./StudioPreview";
 import { SubjectSeparationCanvas, type SubjectSeparation } from "./SubjectSeparation";
 import { usePreviewPan } from "./use-preview-pan";
 import { rigPart } from "./character-rig";
+import { hasSeeThroughRigLayers } from "./character-processing";
 import { livePreviewLayers } from "./live-layer-preview";
 import type { CharacterRigController } from "./use-character-rig";
 
@@ -35,9 +36,9 @@ export function StudioCanvas({ picture, edit, tool, layered, background, foregro
   const palette = { dark: darkPalette, toggle: () => setDarkPalette(value => !value) };
   const visible = visibleLayers(tool === "live" ? "all" : selectedLayer);
   const showingLayers = layered && (tool === "layers" || tool === "live");
-  const isSingleCharacterPart = tool === "live" && !!selectedCharacterLayerId;
-  const usingCharacterRig = tool === "live" && !!picture.layers?.length && !picture.layers.some(layer => layer.layerType === "Background");
-  const moving = motion.active;
+  const usingCharacterRig = tool === "live" && hasSeeThroughRigLayers(picture.layers);
+  const transparentPreview = usingCharacterRig || (showingLayers && tool === "layers" && selectedLayer === "subject");
+  const moving = motion.active && !usingCharacterRig;
   const dimensionsCallback = useRef(onDimensions);
   dimensionsCallback.current = onDimensions;
   const source = layered && !inline && (tool === "layers" || tool === "live" || tool === "crop")
@@ -72,11 +73,13 @@ export function StudioCanvas({ picture, edit, tool, layered, background, foregro
         {tool === "crop" ? <CropEditor picture={layered ? { ...picture, background, foregrounds } : picture} edit={edit} change={onEdit} disabled={readOnly || hand} zoom={zoom} palette={palette} rulers panImage={hand} /> : <div ref={pan.root} {...pan.events} className={`studio-canvas-center ${pan.canPan ? "preview-can-pan" : ""} ${pan.dragging ? "preview-panning" : ""}`}>
           <div className="studio-pan-surface" style={{ width: zoom === "fit" ? "100%" : croppedWidth * Number(zoom) / 100 + 44, height: zoom === "fit" ? "100%" : croppedHeight * Number(zoom) / 100 + 44 }}>
           <PreviewPaletteButton {...palette} />
-          <div className={`canvas-stage studio-preview-stage ${cropped ? "crop-stage" : ""} ${layered && selectedLayer === "subject" && tool === "layers" ? "subject-only" : ""}`}
-            ref={usingCharacterRig ? characterRig.stage : motion.stage} style={previewStageStyle(croppedWidth, croppedHeight, zoom)}>
+          <div className={`canvas-stage studio-preview-stage ${cropped ? "crop-stage" : ""} ${transparentPreview ? "transparent-preview" : ""}`}
+            ref={element => { motion.stage.current = element; characterRig.stage.current = usingCharacterRig ? element : null; }}
+            style={previewStageStyle(croppedWidth, croppedHeight, zoom)}>
             <div className="studio-image-plane" style={selected.plane}>
             {inline ? <SubjectSeparationCanvas editor={separation} disabled={readOnly || !layered || hand || pan.canPan || separation.tracing} filter={filterStyle(edit.filter)} /> : showingLayers ? (
-              <div className={`live-canvas ${moving ? "motion-active" : ""}`} ref={usingCharacterRig ? characterRig.layers : motion.layers} style={{ filter: filterStyle(edit.filter) }}>
+              <div className={`live-canvas ${moving ? "motion-active" : ""}`} style={{ filter: filterStyle(edit.filter) }}
+                ref={element => { motion.layers.current = element; characterRig.layers.current = usingCharacterRig ? element : null; }}>
                 {picture.layers?.length ? livePreviewLayers(
                   picture.layers.filter(layer => layer.layerType === "Background" ? visible.background : visible.subject),
                   tool === "live" ? selectedCharacterLayerId : null)

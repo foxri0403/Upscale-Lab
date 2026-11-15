@@ -1329,10 +1329,6 @@ small {
   padding: 4px 9px;
   line-height: 1.3;
 }
-.type-badge.live {
-  color: var(--primary);
-  background: #edf0ff;
-}
 .card-menu {
   position: relative;
 }

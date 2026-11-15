@@ -36,6 +36,5 @@ export function LayerPreviewSelector({ value, change, ready, original, backgroun
           {value === layer.id && <Check size={17} aria-hidden="true" />}
         </button>)}
     </div>
-    {!ready && <p className="layer-preview-hint">분리가 완료되면 배경과 피사체를 따로 볼 수 있습니다.</p>}
   </section>;
 }

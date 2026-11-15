@@ -89,6 +89,13 @@ public sealed class ProjectsController(
         return NoContent();
     }
 
+    [HttpPatch("{projectId:guid}/metadata")]
+    public async Task<IActionResult> UpdateMetadata(Guid projectId, UpdateProjectMetadataRequest request, CancellationToken ct)
+    {
+        await projectService.UpdateMetadataAsync(User.GetRequiredUserId(), projectId, request, ct);
+        return NoContent();
+    }
+
     [HttpDelete("{projectId:guid}/draft")]
     public async Task<IActionResult> DiscardDraft(Guid projectId, CancellationToken ct)
     {

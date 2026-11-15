@@ -30,8 +30,6 @@ import {
   write,
   sampleLibrary,
   community,
-  defaultEdit,
-  defaultHeadRig,
   uuid,
   type Library,
   type Picture,
@@ -65,6 +63,7 @@ import {
   allTagsSelected,
   matchesSelectedTags,
   selectableTags,
+  unspecifiedTag,
 } from "./image-tags";
 import { TagSelector } from "./TagSelector";
 import { watchDeviceUpdates } from "./device-updates";
@@ -86,7 +85,7 @@ import { displaySize, type WallpaperFrame } from "./wallpaper-frame";
 import { SharedImageSettings, type SharedImageMetadata } from "./SharedImageSettings";
 
 type SharedPicture = Picture & { ownerId: string };
-type ApplyOptions = { useExistingAsset?: boolean; enablePcLiveMotion?: boolean; frame?: WallpaperFrame };
+type ApplyOptions = { useExistingAsset?: boolean; frame?: WallpaperFrame };
 type DemoContext = {
   session: Session;
   library: Library;
@@ -94,7 +93,7 @@ type DemoContext = {
   toast: (message: string) => void;
   shared: SharedPicture[];
   publish: (picture: Picture, enabled: boolean) => Promise<boolean>;
-  editShared: (picture: Picture, metadata: SharedImageMetadata) => Promise<boolean>;
+  editMetadata: (picture: Picture, metadata: SharedImageMetadata, fromExplore: boolean) => Promise<boolean>;
   apply: (
     picture: Picture,
     deviceId: string,
@@ -107,6 +106,7 @@ type DemoContext = {
   loading: boolean;
 };
 const Demo = createContext<DemoContext | null>(null);
+const likedRecommendationLimit = 5;
 export function useDemo() {
   return useContext(Demo)!;
 }
@@ -275,6 +275,8 @@ export function Workspace({
               src: previous.src,
               background: previous.background,
               foregrounds: previous.foregrounds,
+              layers: previous.layers,
+              subjectLayerId: previous.subjectLayerId,
               jobId: previous.jobId,
               width: previous.width,
               height: previous.height,
@@ -462,27 +464,38 @@ export function Workspace({
       sharing.current = false;
     }
   }
-  async function editShared(picture: Picture, metadata: SharedImageMetadata) {
-    if (!isOwnExplorePicture(picture, session.id, [...current.current.images, ...(current.current.assets || [])]) ||
-        picture.isReadOnly) return false;
+  async function editMetadata(picture: Picture, metadata: SharedImageMetadata, fromExplore: boolean) {
     try {
+      const { images, assets = [] } = current.current;
+      const owned = [...images, ...assets];
+      const latest = fromExplore ? ownedExplorePicture(picture, session.id, owned) : images.find(item => item.id === picture.id);
+      if (picture.isReadOnly || latest?.isReadOnly ||
+          (fromExplore ? !isOwnExplorePicture(picture, session.id, owned) : !latest))
+        throw new Error("수정할 수 있는 내 이미지를 찾지 못했습니다.");
       if (cloud) {
-        const path = picture.galleryPostId ? `/api/gallery/${picture.galleryPostId}`
-          : `/api/wallpapers/${picture.assetId}/metadata`;
+        const assetId = latest?.assetId ?? picture.assetId;
+        const path = latest?.projectId ? `/api/projects/${latest.projectId}/metadata`
+          : fromExplore && picture.galleryPostId ? `/api/gallery/${picture.galleryPostId}`
+          : assetId ? `/api/wallpapers/${assetId}/metadata` : undefined;
+        if (!path) throw new Error("수정할 이미지를 찾을 수 없습니다.");
         await request(path, { method: "PATCH", body: JSON.stringify(metadata) });
         await refresh();
       } else {
-        const previous = read<SharedPicture[]>("upscale.demo.shared.v1", []);
-        if (!previous.some(p => p.id === picture.id && p.ownerId === session.id))
+        const sharedId = fromExplore ? picture.id : latest?.sharedId;
+        const previous = sharedId ? read<SharedPicture[]>("upscale.demo.shared.v1", []) : undefined;
+        const isPublication = (p: SharedPicture) => p.id === sharedId && p.ownerId === session.id;
+        if (fromExplore && !previous?.some(isPublication))
           throw new Error("공유 이미지를 찾을 수 없습니다.");
-        const edit = { name: metadata.title, tags: metadata.tags, platformTags: metadata.platformTags };
-        const next = previous.map(p => p.id === picture.id && p.ownerId === session.id ? { ...p, ...edit } : p);
-        write("upscale.demo.shared.v1", next);
-        if (!update(value => ({ ...value, images: value.images.map(p => p.sharedId === picture.id ? { ...p, ...edit } : p) }))) {
-          write("upscale.demo.shared.v1", previous);
+        const edit = { name: metadata.title, tags: metadata.tags, platformTags: metadata.platformTags,
+          genre: (metadata.tags[0] || unspecifiedTag) as Picture["genre"] };
+        const next = previous?.map(p => isPublication(p) ? { ...p, ...edit } : p);
+        if (next) write("upscale.demo.shared.v1", next);
+        const replace = (p: Picture) => p.id === latest?.id || (sharedId && p.sharedId === sharedId) ? { ...p, ...edit } : p;
+        if (!update(value => ({ ...value, images: value.images.map(replace), assets: value.assets?.map(replace) }))) {
+          if (previous) write("upscale.demo.shared.v1", previous);
           return false;
         }
-        setShared(next);
+        if (next) setShared(next);
       }
       toast("이미지 이름과 태그를 변경했습니다.");
       return true;
@@ -506,17 +519,8 @@ export function Workspace({
     if (cloud) {
       let sent = false;
       try {
-        // Explicit PC motion opt-in creates a NEW private wallpaper snapshot.
-        // Do not reuse or modify a published/immutable asset or the author's project.
-        const movingPicture: Picture = options?.enablePcLiveMotion ? {
-          ...picture,
-          edit: { ...defaultEdit, ...picture.edit, foreground: true, liveEnabled: true,
-            mouseEnabled: true, gyroEnabled: picture.edit?.gyroEnabled ?? false,
-            rig: { ...defaultHeadRig, ...picture.edit?.rig, enabled: true, bodyMode: "follow" },
-          },
-        } : picture;
-        const asset: Asset = frame || options?.enablePcLiveMotion
-          ? await createAsset(movingPicture, frame)
+        const asset: Asset = frame
+          ? await createAsset(picture, frame)
           : options?.useExistingAsset && picture.assetId ? {
             id: picture.assetId, title: picture.name,
             mode: picture.background && picture.foregrounds?.length ? "Live2D" : "Static",
@@ -571,7 +575,7 @@ export function Workspace({
         toast,
         shared,
         publish,
-        editShared,
+        editMetadata,
         apply,
         refresh,
         refreshDevices,
@@ -718,7 +722,7 @@ export function Workspace({
 }
 
 export function Gallery({ explore = false }: { explore?: boolean }) {
-  const { library, session, update, toast, shared, refresh, apply, publish, editShared, loading } =
+  const { library, session, update, toast, shared, refresh, apply, publish, editMetadata, loading } =
     useDemo();
   const [query, setQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>(() => [
@@ -749,18 +753,15 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     previewTrigger.current?.focus();
   }
   const [editing, setEditing] = useState<Picture | null>(null);
-  const [editingShared, setEditingShared] = useState<Picture | null>(null);
   const [unpublishing, setUnpublishing] = useState<Picture | null>(null);
   const [unpublishBusy, setUnpublishBusy] = useState(false);
   const [viewing, setViewing] = useState<Picture | null>(null);
-  const [name, setName] = useState("");
   const [deleting, setDeleting] = useState<Picture | null>(null);
   const [importing, setImporting] = useState(false);
   const [applyingPicture, setApplyingPicture] = useState<Picture | null>(null);
   const applying = useRef(false);
   const importedPictures = useRef(new Map<string, Promise<Picture>>());
   const editableCopies = useRef(new Map<string, Promise<Picture>>());
-  const [renaming, setRenaming] = useState(false);
   const filtersActive = !!query.trim() || !allTagsSelected(selectedTags) || selectedPlatforms.length > 0;
   const queryParams = new URLSearchParams();
   if (query.trim()) queryParams.set("search", query.trim());
@@ -771,7 +772,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   }
   selectedPlatforms.forEach(tag => queryParams.append("platformTags", tag));
   const remote = useExploreResults(queryParams.toString(), shared, explore && cloud);
-  const ranked = useExploreResults("sort=likes&limit=8", shared, explore && cloud);
+  const ranked = useExploreResults(`sort=likes&limit=${likedRecommendationLimit}`, shared, explore && cloud);
   function withEngagement(picture: Picture): Picture {
     if (cloud) return { ...picture, ...engagement[picture.id] };
     const entry = localEngagement[picture.id];
@@ -893,7 +894,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     [...all, ...(ranked?.pictures || [])].map(picture => [picture.id, picture]),
   ).values()].map(withEngagement), "likes");
   const hasLikedRecommendations = (rankedRecommendations[0]?.likes ?? 0) > 0;
-  const recommendations = hasLikedRecommendations ? rankedRecommendations.slice(0, 8)
+  const recommendations = hasLikedRecommendations ? rankedRecommendations.slice(0, likedRecommendationLimit)
     : randomRecommendations(all.map(withEngagement), recommendationSeed);
   async function importPicture(p: Picture, open: boolean) {
     if (importing || (open && !isOwnExplorePicture(p, session.id, ownedPictures))) return;
@@ -919,8 +920,9 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     try {
       if (!wallpaperTargets(library.devices, explore).some(target => target.deviceId === deviceId && target.displayId === displayId))
         throw new Error("연결된 화면을 선택해 주세요.");
-      const saved = explore ? await ensureOwnPicture(applyingPicture) : applyingPicture;
-      if (await apply({ ...saved, width: picture.width, height: picture.height }, deviceId, displayId,
+      const owned = explore && ownedExplorePicture(applyingPicture, session.id, ownedPictures);
+      const source = explore && !owned ? { ...await ensureOwnPicture(applyingPicture), width: picture.width, height: picture.height } : picture;
+      if (await apply(source, deviceId, displayId,
         { useExistingAsset: explore, frame })) setApplyingPicture(null);
     } catch (error) { toast((error as Error).message); }
     finally { applying.current = false; setImporting(false); }
@@ -1055,15 +1057,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
                 if (explore) toggleDetails(p);
                 else void openOwnPicture(p);
               }}
-              rename={() => {
-                if (explore) {
-                  setEditingShared(p);
-                  return;
-                }
-                if (isImageShared(p) || p.isReadOnly) return;
-                setEditing(p);
-                setName(p.name);
-              }}
+              editMetadata={() => setEditing(p)}
               unpublish={explore && isOwnExplorePicture(p, session.id, ownedPictures) ? () => setUnpublishing(p) : undefined}
               remove={() => setDeleting(p)}
             />
@@ -1090,11 +1084,14 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           setViewing(null);
         }}><Monitor size={18} /> 연결된 기기에 적용</button>
       </Modal>}
-      {applyingPicture && <ApplyWallpaperDialog picture={applyingPicture} devices={library.devices} fromExplore={explore}
+      {applyingPicture && <ApplyWallpaperDialog
+        picture={(explore ? ownedExplorePicture(applyingPicture, session.id, ownedPictures)
+          : ownedPictures.find(item => item.id === applyingPicture.id)) ?? applyingPicture}
+        devices={library.devices} fromExplore={explore}
         busy={importing} close={() => setApplyingPicture(null)}
         confirm={applyExplorePicture} />}
-      {editingShared && <SharedImageSettings picture={editingShared} close={() => setEditingShared(null)}
-        save={metadata => editShared(editingShared, metadata)} />}
+      {editing && <SharedImageSettings picture={editing} close={() => setEditing(null)}
+        save={metadata => editMetadata(editing, metadata, explore)} />}
       {unpublishing && <Modal title="업로드를 취소할까요?" close={() => { if (!unpublishBusy) setUnpublishing(null); }}>
         <p>‘{unpublishing.name}’을 탐색에서 내립니다. 내 이미지에 저장된 파일은 유지됩니다.</p>
         {unpublishing.galleryPostId && <p>기존 갤러리 게시글의 댓글과 좋아요도 함께 삭제됩니다.</p>}
@@ -1111,57 +1108,6 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           }}>{unpublishBusy ? <Busy /> : "업로드 취소"}</button>
         </div>
       </Modal>}
-      {editing && (
-        <Modal title="이미지 이름 변경" close={() => setEditing(null)}>
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (!name.trim() || renaming) return;
-              const latest = library.images.find((p) => p.id === editing.id);
-              if (!latest || isImageShared(latest)) {
-                toast("공유를 끈 뒤 이름을 변경해 주세요.");
-                return;
-              }
-              setRenaming(true);
-              try {
-                if (cloud) {
-                  await request(latest.assetId
-                    ? `/api/wallpapers/${latest.assetId}`
-                    : `/api/projects/${latest.projectId}`, {
-                    method: "PATCH", body: JSON.stringify({ title: name.trim() }),
-                  });
-                  await refresh();
-                } else if (!update((v) => ({
-                    ...v,
-                    images: v.images.map((p) =>
-                      p.id === editing.id ? { ...p, name: name.trim() } : p,
-                    ),
-                  }))) return;
-                setEditing(null);
-                toast("이름을 변경했습니다.");
-              } catch (error) {
-                toast((error as Error).message);
-              } finally {
-                setRenaming(false);
-              }
-            }}
-          >
-            <label>
-              이름
-              <input
-                value={name}
-                maxLength={160}
-                required
-                disabled={renaming}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
-            <button className="button primary full" disabled={renaming}>
-              {renaming ? <Busy /> : "변경하기"}
-            </button>
-          </form>
-        </Modal>
-      )}
       {deleting && (
         <Modal title="보관함에서 삭제할까요?" close={() => setDeleting(null)}>
           <p>

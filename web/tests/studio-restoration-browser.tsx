@@ -2,6 +2,7 @@
 import { createRoot } from "react-dom/client";
 import { Workspace } from "../src/Workspace";
 import { defaultEdit, sampleLibrary } from "../src/model";
+import { showcaseCharacter, showcaseRig } from "../src/showcase-character";
 import "../src/styles.css";
 import "../src/responsive.css";
 
@@ -13,15 +14,21 @@ picture.name = character ? "캐릭터 미리보기 복구 검사" : "수동 분�
 picture.edit = { ...defaultEdit };
 picture.width = 1536; picture.height = 1024;
 if (character) {
-  picture.src = "/images/fox.png";
-  picture.layers = ["Face", "FrontHair"].map((layerType, layerOrder) => ({
-    id: `fixture-part-${layerOrder}`, layerType, layerOrder,
-    imageUrl: "/images/fox-foreground.png", movementX: 0, movementY: 0,
+  picture.src = "/images/live2d-character-v2.png";
+  picture.width = showcaseCharacter.width;
+  picture.height = showcaseCharacter.height;
+  picture.background = undefined;
+  picture.foregrounds = undefined;
+  picture.features = ["Live 2D"];
+  const layers = [...showcaseCharacter.layers].sort((a, b) => a.renderOrder - b.renderOrder);
+  picture.layers = layers.map((layer, layerOrder) => ({
+    id: layer.name, layerType: layer.semanticType, layerOrder, automaticOrder: layerOrder,
+    imageUrl: layer.src, movementX: 0, movementY: 0,
   }));
-  // Force the no-background branch despite the existing fox demo shortcut.
-  picture.separationDisabled = true;
+  picture.edit = { ...defaultEdit, rig: { ...showcaseRig, partAssignments: Object.fromEntries(layers.map(layer => [layer.name, layer.part])) } };
 }
-localStorage.setItem(`upscale.demo.library.v1.${id}`, JSON.stringify(library));
+const storageKey = `upscale.demo.library.v1.${id}`;
+if (!character || !localStorage.getItem(storageKey)) localStorage.setItem(storageKey, JSON.stringify(library));
 createRoot(document.getElementById("root")!).render(<Workspace
   session={{ id, name: "복구 검사", email: "fixture@upscalelab.local" }}
-  route="/app/studio?id=fox" logout={() => {}} />);
+  route={character ? "/app/studio?id=fox&tool=live" : "/app/studio?id=fox"} logout={() => {}} />);

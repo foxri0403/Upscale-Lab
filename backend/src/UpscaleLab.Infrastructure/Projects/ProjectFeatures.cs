@@ -11,7 +11,7 @@ internal static class ProjectFeatures
         (!project.Layers.Any(x => x.LayerType == LayerType.Background) ||
          project.ProcessingJobs
              .Where(x => x.Status == ProcessingJobStatus.Completed &&
-                         x.Operation is ProcessingOperation.Layers or ProcessingOperation.CharacterLayers)
+                         x.Operation is ProcessingOperation.Layers or ProcessingOperation.CharacterLayers or ProcessingOperation.UpscaleAndLayers)
              .OrderByDescending(x => x.CompletedAt ?? x.CreatedAt)
              .FirstOrDefault()?.Operation == ProcessingOperation.CharacterLayers);
 
@@ -23,7 +23,7 @@ internal static class ProjectFeatures
             features.Add("업스케일");
         if (project.Layers.Count >= 2 && !character)
             features.Add("배경 분리");
-        if (character || ImageEditState.FromJson(project.SavedEditJson)?.LiveEnabled == true)
+        else if (character || ImageEditState.FromJson(project.SavedEditJson)?.LiveEnabled == true)
             features.Add("Live 2D");
         return features;
     }

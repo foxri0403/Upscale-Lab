@@ -10,9 +10,16 @@ export type WallpaperEdits = { foreground: boolean; filter: string; crop: string
 
 export function wallpaperExportPolicy(picture: WallpaperSource, edit: WallpaperEdits) {
   const backgroundAndSubject = !!picture.background && !!picture.foregrounds?.length;
-  const characterParts = !picture.background && ((picture.layers?.length ?? 0) >= 2 ||
-    // Imported/saved Live2D wallpaper manifests have files but no project-layer rows.
-    (!!picture.assetId && (picture.foregrounds?.length ?? 0) >= 2));
+  const projectLayers = picture.layers ?? [];
+  // See-through may return a Background PNG alongside the semantic character parts.
+  // Do not confuse a plain Background + Body split with a riggable character.
+  const hasBackgroundLayer = projectLayers.some(layer => layer.layerType === "Background");
+  const rigParts = new Set(["Face", "Eye", "Eyebrow", "Mouth", "Nose", "Hair", "FrontHair", "BackHair"]);
+  const hasFaceOrHair = projectLayers.some(layer => rigParts.has(layer.layerType));
+  const characterParts = projectLayers.length >= 2
+    ? ((!picture.background && !hasBackgroundLayer) || hasFaceOrHair)
+    // Imported/saved Live2D wallpaper manifests have PNGs but no project-layer rows.
+    : (projectLayers.length === 0 && !!picture.assetId && (picture.foregrounds?.length ?? 0) >= 2);
   const layered = edit.foreground && (backgroundAndSubject || characterParts);
   const rendered = edit.filter !== "original" || edit.crop !== "original" ||
     edit.scale !== 1 || (!layered && characterParts) || (backgroundAndSubject && !edit.foreground);

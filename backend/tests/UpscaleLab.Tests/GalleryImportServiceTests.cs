@@ -49,7 +49,10 @@ public sealed class GalleryImportServiceTests
         Assert.Equal(1, post.SaveCount);
         Assert.Equal(new[] { "pc", "tablet" }, result.Edit!.PlatformTags);
         Assert.True(result.Edit.IsReadOnly);
-        Assert.True(Assert.Single(await projects.GetAllAsync(viewer, Ct)).Edit!.IsReadOnly);
+        Assert.Equal(post.User.Username, result.Edit.SourceUploaderName);
+        var listedEdit = Assert.Single(await projects.GetAllAsync(viewer, Ct)).Edit!;
+        Assert.True(listedEdit.IsReadOnly);
+        Assert.Equal(post.User.Username, listedEdit.SourceUploaderName);
         await Assert.ThrowsAsync<ConflictException>(() => projects.SaveEditAsync(viewer, result.Id,
             new(50, "mono", "original", 1, true), Ct));
         await Assert.ThrowsAsync<ConflictException>(() => projects.ResetEffectsAsync(viewer, result.Id, new("All"), Ct));

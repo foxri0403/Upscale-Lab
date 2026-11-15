@@ -6,7 +6,7 @@ import { stripTypeScriptTypes } from "node:module";
 // The helper uses a type-only import; Node strips it without requiring React or bundling.
 const source = fs.readFileSync(new URL("../src/live-layer-preview.ts", import.meta.url), "utf8");
 const js = stripTypeScriptTypes(source, { mode: "strip" });
-const { livePreviewLayers, selectedLivePartId, defaultLivePartId } =
+const { livePreviewLayers, selectedLivePartId } =
   await import(`data:text/javascript,${encodeURIComponent(js)}`);
 const layers = [
   { id: "eye", layerType: "Eye", layerOrder: 2 },
@@ -26,16 +26,16 @@ test("clicking any part shows only its corresponding image", () => {
 test("missing selection returns to full view after a project reload", () => {
   assert.equal(selectedLivePartId(layers, "deleted"), null);
   assert.equal(selectedLivePartId(layers, "body"), "body");
-  assert.equal(defaultLivePartId(layers), "eye");
-  assert.equal(defaultLivePartId([]), null);
 });
 test("main studio and reorder dialog expose accessible part-only controls", () => {
   const studio = fs.readFileSync(new URL("../src/Studio.tsx", import.meta.url), "utf8");
   const canvas = fs.readFileSync(new URL("../src/StudioCanvas.tsx", import.meta.url), "utf8");
   const editor = fs.readFileSync(new URL("../src/LayerStackEditor.tsx", import.meta.url), "utf8");
   assert.match(studio, /setRequestedLivePartId\(layer.id\)/);
-  assert.match(studio, /전체 합성 보기/);
+  assert.match(studio, /setRequestedLivePartId\(null\)[\s\S]*?<span>전체<\/span>/);
+  assert.doesNotMatch(studio, /전체 합성 보기|파츠별 보기/);
   assert.match(canvas, /livePreviewLayers\(/);
-  assert.match(editor, /layer-stack-preview-only/);
-  assert.match(editor, /setRequestedPreviewPartId\(null\)/);
+  assert.match(editor, /aria-pressed=\{previewPartId === id\}/);
+  assert.match(editor, /setRequestedPreviewPartId\(previewPartId === id \? null : id\)/);
+  assert.doesNotMatch(editor, /실시간 합성 결과|파츠별 보기|추가할 파츠/);
 });

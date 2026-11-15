@@ -114,19 +114,19 @@ run("shared wallpaper API returns JSON, never the SPA fallback", async () => {
   assert.ok(Array.isArray(await r.json()));
 });
 run("image settings PATCH routes exist and require authentication", async () => {
-  for (const resource of ["projects", "wallpapers"]) {
-    const path = `/api/${resource}/00000000-0000-0000-0000-000000000001`;
+  const id = "00000000-0000-0000-0000-000000000001";
+  for (const path of [`/api/projects/${id}`, `/api/projects/${id}/metadata`, `/api/wallpapers/${id}`]) {
     const options = await fetch(`${base}${path}`, {
       method: "OPTIONS", signal: AbortSignal.timeout(15000),
     });
-    assert.equal(options.status, 405, resource);
-    assert.match(options.headers.get("allow"), /PATCH/, resource);
+    assert.equal(options.status, 405, path);
+    assert.match(options.headers.get("allow"), /PATCH/, path);
     const patch = await fetch(`${base}${path}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Unauthenticated test" }),
       signal: AbortSignal.timeout(15000),
     });
-    assert.equal(patch.status, 401, resource);
+    assert.equal(patch.status, 401, path);
   }
 });
 run(

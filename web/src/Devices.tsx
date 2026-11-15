@@ -15,7 +15,7 @@ import { Modal, Notice, Empty, PictureView } from "./ui";
 import { ApplyWallpaperDialog } from "./ApplyWallpaperDialog";
 import { FramedWallpaper } from "./FramedWallpaper";
 import { cloud, post, request } from "./api";
-import { deviceDisplays, registeredDevices } from "./device-layout";
+import { deviceDisplays, registeredDevices, wallpaperSourceForDisplay } from "./device-layout";
 
 export function Devices() {
   const { library, session, update, toast, apply, refresh, refreshDevices } = useDemo();
@@ -266,7 +266,8 @@ export function Devices() {
           })}
         </div>
       )}
-      {target && <ApplyWallpaperDialog pictures={library.images} currentPicture={currentPicture} devices={library.devices}
+      {target && <ApplyWallpaperDialog pictures={library.images}
+        currentPicture={wallpaperSourceForDisplay(currentPicture, library.images)} devices={library.devices}
         fixedTarget={`${target.device.id}/${target.displayId}`} busy={busy} close={() => setTarget(null)}
         confirm={async ({ picture, deviceId, displayId, frame }) => {
           setBusy(true);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { separationOperation, separationAvailable } from '../src/character-processing.ts';
+import { separationOperation, separationAvailable, hasSeeThroughRigLayers } from '../src/character-processing.ts';
 
 test('background mode continues using the original Layers operation', () => {
   assert.equal(separationOperation('background'), 'Layers');
@@ -18,4 +18,13 @@ test('background mode preserves previous behavior and capability check', () => {
   assert.equal(separationAvailable('background', null), true);
   assert.equal(separationAvailable('background', { layers: true }), true);
   assert.equal(separationAvailable('background', { layers: false, characterLayers: true }), false);
+});
+
+
+test("photo uses the same See-through CharacterLayers operation", () => {
+  assert.equal(separationOperation("character"), "CharacterLayers");
+  assert.equal(hasSeeThroughRigLayers([{ layerType: "Background" }, { layerType: "Face" }, { layerType: "Hair" }]), true);
+  assert.equal(hasSeeThroughRigLayers([{ layerType: "Background" }, { layerType: "Body" }]), false);
+  assert.equal(hasSeeThroughRigLayers([{ layerType: "Face" }, { layerType: "Clothes" }]), true);
+  assert.equal(hasSeeThroughRigLayers([{ layerType: "Background" }]), false);
 });

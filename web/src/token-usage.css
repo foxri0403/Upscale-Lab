@@ -34,7 +34,8 @@
   position: fixed;
   inset: auto;
   margin: 0;
-  width: min(380px, calc(100vw - 24px));
+  width: max-content;
+  max-width: calc(100% - 24px);
   max-height: calc(100dvh - 24px);
   overflow: auto;
   padding: 0;
@@ -46,6 +47,8 @@
 }
 .token-usage-compact table { font-size: 12px; }
 .token-usage-compact th, .token-usage-compact td { padding: 11px 10px; }
+.token-usage-compact tr > :first-child { width: auto; padding-inline-end: 6px; }
+.token-usage-compact tr > :nth-child(2) { padding-inline-start: 6px; }
 .token-usage-compact .billing-usage-table { border: 0; border-radius: 0; }
 
 @media (max-width: 600px) {

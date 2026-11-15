@@ -3,24 +3,50 @@ import { defaultHeadRig, type HeadRig } from "./model";
 export type RigPart = "fixed" | "head" | "frontHair" | "backHair" | "eye" |
   "torso" | "leftArm" | "rightArm" | "leftHand" | "rightHand" |
   "lowerBody" | "leftLeg" | "rightLeg";
-export const assignableRigParts: ReadonlyArray<{ value: RigPart; label: string }> = [
-  { value: "fixed", label: "고정" }, { value: "head", label: "머리·얼굴" },
-  { value: "eye", label: "눈" }, { value: "frontHair", label: "앞머리" }, { value: "backHair", label: "뒷머리" },
-  { value: "torso", label: "상체 · 몸통/의상" },
-  { value: "leftArm", label: "상체 · 왼팔" }, { value: "rightArm", label: "상체 · 오른팔" },
-  { value: "leftHand", label: "상체 · 왼손" }, { value: "rightHand", label: "상체 · 오른손" },
-  { value: "lowerBody", label: "하체 · 전체" }, { value: "leftLeg", label: "하체 · 왼다리" },
-  { value: "rightLeg", label: "하체 · 오른다리" },
-];
-const permitted = new Set<string>(assignableRigParts.map(x => x.value));
+export const rigMovementGroups = [
+  { id: "hair", label: "머리", parts: [
+    { value: "frontHair", label: "앞머리" }, { value: "backHair", label: "뒷머리" },
+  ] },
+  { id: "face", label: "얼굴", parts: [
+    { value: "head", label: "얼굴" }, { value: "eye", label: "눈" },
+  ] },
+  { id: "upperBody", label: "상체", parts: [
+    { value: "torso", label: "몸통·의상" },
+    { value: "leftArm", label: "왼팔" }, { value: "rightArm", label: "오른팔" },
+    { value: "leftHand", label: "왼손" }, { value: "rightHand", label: "오른손" },
+  ] },
+  { id: "lowerBody", label: "하체", parts: [
+    { value: "lowerBody", label: "하체 전체" }, { value: "leftLeg", label: "왼다리" }, { value: "rightLeg", label: "오른다리" },
+  ] },
+  { id: "fixed", label: "고정", parts: [{ value: "fixed", label: "고정" }] },
+] as const satisfies ReadonlyArray<{ id: string; label: string; parts: readonly { value: RigPart; label: string }[] }>;
+export type RigMovementGroup = (typeof rigMovementGroups)[number]["id"];
+const groupsByPart = new Map<RigPart, RigMovementGroup>(rigMovementGroups.flatMap(group =>
+  group.parts.map(part => [part.value, group.id] as const)));
+
+export function rigMovementGroup(part: RigPart): RigMovementGroup {
+  return groupsByPart.get(part) ?? "fixed";
+}
+
+export function toggleRigMovementGroup(group: RigMovementGroup, current: RigPart, original: RigPart, inferred: RigPart): RigPart {
+  if (rigMovementGroup(current) === group) {
+    if (group !== "fixed") return "fixed";
+    if (original !== "fixed") return original;
+    return inferred !== "fixed" ? inferred : "head";
+  }
+  if (rigMovementGroup(original) === group) return original;
+  if (rigMovementGroup(inferred) === group) return inferred;
+  return rigMovementGroups.find(item => item.id === group)!.parts[0].value;
+}
 /** See-through currently has no guaranteed separate arm/hand/leg segmentation.
  * Never infer nonexistent independent PNG parts. Users can map actual layer IDs.
  */
 export function rigPart(type: string, layerIdOrSourceName?: string, assignments?: Record<string, RigPart>, sourceName?: string): RigPart {
   // Studio uses the second argument as a layer ID for explicit overrides;
   // the showcase uses it as the original See-through source name.
+  if (type === "Background") return "fixed";
   const manual = layerIdOrSourceName && assignments?.[layerIdOrSourceName];
-  if (manual && permitted.has(manual)) return manual;
+  if (manual && groupsByPart.has(manual)) return manual;
   const semanticName = sourceName ?? (assignments ? "" : layerIdOrSourceName ?? "");
   // Eye whites and lashes follow the head, only irides get independent gaze.
   if (type === "Eye" && /eye[ _-]?(white|lash)|sclera/i.test(semanticName)) return "head";
@@ -46,7 +72,7 @@ export function normalizeRig(value?: Partial<HeadRig> | null): HeadRig {
   const provided = result.partAssignments && typeof result.partAssignments === "object" &&
     !Array.isArray(result.partAssignments) ? result.partAssignments : {};
   result.partAssignments = Object.fromEntries(Object.entries(provided)
-    .filter(([id, part]) => id.length <= 100 && permitted.has(part))) as Record<string, RigPart>;
+    .filter(([id, part]) => id.length <= 100 && groupsByPart.has(part))) as Record<string, RigPart>;
   return result;
 }
 const clamp = (value: number) => Math.max(-1, Math.min(1, value));
