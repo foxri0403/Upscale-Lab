@@ -34,6 +34,8 @@ const cardIssuers: Record<string, string> = {
 const count = new Intl.NumberFormat("ko-KR");
 const date = new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeZone: "Asia/Seoul" });
 const paymentDate = (value: string) => date.format(new Date(value));
+const compactDate = new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Seoul" });
+const renewalDate = (value: string) => compactDate.format(new Date(value)).replace(/\s/g, "");
 const money = (amount: number) => `${count.format(amount)}원`;
 const tokens = (amount: number) => `${count.format(amount)}개`;
 const address = "/api/payments/account";
@@ -161,7 +163,7 @@ export function AccountBilling({ close }: { close: () => void }) {
     : [{ payment, at: payment.paidAt, refund: false }]).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   const refundable = details?.payments.filter(payment => payment.refundableTokens > 0);
 
-  return <Modal title={refunding ? "토큰 환불" : "결제 정보"} wide close={close} dismissible={!busy}>
+  return <Modal title={refunding ? "토큰 환불" : "결제 정보"} wide close={refunding ? backToBilling : close} dismissible={!busy}>
     <div className="account-billing" aria-busy={busy || (!details && !error)}>
       {error && <p className="form-error" role="alert">{error}</p>}
       {message && <p className="notice" role="status">{message}</p>}
@@ -171,8 +173,8 @@ export function AccountBilling({ close }: { close: () => void }) {
         <section className="account-refund-terms">
           <h3 tabIndex={-1} ref={refundTerms}>환불 안내</h3>
           <ul>
-            <li>추가로 구매한 토큰 중 사용하지 않은 수량만 환불할 수 있습니다.</li>
-            <li>결제한 금액에서 미사용 수량에 해당하는 금액을 원 결제 수단으로 돌려드립니다.</li>
+            <li>추가로 구매한 토큰 중 사용하지 않은 수량만 환불 받으실 수 있습니다.</li>
+            <li>결제한 금액에서 미사용 수량에 해당하는 금액을 원(KRW) 결제 수단으로 환불해드립니다.</li>
             <li>추가 구매 토큰을 사용 중인 작업이 있으면 완료된 뒤에 신청할 수 있습니다.</li>
           </ul>
         </section>
@@ -182,18 +184,15 @@ export function AccountBilling({ close }: { close: () => void }) {
             : !refundable?.length ? <p>환불 가능한 구매 내역이 없습니다.</p> : (
               <ul className="account-payment-list" tabIndex={0} aria-labelledby="refundable-orders">
                 {refundable.map(payment => <li key={payment.orderId}>
-                  <div><strong>{payment.productName}</strong><small>{paymentDate(payment.paidAt)} · 환불 수량 {tokens(payment.refundableTokens)}</small></div>
-                  <div className="account-payment-amount">
-                    <strong>{money(payment.refundableAmount)}</strong>
-                    <button className="button secondary" type="button" disabled={busy}
-                      aria-label={`${payment.productName} ${money(payment.refundableAmount)} 환불 신청`}
-                      onClick={() => void refund(payment)}>환불 신청</button>
-                  </div>
+                  <div><strong>{payment.productName} - {money(payment.refundableAmount)}</strong>
+                    <small>{paymentDate(payment.paidAt)} · 환불 수량 {tokens(payment.refundableTokens)}</small></div>
+                  <button className="button secondary account-payment-refund" type="button" disabled={busy}
+                    aria-label={`${payment.productName} ${money(payment.refundableAmount)} 환불 신청`}
+                    onClick={() => void refund(payment)}>환불 신청</button>
                 </li>)}
               </ul>
             )}
         </section>
-        <button className="button secondary account-billing-back" type="button" disabled={busy} onClick={backToBilling}>결제 정보로 돌아가기</button>
       </> : <>
         <dl className="account-billing-summary">
           <div>
@@ -205,12 +204,14 @@ export function AccountBilling({ close }: { close: () => void }) {
           </div>
           <div>
             <dt>구독 플랜</dt>
-            <dd>{currentPlan}{subscription?.status === "PastDue" && " · 갱신 결제 미완료"}</dd>
+            <dd>{currentPlan}
+              {subscribed && !subscription.cancelAtPeriodEnd && subscription.nextBillingAtUtc &&
+                ` - 재결제일 ${renewalDate(subscription.nextBillingAtUtc)}`}
+              {subscription?.status === "PastDue" && " · 갱신 결제 미완료"}</dd>
             {subscription?.status === "Active" && !subscription.cancelAtPeriodEnd && <dd className="account-billing-action">
               <button className="button secondary" type="button" disabled={busy} onClick={() => void cancelSubscription()}>구독 해지 예약</button></dd>}
-            {subscribed && subscription.cancelAtPeriodEnd ? <dd className="account-billing-date">해지 예약됨
-              {subscription.currentPeriodEndUtc && ` · ${paymentDate(subscription.currentPeriodEndUtc)} 종료`}</dd>
-              : subscribed && subscription.nextBillingAtUtc && <dd className="account-billing-date">재결제일 {paymentDate(subscription.nextBillingAtUtc)}</dd>}
+            {subscribed && subscription.cancelAtPeriodEnd && <dd className="account-billing-date">해지 예약됨
+              {subscription.currentPeriodEndUtc && ` · ${paymentDate(subscription.currentPeriodEndUtc)} 종료`}</dd>}
           </div>
           <div>
             <dt>잔여 추가 구매 토큰</dt>
