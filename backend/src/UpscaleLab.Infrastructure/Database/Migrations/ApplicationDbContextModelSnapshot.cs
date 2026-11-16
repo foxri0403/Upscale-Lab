@@ -789,6 +789,18 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
 
+                    b.Property<int?>("RefundAmount")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("RefundDeclined")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("RefundTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("RefundedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -1135,6 +1147,14 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
 
                     b.Property<bool>("CancelAtPeriodEnd")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("CardIssuerCode")
+                        .HasMaxLength(2)
+                        .HasColumnType("character varying(2)");
+
+                    b.Property<string>("CardNumberSuffix")
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");

@@ -68,6 +68,7 @@ export function normalizeRig(value?: Partial<HeadRig> | null): HeadRig {
   for (const field of intensityFields) result[field] = safe(result[field], defaultHeadRig[field]);
   result.enabled = result.enabled === true;
   result.idle = result.idle !== false;
+  result.faceEnabled = result.faceEnabled !== false;
   result.bodyMode = result.bodyMode === "follow" ? "follow" : "fixed";
   const provided = result.partAssignments && typeof result.partAssignments === "object" &&
     !Array.isArray(result.partAssignments) ? result.partAssignments : {};
@@ -94,6 +95,8 @@ export function rigTargets(tilt: number, tiltY: number, look: number, lookY: num
   const lowerBody = lower * .32;
   const leftLeg = lowerBody + lower * settings.leftLeg / 100 * .18;
   const rightLeg = lowerBody + lower * settings.rightLeg / 100 * .18;
-  return { head, eye, shiftY, eyeY, front: front * settings.hairSway / 100,
-    back: back * settings.hairSway / 100, torso, leftArm, rightArm, leftHand, rightHand, lowerBody, leftLeg, rightLeg };
+  const face = settings.faceEnabled !== false ? 1 : 0;
+  return { head: head * face, eye: eye * face, shiftY: shiftY * face, eyeY: eyeY * face,
+    front: front * settings.hairSway / 100 * face, back: back * settings.hairSway / 100 * face,
+    torso, leftArm, rightArm, leftHand, rightHand, lowerBody, leftLeg, rightLeg };
 }

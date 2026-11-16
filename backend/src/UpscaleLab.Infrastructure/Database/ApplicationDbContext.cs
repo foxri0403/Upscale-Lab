@@ -211,6 +211,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 
         subscription.Property(x => x.BillingKeyCiphertext)
             .HasMaxLength(2048);
+        subscription.Property(x => x.CardIssuerCode).HasMaxLength(2);
+        subscription.Property(x => x.CardNumberSuffix).HasMaxLength(4);
 
         subscription.HasIndex(x => x.UserId).IsUnique();
         subscription.HasIndex(x => x.CustomerKey).IsUnique();

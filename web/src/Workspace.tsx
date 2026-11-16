@@ -127,13 +127,15 @@ export function Workspace({
 }) {
   const [session, setSession] = useState(initialSession);
   const accountMenu = useRef<HTMLDetailsElement>(null);
+  const tokenMenu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     const dismissOutside = (event: Event) => {
-      const menu = accountMenu.current;
-      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+      for (const menu of [accountMenu.current, tokenMenu.current]) {
+        if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+      }
     };
     const dismissEscape = (event: KeyboardEvent) => {
-      const menu = accountMenu.current;
+      const menu = [accountMenu.current, tokenMenu.current].find(item => item?.open);
       if (menu?.open && event.key === "Escape") {
         event.preventDefault(); menu.open = false; menu.querySelector("summary")?.focus();
       }
@@ -604,7 +606,7 @@ export function Workspace({
           <span className="header-section">{page?.name || "Upscale Lab"}</span>
           <div className="header-right">
             {cloud && tokenWallet && (
-              <details className="header-token-menu">
+              <details className="header-token-menu" ref={tokenMenu}>
                 <summary className="header-token-summary" aria-label={`현재 요금제 ${tokenWallet.plan ?? "-"}, 잔여 토큰 ${tokenWallet.totalBalance ?? 0}`}>
                   <span>{tokenWallet.plan ?? "-"}</span>
                   <Coins size={16} />

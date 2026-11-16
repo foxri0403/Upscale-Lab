@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, Settings2 } from "lucide-react";
 import { normalizeRig } from "./character-rig";
 import { defaultHeadRig, type HeadRig } from "./model";
 
@@ -55,6 +55,8 @@ export function CharacterMotionControls({ rig, onChange, disabled }: {
 }) {
   const value = normalizeRig(rig);
   const follows = value.bodyMode === "follow";
+  const [details, setDetails] = useState<"face" | "body" | null>(null);
+  const detailsId = useId();
   function sliders(items: ReadonlyArray<readonly [SliderKey, string]>) {
     return items.map(([key, label]) => <RigSetting key={key} label={label} value={value[key]}
       change={next => { if (next !== value[key]) onChange({ ...value, [key]: next }); }} />);
@@ -62,19 +64,30 @@ export function CharacterMotionControls({ rig, onChange, disabled }: {
   return <section className="studio-rig-controls">
     <h3>레이어 움직임</h3>
     <fieldset disabled={disabled}>
-      <h3>머리·얼굴</h3>
-      {sliders(headSettings)}
-      <h3>몸 반응 방식</h3>
-      <button className="button secondary full" type="button" aria-expanded={follows}
-        onClick={() => onChange({ ...value, bodyMode: follows ? "fixed" : "follow" })}>
-        {follows ? "몸 반응 제거" : "몸 반응 추가"}
-      </button>
-      {follows && <>
-        <h3>상체 움직임</h3>{sliders(upperSettings)}
-        <h3>하체 움직임</h3>{sliders(lowerSettings)}
-      </>}
+      {([
+        ["face", "얼굴", value.faceEnabled, () => onChange({ ...value, faceEnabled: !value.faceEnabled })],
+        ["body", "몸", follows, () => onChange({ ...value, bodyMode: follows ? "fixed" : "follow" })],
+      ] as const).map(([part, label, applied, toggle]) => <div key={part}>
+        <div className="studio-rig-actions">
+          <button className="button secondary" type="button" onClick={toggle}>
+            {label} 반응 {applied ? "제거" : "추가"}
+          </button>
+          <button className="button secondary" type="button" aria-label={`${label} 반응 세부 설정`}
+            aria-expanded={details === part} aria-controls={`${detailsId}-${part}`}
+            onClick={() => setDetails(details === part ? null : part)}>
+            <Settings2 size={15} /> 세부 설정
+          </button>
+        </div>
+        <div className="studio-rig-details" id={`${detailsId}-${part}`} hidden={details !== part}>
+          {part === "face" ? sliders(headSettings) : <>
+            <h3>상체 움직임</h3>{sliders(upperSettings)}
+            <h3>하체 움직임</h3>{sliders(lowerSettings)}
+          </>}
+        </div>
+      </div>)}
       <button className="button secondary full studio-rig-reset" type="button"
-        onClick={() => onChange({ ...defaultHeadRig, enabled: value.enabled, partAssignments: value.partAssignments })}>
+        onClick={() => onChange({ ...defaultHeadRig, enabled: value.enabled, faceEnabled: value.faceEnabled,
+          bodyMode: value.bodyMode, partAssignments: value.partAssignments })}>
         <RotateCcw size={15} /> 움직임 기본값
       </button>
     </fieldset>

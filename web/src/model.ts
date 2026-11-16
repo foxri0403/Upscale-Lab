@@ -16,6 +16,7 @@ export type HeadRig = {
   idle: boolean;
   /** Body reaction mode. Existing saved rigs without this field remain fixed. */
   bodyMode: "fixed" | "follow";
+  faceEnabled: boolean;
   upperBody: number;
   lowerBody: number;
   torso: number;
@@ -32,7 +33,7 @@ export type HeadRig = {
 };
 export const defaultHeadRig: HeadRig = {
   enabled: false, headTilt: 60, eyeMove: 35, hairSway: 55,
-  pivotX: 50, pivotY: 16, idle: true, bodyMode: "fixed",
+  pivotX: 50, pivotY: 16, idle: true, bodyMode: "fixed", faceEnabled: true,
   upperBody: 40, lowerBody: 20, torso: 50, leftArm: 35, rightArm: 35,
   leftHand: 25, rightHand: 25, leftLeg: 20, rightLeg: 20,
   torsoPivotY: 40, lowerPivotY: 68, partAssignments: {},

@@ -43,7 +43,7 @@ export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: s
         const isLower = part === "lowerBody" || part === "leftLeg" || part === "rightLeg";
         const pivotY = isBody ? settings.torsoPivotY : isLower ? settings.lowerPivotY : settings.pivotY;
         img.style.transformOrigin = `${settings.pivotX}% ${pivotY}%`;
-        const headShift = settings.headTilt / 100 * inputX * width * .008;
+        const headShift = settings.faceEnabled ? settings.headTilt / 100 * inputX * width * .008 : 0;
         const gaze = part === "eye" ? eye * width : 0;
         const angle = (isBody || isLower) ? bodyAngles[part] :
           head + (part === "frontHair" ? front : part === "backHair" ? back : 0);
@@ -66,7 +66,7 @@ export function useCharacterRig(visible: boolean, value?: HeadRig, sourceKey?: s
       stop();
       document.removeEventListener("visibilitychange", reconcile);
     };
-  }, [visible, sourceKey, settings.enabled, settings.headTilt, settings.eyeMove, settings.hairSway,
+  }, [visible, sourceKey, settings.enabled, settings.faceEnabled, settings.headTilt, settings.eyeMove, settings.hairSway,
     settings.pivotX, settings.pivotY, settings.idle, settings.bodyMode, settings.upperBody, settings.lowerBody,
     settings.torso, settings.leftArm, settings.rightArm, settings.leftHand, settings.rightHand,
     settings.leftLeg, settings.rightLeg, settings.torsoPivotY, settings.lowerPivotY,

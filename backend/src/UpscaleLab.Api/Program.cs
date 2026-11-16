@@ -137,8 +137,9 @@ builder.Services.AddScoped<IGalleryThumbnailService, GalleryThumbnailService>();
 builder.Services.AddSingleton<GalleryThumbnailCache>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddHttpClient<UpscaleLab.Infrastructure.Payments.TossPaymentsClient>(
-    client => client.Timeout = TimeSpan.FromSeconds(30));
+    client => client.Timeout = TimeSpan.FromSeconds(30)).RemoveAllLoggers();
 builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.PaymentFulfillmentService>();
+builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.AccountBillingService>();
 builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.SubscriptionFulfillmentService>();
 builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.SubscriptionChargeClaimService>();
 builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.SubscriptionRenewalOrderService>();
@@ -148,7 +149,7 @@ builder.Services.AddHostedService<UpscaleLab.Api.BackgroundServices.PaymentRecov
 builder.Services.AddHostedService<UpscaleLab.Api.BackgroundServices.SubscriptionPaymentRecoveryWorker>();
 builder.Services.AddHostedService<UpscaleLab.Api.BackgroundServices.SubscriptionRenewalWorker>();
 builder.Services.AddHostedService<UpscaleLab.Api.BackgroundServices.SubscriptionExpirationWorker>();
-builder.Services.AddHttpClient<UpscaleLab.Infrastructure.Payments.TossBillingClient>(client => client.Timeout = TimeSpan.FromSeconds(90));
+builder.Services.AddHttpClient<UpscaleLab.Infrastructure.Payments.TossBillingClient>(client => client.Timeout = TimeSpan.FromSeconds(90)).RemoveAllLoggers();
 builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.BillingKeyProtector>();
 builder.Services.AddScoped<UpscaleLab.Infrastructure.Tokens.ITokenService, UpscaleLab.Infrastructure.Tokens.TokenService>();
 builder.Services.AddScoped<IProjectProcessingService, ProjectProcessingService>();

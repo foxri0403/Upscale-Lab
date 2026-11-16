@@ -62,6 +62,9 @@ internal sealed class CompanionController : IDisposable
         api = new AgentApi(server, requests) { Session = session, Device = binding };
         api.SessionChanged = Persist;
     }
+    internal bool CanRetryRestore => !restoreRejected && readCredentials() is { } saved && CompanionConfiguration.CanRestore(saved, Server);
+    private bool restoreRejected;
+
     public async Task Restore()
     {
         if (!privacyAccepted()) return;
@@ -72,11 +75,12 @@ internal sealed class CompanionController : IDisposable
             await api!.Call<Account>("/api/auth/me"); verified = true;
             LoadApplied(); await Enable(); await RefreshProfile();
         }
-        catch (Exception error) { Notify("자동 연결 대기: " + error.Message); }
+        catch (Exception error) { restoreRejected = error is ApiFailure { Status: 401 or 403 }; Notify("자동 연결 대기: " + error.Message); }
     }
     public async Task SignIn(string identifier, string password, bool automatic)
     {
         RequireConsent();
+        restoreRejected = false;
         await Stop(); verified = false; Monitors = []; Profile = null; Plan = "확인 중";
         Connection = ConnectionState.Connecting; Notify("로그인 중입니다.");
         var saved = readCredentials(); SetApi(Server, null, null);

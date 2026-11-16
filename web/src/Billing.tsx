@@ -376,29 +376,6 @@ export function Billing() {
     }
   }
 
-  async function cancelSubscription() {
-    if (subscriptionBusy) return;
-    if (!window.confirm(
-      "다음 결제일부터 구독이 갱신되지 않도록 예약할까요?"
-    )) return;
-
-    setSubscriptionBusy(true);
-    setError("");
-
-    try {
-      await post("/api/subscriptions/cancel", {});
-      setSubscriptionMessage(
-        "구독 해지가 예약되었습니다. 현재 이용 기간은 유지됩니다."
-      );
-    } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "구독 해지 실패"
-      );
-    } finally {
-      setSubscriptionBusy(false);
-    }
-  }
-
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const result = params.get("subscription");
@@ -672,18 +649,7 @@ export function Billing() {
           </div>
 
 
-          {wallet &&
-            ["Plus", "Pro"].includes(wallet.plan ?? "") && (
-              <div style={{ marginBottom: 25 }}>
-                <button
-                  type="button"
-                  disabled={subscriptionBusy}
-                  onClick={() => void cancelSubscription()}
-                >
-                  구독 해지 예약
-                </button>
-              </div>
-            )}
+          <p className="billing-account-note">구독 해지 및 환불은 <strong>내 계정</strong> 설정을 통해 이용하실 수 있습니다.</p>
 
 
           {wallet?.plan === "Free" && canTestPay && (

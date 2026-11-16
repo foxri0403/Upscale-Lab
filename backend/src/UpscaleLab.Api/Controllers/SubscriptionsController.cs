@@ -99,6 +99,8 @@ public sealed class SubscriptionsController(
         var encrypted = protector.Encrypt(
             result.BillingKey,
             subscription.CustomerKey);
+        var cardIssuer = result.Card?.IssuerCode;
+        var cardSuffix = result.Card?.NumberSuffix;
 
         // 동일 구독에 빌링키가 이미 저장됐다면 덮어쓰지 않는다.
         var updated = await db.UserSubscriptions
@@ -111,6 +113,8 @@ public sealed class SubscriptionsController(
                 .SetProperty(
                     x => x.BillingKeyCiphertext,
                     encrypted)
+                .SetProperty(x => x.CardIssuerCode, cardIssuer)
+                .SetProperty(x => x.CardNumberSuffix, cardSuffix)
                 .SetProperty(
                     x => x.UpdatedAt,
                     DateTime.UtcNow),

@@ -10,7 +10,9 @@ internal sealed class MainForm : Form
     private readonly TextBox password = new() { PlaceholderText = "비밀번호", UseSystemPasswordChar = true, BorderStyle = BorderStyle.None, Dock = DockStyle.Fill };
     private readonly CheckBox saveIdentifier = new() { Text = "아이디 저장", AutoSize = true, Margin = new(0, 8, 22, 8) };
     private readonly CheckBox remember = new() { Text = "자동 로그인", AutoSize = true, Margin = new(0, 8, 0, 8) };
-    private readonly CheckBox startup = new() { Text = "Windows 시작 시 실행", AutoSize = true, Anchor = AnchorStyles.Left };
+    private readonly CheckBox startup = new() { Text = "PC 부팅 시 실행", AutoSize = true, Anchor = AnchorStyles.Left };
+    private readonly CheckBox backgroundStartup = new() { Text = "백그라운드로 자동 실행", AutoSize = true, Anchor = AnchorStyles.Left };
+    private readonly System.Windows.Forms.Timer restoreTimer = new() { Interval = 30_000 };
     private readonly System.Windows.Forms.Timer playbackTimer = new() { Interval = 250 };
     private readonly DisplayPowerNotifications displayPower = new();
     private PlaybackRules playbackRules = PlaybackRules.Load();
@@ -28,6 +30,8 @@ internal sealed class MainForm : Form
     private readonly TableLayoutPanel connected = Stack();
     private readonly NotifyIcon tray = new() { Icon = AppBrand.Icon(), Text = "Upscale Lab Connect", Visible = true };
     private bool busy, quitting, loadingAvatar;
+    private StartupMode startupMode;
+    private bool changingStartup;
     private string? avatarUrl;
     private DateTime lastProfileRefresh;
 
@@ -45,7 +49,7 @@ internal sealed class MainForm : Form
     {
         controller = companion ?? new(); Text = CompanionConfiguration.AppName; Icon = AppBrand.Icon(); ShowIcon = false;
         Font = new("맑은 고딕", 10); AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new(1000, 660); MinimumSize = new(820, 540);
+        ClientSize = new(900, 460); MinimumSize = new(680, 360); AutoScroll = true;
         ForeColor = AppBrand.Ink; BackColor = AppBrand.Background; StartPosition = FormStartPosition.CenterScreen;
         var content = Stack(); content.Padding = new(24);
         var header = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, Height = 82, Margin = new(0, 0, 0, 10) };
@@ -72,7 +76,10 @@ internal sealed class MainForm : Form
         deviceContent.Controls.Add(Copy("연결된 화면", 13, true)); deviceContent.Controls.Add(screens);
         var deviceCard = new BrandPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new(14), CornerRadius = 2, Margin = new(0, 0, 0, 6) }; deviceCard.Controls.Add(deviceContent); connected.Controls.Add(deviceCard);
         var footer = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = new(0, 12, 0, 0) };
-        footer.ColumnStyles.Add(new(SizeType.Percent, 48)); footer.ColumnStyles.Add(new(SizeType.Percent, 52)); footer.Controls.Add(startup);
+        footer.ColumnStyles.Add(new(SizeType.Percent, 48)); footer.ColumnStyles.Add(new(SizeType.Percent, 52));
+        var startupOptions = Stack();
+        startupOptions.Controls.Add(startup); startupOptions.Controls.Add(backgroundStartup);
+        footer.Controls.Add(startupOptions);
         var actions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right, Margin = Padding.Empty };
         var privacy = new LinkLabel { Text = "수집 정보 안내", AutoSize = true, LinkColor = AppBrand.Muted, Margin = new(0, 14, 0, 0) };
         privacy.LinkClicked += (_, _) => MessageBox.Show(this, PrivacyConsent.Details, PrivacyConsent.Title);
@@ -87,26 +94,25 @@ internal sealed class MainForm : Form
             status.MaximumSize = new(width, 0); screens.MaximumSize = new(width - 48, 0);
             username.MaximumSize = email.MaximumSize = plan.MaximumSize = new(Math.Max(180, (int)(width * .43) - 90), 0);
         };
-        content.Layout += (_, _) => {
-            var requiredHeight = SizeFromClientSize(new Size(ClientSize.Width, content.Height)).Height;
-            var minimum = new Size(MinimumSize.Width, Math.Min(requiredHeight, Screen.FromControl(this).WorkingArea.Height));
-            if (MinimumSize != minimum) MinimumSize = minimum;
-        };
         identifier.Text = LoginPreferences.Current.Read(); saveIdentifier.Checked = identifier.Text.Length > 0;
         void SaveIdentity() { try { LoginPreferences.Current.Save(saveIdentifier.Checked, identifier.Text); } catch (Exception e) { status.Text = "아이디 저장 실패: " + e.Message; } }
         saveIdentifier.CheckedChanged += (_, _) => SaveIdentity(); identifier.Leave += (_, _) => SaveIdentity();
         login.Click += async (_, _) => await Operation(async () => { SaveIdentity(); try { await controller.SignIn(identifier.Text, password.Text, remember.Checked); } finally { password.Clear(); } });
-        logout.Click += async (_, _) => await Operation(async () => { await controller.Logout(); Startup(false); startup.Checked = false; identifier.Text = LoginPreferences.Current.Read(); });
-        using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")) startup.Checked = key?.GetValue("UpscaleLabConnect-" + CompanionConfiguration.ServerId) != null;
-        startup.CheckedChanged += (_, _) => { if (!busy) Startup(startup.Checked); };
+        logout.Click += async (_, _) => await Operation(async () => { await controller.Logout(); SaveStartup(StartupMode.Off); identifier.Text = LoginPreferences.Current.Read(); });
+        using (var key = Registry.CurrentUser.OpenSubKey(RunKey))
+            UpdateStartupChecks(key?.GetValue(StartupName) is string command
+                ? command.EndsWith(" --background", StringComparison.Ordinal) ? StartupMode.Background : StartupMode.Window
+                : StartupMode.Off);
+        startup.CheckedChanged += (_, _) => { if (!changingStartup) SaveStartup(startup.Checked ? StartupMode.Window : StartupMode.Off); };
+        backgroundStartup.CheckedChanged += (_, _) => { if (!changingStartup) SaveStartup(backgroundStartup.Checked ? StartupMode.Background : StartupMode.Off); };
+        restoreTimer.Tick += async (_, _) => await Operation(controller.Restore);
         controller.Changed += RefreshState; tray.DoubleClick += (_, _) => ShowMain();
         var menu = new ContextMenuStrip(); menu.Items.Add("열기", null, (_, _) => ShowMain());
-        menu.Items.Add("종료", null, async (_, _) => { quitting = true; var restore = controller.LoggedIn; await controller.Stop();
-            var saved = SecureStore.Read(); if (saved != null && saved.Remember) SecureStore.Write(saved with { Enabled = restore }); Close(); });
+        menu.Items.Add("종료", null, async (_, _) => await ExitAsync());
         tray.ContextMenuStrip = menu;
-        FormClosing += (_, e) => { SaveIdentity(); if (!quitting && controller.LoggedIn) { e.Cancel = true; Hide(); } };
-        FormClosed += (_, _) => { playbackTimer.Dispose(); var icon = tray.Icon; tray.Dispose(); icon?.Dispose(); avatar.Image?.Dispose(); controller.Dispose(); };
-        Shown += async (_, _) => { RoundWindow(); await Operation(controller.Restore); };
+        FormClosing += (_, e) => { SaveIdentity(); if (e.CloseReason == CloseReason.UserClosing && !quitting && controller.LoggedIn) { e.Cancel = true; Hide(); } };
+        FormClosed += (_, _) => { restoreTimer.Dispose(); playbackTimer.Dispose(); var icon = tray.Icon; tray.Dispose(); icon?.Dispose(); avatar.Image?.Dispose(); controller.Dispose(); };
+        Shown += (_, _) => RoundWindow();
         SizeChanged += (_, _) => { if (IsHandleCreated) RoundWindow(); };
         Activated += async (_, _) => { if (controller.LoggedIn && !busy && DateTime.UtcNow - lastProfileRefresh > TimeSpan.FromMinutes(1)) {
             lastProfileRefresh = DateTime.UtcNow; await controller.RefreshProfile(); } };
@@ -172,6 +178,30 @@ internal sealed class MainForm : Form
         base.WndProc(ref m);
     }
     internal void ShowMain() { if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal; Show(); Activate(); }
+    internal async Task ExitAsync()
+    {
+        if (quitting) return;
+        quitting = true;
+        restoreTimer.Stop();
+        try
+        {
+            var restore = controller.LoggedIn;
+            await controller.Stop();
+            if (SecureStore.Read() is { Remember: true } saved) SecureStore.Write(saved with { Enabled = restore });
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            // The last committed login state remains available for the next launch.
+        }
+        finally { Close(); }
+    }
+    internal async Task InitializeAsync(bool background)
+    {
+        _ = Handle;
+        if (!background) ShowMain();
+        await Operation(controller.Restore);
+        if (!controller.Enabled && controller.CanRetryRestore) restoreTimer.Start();
+    }
     private async Task Operation(Func<Task> operation) {
         if (busy) return; busy = true; RefreshState();
         try { await operation(); } catch (Exception error) { controller.ConnectionFailed(); status.Text = error.Message; }
@@ -184,7 +214,8 @@ internal sealed class MainForm : Form
         credentials.Visible = !controller.LoggedIn; connected.Visible = account.Visible = controller.LoggedIn;
         AcceptButton = controller.LoggedIn ? null : login;
         login.Enabled = identifier.Enabled = password.Enabled = remember.Enabled = saveIdentifier.Enabled = !busy;
-        logout.Enabled = startup.Enabled = !busy;
+        logout.Enabled = startup.Enabled = backgroundStartup.Enabled = !busy;
+        if (restoreTimer.Enabled && (controller.Enabled || !controller.CanRetryRestore)) restoreTimer.Stop();
         playbackTimer.Enabled = controller.LoggedIn;
         if (replaceStatus) status.Text = "";
         status.Visible = status.Text.Length > 0;
@@ -213,9 +244,39 @@ internal sealed class MainForm : Form
         if (Width > 40 && Height > 40) { using var outline = BrandPanel.Shape(new(0, 0, Width, Height), 14);
             var previous = Region; Region = new Region(outline); previous?.Dispose(); }
     }
-    private void Startup(bool enabled) {
-        using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-        var name = "UpscaleLabConnect-" + CompanionConfiguration.ServerId;
-        if (enabled) key.SetValue(name, $"\"{Environment.ProcessPath}\" --run"); else key.DeleteValue(name, false);
+    private enum StartupMode { Off, Window, Background }
+    private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private static string StartupName => "UpscaleLabConnect-" + CompanionConfiguration.ServerId;
+
+    private void SaveStartup(StartupMode mode)
+    {
+        if (mode == StartupMode.Background && !controller.CanRetryRestore)
+        {
+            UpdateStartupChecks(startupMode);
+            MessageBox.Show(this, "백그라운드에서 연결하려면 자동 로그인을 켜고 로그인해 주세요.", Text);
+            return;
+        }
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(RunKey);
+            if (mode == StartupMode.Off) key.DeleteValue(StartupName, false);
+            else key.SetValue(StartupName, $"\"{Environment.ProcessPath}\" --run" +
+                (mode == StartupMode.Background ? " --background" : ""));
+            UpdateStartupChecks(mode);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            UpdateStartupChecks(startupMode);
+            MessageBox.Show(this, "Windows 시작 설정을 저장하지 못했습니다.", Text);
+        }
+    }
+
+    private void UpdateStartupChecks(StartupMode mode)
+    {
+        startupMode = mode;
+        changingStartup = true;
+        startup.Checked = mode == StartupMode.Window;
+        backgroundStartup.Checked = mode == StartupMode.Background;
+        changingStartup = false;
     }
 }

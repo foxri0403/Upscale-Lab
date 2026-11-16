@@ -90,6 +90,14 @@ test("body fixed vs follow and independent upper/lower strength", () => {
   assert.equal(upperOnly.torso, 0); assert(upperOnly.leftLeg > 0);
 });
 
+test("face off holds facial and hair layers still while the body follows", () => {
+  const saved = normalizeRig({ enabled: true, faceEnabled: false, bodyMode: "follow" });
+  const result = rigTargets(1, 1, 1, 1, 1, saved);
+  for (const key of ["head", "eye", "shiftY", "eyeY", "front", "back"]) assert.equal(Math.abs(result[key]), 0);
+  assert(result.torso > 0 && result.leftLeg > 0);
+  assert.equal(normalizeRig({ enabled: true }).faceEnabled, true);
+});
+
 test("legacy rig saved without body properties defaults to fixed and sanitized assignments", () => {
   const old = normalizeRig({ enabled: true, headTilt: 60, partAssignments: { "id": "leftArm", "other": "notValid" } });
   assert.equal(old.bodyMode, "fixed");

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace UpscaleLab.Companion;
@@ -13,6 +14,58 @@ internal sealed class CompanionInstaller(string installDirectory, string startMe
         Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), CreateShortcut);
 
     internal bool IsInstalled(string source) => string.Equals(Path.GetFullPath(source), Path.GetFullPath(Executable), StringComparison.OrdinalIgnoreCase);
+
+    internal bool OpenOrUpgrade(string source)
+    {
+        if (IsInstalled(source) || !File.Exists(Executable)) return false;
+        if (ReadVersion(source) > ReadVersion(Executable))
+            ReplaceExecutable(source, StopInstalledInstance);
+        Process.Start(new ProcessStartInfo(Executable, "--run") { UseShellExecute = true });
+        return true;
+    }
+
+    private static Version ReadVersion(string path)
+    {
+        var info = FileVersionInfo.GetVersionInfo(path);
+        return new(info.FileMajorPart, info.FileMinorPart, info.FileBuildPart, info.FilePrivatePart);
+    }
+
+    internal void ReplaceExecutable(string source, Action stopInstalledInstance)
+    {
+        var candidate = Path.Combine(installDirectory, $".{Guid.NewGuid():N}.exe");
+        try
+        {
+            File.Copy(source, candidate);
+            stopInstalledInstance();
+            File.Move(candidate, Executable, overwrite: true);
+        }
+        finally { File.Delete(candidate); }
+    }
+
+    private void StopInstalledInstance()
+    {
+        using var current = Process.GetCurrentProcess();
+        using var activation = new InstanceActivation(InstanceActivation.Name);
+        foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(Executable)))
+        {
+            using (process)
+            {
+                if (process.Id == current.Id || process.HasExited || process.SessionId != current.SessionId) continue;
+                string? path;
+                try { path = process.MainModule?.FileName; }
+                catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception) { continue; }
+                if (path is null || !IsInstalled(path)) continue;
+                activation.RequestExit(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+                if (!process.WaitForExit(5000))
+                {
+                    // Versions that predate the update signal still save account state atomically.
+                    try { process.Kill(); }
+                    catch (InvalidOperationException) when (process.HasExited) { }
+                    if (!process.WaitForExit(5000)) throw new IOException("기존 앱이 종료되지 않았습니다.");
+                }
+            }
+        }
+    }
 
     internal string Install(string source, bool desktopShortcut, bool startMenuShortcut, bool privacyAccepted)
     {

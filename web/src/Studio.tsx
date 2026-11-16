@@ -732,7 +732,7 @@ export function Studio({ route }: { route: string }) {
             <p>레이어 겹침이 어색하다면 파츠를 직접 수정해보세요.</p>
           </div>}
           {isCharacterProject && <section className="studio-rig-controls" aria-label="기기별 Live2D 움직임 입력">
-            <h3>배경화면 움직임 입력</h3>
+            <h3>움직임 기능 적용</h3>
             <MotionInputButtons edit={edit} ready={!published && !busy && !processing}
               change={changeMotionInput} gyroPending={motion.gyroPending} toggleGyro={() => void toggleGyro()} />
           </section>}

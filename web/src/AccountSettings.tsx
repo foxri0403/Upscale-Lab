@@ -1,9 +1,10 @@
 import { useRef, useState, type FormEvent } from "react";
-import { UserRound } from "lucide-react";
+import { CreditCard, UserRound } from "lucide-react";
 import { type Session, updateDemoAccount } from "./auth";
 import { cloud, request } from "./api";
 import { Modal, Busy } from "./ui";
 import { passwordResetHelp, validatePasswordReset } from "./password-reset";
+import { AccountBilling } from "./AccountBilling";
 
 export type AccountProfile = { id: string; email: string; username: string; profileImageUrl: string | null };
 export const profileSession = (p: AccountProfile): Session => ({ id: p.id, email: p.email, name: p.username, avatarUrl: p.profileImageUrl || undefined });
@@ -26,6 +27,7 @@ export function AccountSettings({ session, updated, close, logout }: { session: 
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [photoOpen, setPhotoOpen] = useState(false);
+  const [billingOpen, setBillingOpen] = useState(false);
   const photoInput = useRef<HTMLInputElement>(null);
   const lock = useRef(false);
   async function run(action: () => Promise<void>) {
@@ -108,8 +110,11 @@ export function AccountSettings({ session, updated, close, logout }: { session: 
         <label className="account-delete-check"><input type="checkbox" required checked={accepted} onChange={e => setAccepted(e.target.checked)} />영구 삭제 안내를 확인했습니다.</label>
         <button type="submit" className="button danger" disabled={!accepted || deleteText !== "계정 삭제"}>{busy ? <Busy /> : null}계정 영구 삭제</button>
       </fieldset></form>
+      {cloud && <button type="button" className="button secondary account-billing-trigger" aria-haspopup="dialog"
+        disabled={busy} onClick={() => setBillingOpen(true)}><CreditCard size={18} /> 결제 정보</button>}
     </div>
   </Modal>
+    {billingOpen && <AccountBilling close={() => setBillingOpen(false)} />}
     {photoOpen && <Modal title="프로필 사진" close={() => { if (!lock.current) setPhotoOpen(false); }}>
       <div className="profile-photo-dialog" aria-busy={busy}>
         <div className="profile-photo-preview"><AccountAvatar session={session} large /></div>

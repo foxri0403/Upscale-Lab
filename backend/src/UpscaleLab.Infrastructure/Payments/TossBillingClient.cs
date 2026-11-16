@@ -8,7 +8,8 @@ namespace UpscaleLab.Infrastructure.Payments;
 
 public sealed record TossBillingKeyResult(
     string BillingKey,
-    string CustomerKey
+    string CustomerKey,
+    PaymentCard? Card = null
 );
 
 public sealed record TossBillingPaymentResult(
@@ -76,7 +77,8 @@ public sealed class TossBillingClient(
 
         var result = new TossBillingKeyResult(
             root.GetProperty("billingKey").GetString() ?? "",
-            root.GetProperty("customerKey").GetString() ?? ""
+            root.GetProperty("customerKey").GetString() ?? "",
+            PaymentCard.Read(root)
         );
 
         if (string.IsNullOrWhiteSpace(result.BillingKey) ||
