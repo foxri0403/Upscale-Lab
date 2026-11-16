@@ -1,13 +1,9 @@
-import { useEffect, useId, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { BatteryFull, Check, ChevronsLeftRight, MousePointer2, Signal, Smartphone } from "lucide-react";
+import { useEffect, useId, useState, type KeyboardEvent, type Ref } from "react";
+import { BatteryFull, Check, ChevronsLeftRight, MousePointer2, Repeat2, Signal, Smartphone } from "lucide-react";
 import { useParallax } from "./use-parallax";
 import { useCharacterRig } from "./use-character-rig";
-import { showcaseCharacter, showcaseRig } from "./showcase-character";
-import { PortraitMotion, portraitImage } from "./PortraitMotion";
+import { characterImage, portraitImage, portraitRig, showcaseCharacter, showcasePortrait, showcaseRig, type Live2DExample } from "./showcase-character";
 import { defaultDemoInput } from "./demo-input";
-
-const characterImage = "/images/live2d-character-v2.png";
-export type Live2DExample = "portrait" | "character";
 
 function currentDemoInput() {
   return defaultDemoInput(window.matchMedia("(pointer: coarse)").matches,
@@ -39,22 +35,62 @@ export function UpscaleDemo() {
   );
 }
 
+function ShowcaseArtwork({ example, layersRef, onError }: {
+  example: Live2DExample; layersRef: Ref<HTMLDivElement>; onError: () => void;
+}) {
+  const [loaded, setLoaded] = useState(0);
+  const neckOpening = `${useId()}-neck-opening`;
+  const portrait = example === "portrait";
+  const artwork = portrait ? showcasePortrait : showcaseCharacter;
+  const preparingPortrait = portrait && loaded < artwork.layers.length;
+
+  return <>
+    {!portrait && <div className="character-backdrop" aria-hidden="true"><span /></div>}
+    {preparingPortrait && <img className="demo-portrait-fallback" src={portraitImage} width={artwork.width} height={artwork.height}
+      alt="남성 인물 사진" loading="lazy" />}
+    <div className="demo-character-plane">
+      <div className={`demo-character-rig${portrait ? " demo-portrait-rig" : ""}`} ref={layersRef} role="img"
+        aria-hidden={preparingPortrait || undefined}
+        aria-label={portrait ? "얼굴·눈동자·머리카락 파츠가 독립적으로 움직이는 남성 인물"
+          : "얼굴·눈동자·머리카락 파츠가 독립적으로 움직이는 여성 캐릭터"}
+        style={{ aspectRatio: `${artwork.width} / ${artwork.height}`, visibility: preparingPortrait ? "hidden" : undefined }}>
+        {!portrait && <svg className="character-clip-defs" width="0" height="0" aria-hidden="true" focusable="false">
+          <defs><clipPath id={neckOpening} clipPathUnits="objectBoundingBox">
+            <path d="M0 0H1V.42H.572C.568 .435 .548 .442 .514 .442C.485 .442 .464 .436 .458 .42H0Z" />
+          </clipPath></defs>
+        </svg>}
+        {artwork.layers.map(layer => <img key={layer.file} src={layer.src} alt="" aria-hidden="true"
+          width={artwork.width} height={artwork.height} loading="lazy"
+          data-rig-part={layer.part} data-layer-name={layer.name}
+          style={{ zIndex: layer.renderOrder, clipPath: !portrait && layer.name === "neck" ? `url("#${neckOpening}")` : undefined }}
+          onLoad={portrait ? () => setLoaded(count => count + 1) : undefined} onError={onError} />)}
+      </div>
+    </div>
+  </>;
+}
+
+type MotionDemoProps = { variant: "subject" } |
+  { variant: "character"; example: Live2DExample; switchExample: () => void };
+
 /** The same calibrated mouse/gyro input as the editor, applied to prepared demo artwork. */
-export function MotionDemo({ variant, example = "character" }: { variant: "subject" | "character"; example?: Live2DExample }) {
+export function MotionDemo(props: MotionDemoProps) {
+  const { variant } = props;
+  const example = props.variant === "character" ? props.example : "character";
   const [input, setInput] = useState(currentDemoInput);
   const [sensorMissing, setSensorMissing] = useState(false);
   const [error, setError] = useState("");
   const [inView, setInView] = useState(false);
   const [reduced, setReduced] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const [keyboard, setKeyboard] = useState({ x: 0, y: 0 });
-  const [artworkError, setArtworkError] = useState(false);
+  const [failedExample, setFailedExample] = useState<Live2DExample>();
   const instruction = useId();
-  const neckOpening = `${useId()}-neck-opening`;
   const portrait = variant === "character" && example === "portrait";
+  const artworkError = failedExample === example;
   const title = variant === "character" ? (portrait ? "Live 2D 실사 인물" : "Live 2D 캐릭터") : "배경·피사체 분리";
   const moving = !reduced;
   const motion = useParallax(moving && inView, 85, input === "mouse", input === "gyro", variant, keyboard, true);
-  const rig = useCharacterRig(variant === "character" && !portrait && moving && inView && !artworkError, showcaseRig, example, motion.position);
+  const rig = useCharacterRig(variant === "character" && moving && inView && !artworkError,
+    portrait ? portraitRig : showcaseRig, example, motion.position);
 
   useEffect(() => {
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -124,7 +160,7 @@ export function MotionDemo({ variant, example = "character" }: { variant: "subje
   }, [input, motion.gyroReady, moving, inView]);
 
   function moveWithKeys(event: KeyboardEvent<HTMLDivElement>) {
-    if (!moving || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home"].includes(event.key)) return;
+    if (event.target !== event.currentTarget || !moving || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home"].includes(event.key)) return;
     event.preventDefault();
     if (event.key === "Home") { setKeyboard({ x: 0, y: 0 }); return; }
     const dx = event.key === "ArrowLeft" ? -.25 : event.key === "ArrowRight" ? .25 : 0;
@@ -148,32 +184,18 @@ export function MotionDemo({ variant, example = "character" }: { variant: "subje
               <div className="demo-subject-plane">
                 <img src="/images/fox-foreground.png" alt="마우스와 기울기에 따라 움직이는 여우 피사체" loading="lazy" />
               </div>
-            </> : portrait ? <PortraitMotion input={motion.position} active={moving && inView} /> : <>
-              <div className="character-backdrop" aria-hidden="true"><span /></div>
-              <div className="demo-character-plane">
-                <div className="demo-character-rig" ref={rig.layers} role="img" aria-label="얼굴·눈동자·머리카락 파츠가 독립적으로 움직이는 여성 캐릭터"
-                  style={{ aspectRatio: `${showcaseCharacter.width} / ${showcaseCharacter.height}` } as CSSProperties}>
-                  <svg className="character-clip-defs" width="0" height="0" aria-hidden="true" focusable="false">
-                    <defs><clipPath id={neckOpening} clipPathUnits="objectBoundingBox">
-                      <path d="M0 0H1V.42H.572C.568 .435 .548 .442 .514 .442C.485 .442 .464 .436 .458 .42H0Z" />
-                    </clipPath></defs>
-                  </svg>
-                  {showcaseCharacter.layers.map(layer => <img key={layer.file} src={layer.src} alt="" aria-hidden="true"
-                    width={showcaseCharacter.width} height={showcaseCharacter.height} loading="lazy"
-                    data-rig-part={layer.part} data-layer-name={layer.name}
-                    style={{ zIndex: layer.renderOrder, clipPath: layer.name === "neck" ? `url("#${neckOpening}")` : undefined }}
-                    onError={() => setArtworkError(true)} />)}
-                </div>
-              </div>
-            </>}
+            </> : <ShowcaseArtwork key={example} example={example} layersRef={rig.layers} onError={() => setFailedExample(example)} />}
           </div>
+          {props.variant === "character" && <button type="button" className="demo-example-toggle" onClick={props.switchExample}>
+            <Repeat2 size={17} aria-hidden="true" />{portrait ? "2D 캐릭터로 전환" : "실사 인물로 전환"}
+          </button>}
         </div>
         <p id={instruction} className="floating-label demo-motion-hint">
           <span className="motion-hint-desktop"><MousePointer2 size={16} /><span>마우스를 움직여 보세요.</span></span>
           <span className="motion-hint-mobile"><Smartphone size={16} /><span>핸드폰을 기울여서 자이로센서를 이용해 보세요.</span></span>
         </p>
       </div>
-      {variant === "character" && !portrait && artworkError && <p className="form-error" role="alert">캐릭터 파츠를 불러오지 못했어요. 페이지를 새로고침해 주세요.</p>}
+      {variant === "character" && artworkError && <p className="form-error" role="alert">이미지 파츠를 불러오지 못했어요. 페이지를 새로고침해 주세요.</p>}
       {status && <p className="demo-status" role="status">{status}</p>}
     </div>
   );

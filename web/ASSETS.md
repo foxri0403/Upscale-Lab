@@ -39,6 +39,6 @@ Live 2D 소개와 휴대폰 목업의 여성 버튜버 캐릭터는 별도의 �
 
 ## 실사 Live 2D 예시
 
-`public/images/live2d-portrait.jpg`는 소개 화면과 휴대폰 미리보기에 사용하는 남성 인물 사진이다. 내장 ImageGen으로 생성한 이미지를 JPEG로 저장했다. 소개 화면은 브라우저에서 고개·시선·머리카락 영역을 움직인다.
+`public/images/live2d-portrait.jpg`는 소개 화면과 휴대폰 미리보기에 사용하는 남성 인물 사진이다. 내장 ImageGen으로 생성한 이미지를 JPEG로 저장했다. 아래 프롬프트로 만든 원본에서 배경, 몸통, 얼굴, 눈동자, 눈꺼풀, 머리카락을 공통 1024 × 1536 크기의 PNG로 분리했다. 움직일 때 드러나는 배경과 목, 흰자 영역은 주변 픽셀로 보완했다. 실사와 캐릭터 예시는 같은 Live 2D 파츠 렌더러를 사용한다.
 
 > Photorealistic editorial studio portrait for an interactive Live 2D demo and Android wallpaper. Vertical 2:3 composition, centered straight-on head-and-shoulders photograph of a fictional Korean adult man in his late twenties, looking directly into the camera. Medium-short natural black hair with a center part, swept lightly to the sides so both eyebrows and eyes are fully visible. Clean-shaven face, softly closed lips, subtle confident expression, charcoal plum knit crew-neck. Entire top of hair and both shoulders in the frame, center hairline at x50%, top of hair at y14%, eye line near y39%, chin near y62%, shoulders in bottom third. Leave generous pale lavender-gray studio background around head and above the hair for a square crop. Soft diffuse natural studio light, realistic skin and hair texture, subtle background gradient. One human subject only, no text, props, logos, or borders.

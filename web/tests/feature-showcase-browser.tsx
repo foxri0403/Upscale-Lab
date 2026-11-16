@@ -66,26 +66,50 @@ element<HTMLButtonElement>("#run-tests").onclick = async () => {
     catch (error) { failed++; output.textContent += `FAIL ${name}: ${(error as Error).message}\n`; }
   }
   try {
-    await check("실사 인물 기본값과 휴대폰 미리보기 연동", async () => {
-      const options = element(".live2d-example-options");
-      const [portrait, character] = options.querySelectorAll("button");
+    await check("실사 파츠·전환 버튼·소개 문구·휴대폰 미리보기 연동", async () => {
       const phone = () => element<HTMLImageElement>(".phone-character-wallpaper > img");
       const demo = element(".character-demo .demo-stage");
+      const toggle = element<HTMLButtonElement>(".demo-stage .demo-example-toggle");
+      const copy = demo.closest(".feature-section")!.querySelector(".feature-copy")!;
+      const portrait = () => element(".demo-portrait-rig");
       demo.scrollIntoView({ block: "center" }); await frame();
-      const photo = element<HTMLImageElement>(".demo-portrait > img");
-      await photo.decode();
-      assert(portrait.getAttribute("aria-pressed") === "true", "portrait must be selected by default");
-      assert(photo.src === phone().src, "phone must match the portrait");
-      character.click();
-      await until(() => phone().src.endsWith("live2d-character-v2.png") && !!demo.querySelector(".demo-character-rig"), "character did not update both previews");
-      portrait.click();
-      await until(() => phone().src === photo.src && !!demo.querySelector(".demo-portrait"), "portrait did not restore both previews");
-      character.click();
-      await until(() => !!demo.querySelector(".demo-character-rig"), "character rig did not remount");
+      await until(() => getComputedStyle(portrait()).visibility === "visible", "portrait layers did not load");
+      assert(toggle.textContent === "2D 캐릭터로 전환", "portrait must be selected by default");
+      assert(phone().src.endsWith("live2d-portrait.jpg"), "phone must match the portrait");
+      assert(copy.textContent?.includes("인물 사진에") && copy.textContent.includes("머리카락은 고개가 기운 뒤"), "portrait copy missing");
+      const button = toggle.getBoundingClientRect(), stage = demo.getBoundingClientRect();
+      assert(stage.right - button.right < 20 && button.right < stage.right &&
+        button.top - stage.top < 20 && button.top > stage.top, "toggle is outside the image's upper-right corner");
+      const parts = Array.from(portrait().querySelectorAll<HTMLImageElement>("[data-rig-part]"));
+      assert(parts.length === 6 && parts.every(image => image.naturalWidth === 1024 && image.naturalHeight === 1536),
+        "the portrait must render six independent PNGs on a common canvas");
+      assert(!demo.querySelector("canvas"), "the portrait still uses a whole-image effect");
+
+      if (mode !== "denied") {
+        neutral(); await frame();
+        if (mobile) sensorMove(); else point(.95);
+        const transform = (name: string) => getComputedStyle(portrait().querySelector(`[data-layer-name="${name}"]`)!).transform;
+        await until(() => motionX("character") > 2 && transform("face") !== transform("irises") &&
+          transform("face") !== transform("hair"), "head, gaze and hair did not move independently");
+        assert(transform("face") === transform("eyelids"), "eyelids must follow the head");
+        assert(transform("background") === "none" && transform("body") === "none", "fixed portrait parts moved");
+        neutral();
+      }
+
+      toggle.click();
+      await until(() => phone().src.endsWith("live2d-character-v2.png") && !demo.querySelector(".demo-portrait-rig") &&
+        toggle.textContent === "실사 인물로 전환", "character did not update both previews");
+      assert(copy.textContent?.includes("나의 캐릭터에") && copy.textContent.includes("좋아하는 2D 캐릭터를 더 생생하게 만나 보세요."),
+        "original character copy missing");
+      toggle.click();
+      await until(() => phone().src.endsWith("live2d-portrait.jpg") && !!demo.querySelector(".demo-portrait-rig") &&
+        copy.textContent?.includes("인물 사진에") === true, "portrait did not restore the two previews and copy");
+      toggle.click();
+      await until(() => !!demo.querySelector(".demo-character-rig") && !demo.querySelector(".demo-portrait-rig"), "character rig did not remount");
     });
-    await check("호수 비교·기기 이미지 유지, 조작/파츠 버튼 제거, 항상 전체 합성", () => {
+    await check("호수·기기 이미지 유지, 전환 버튼 하나, 전체 캐릭터 파츠 합성", () => {
       assert(element<HTMLImageElement>(".compare-art > img").src === element<HTMLImageElement>(".mock-monitor > img").src, "lake must match monitor");
-      assert(document.querySelectorAll(".motion-demo button").length === 0, "demo controls remain");
+      assert(document.querySelectorAll(".motion-demo button").length === 1, "multiple motion demo controls");
       const parts = element(".demo-character-rig").querySelectorAll("img");
       assert(parts.length === 12, "real layer count");
       assert(Array.from(parts).every(part => getComputedStyle(part).visibility === "visible"), "hidden part");
@@ -192,6 +216,7 @@ element<HTMLButtonElement>("#run-tests").onclick = async () => {
     });
     await check("가로 스크롤 없음", () => assert(document.documentElement.scrollWidth <= document.documentElement.clientWidth, "horizontal overflow"));
   } finally {
+    if (!document.querySelector(".demo-portrait-rig")) element<HTMLButtonElement>(".demo-example-toggle").click();
     output.textContent += `\n${passed} passed, ${failed} failed (${mode})`;
     run.disabled = false; output.scrollIntoView({ block: "center" });
   }
