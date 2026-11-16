@@ -17,6 +17,7 @@ import android.os.Looper
 
 /** All API and image work is serialized. Invalidation is immediate, including during downloads. */
 internal object CompanionRuntime {
+    private class InactiveWallpaperScreen : IllegalStateException("배경화면을 적용할 화면을 먼저 열어 주세요.")
     private lateinit var context: Context
     private lateinit var store: CompanionStore
     private lateinit var api: CompanionApi
@@ -41,6 +42,7 @@ internal object CompanionRuntime {
     private var notifiedLiveId: String? = null
     private fun preferences() = CompanionPreferences(context)
     private fun currentOwner() = store.read().optJSONObject("session")?.optJSONObject("user")?.optString("id") ?: ""
+    private fun targetFlag(target: String?) = if (target == "Lock") WallpaperManager.FLAG_LOCK else WallpaperManager.FLAG_SYSTEM
     private fun liveEnabled() = currentOwner().isNotEmpty() && preferences().live(currentOwner())
     fun alarmsEnabled() = currentOwner().isNotEmpty() && preferences().alarms(currentOwner())
     private fun announce(text: String) { CompanionAlerts.show(context, alarmsEnabled(), text) }
@@ -112,9 +114,12 @@ internal object CompanionRuntime {
         val displays = CompanionInventoryAccess.read(CompanionPrivacy(context).accepted, allowed) {
             runCatching { CompanionInventory(context).read(applied(state)) }.getOrDefault(JSONArray())
         } ?: JSONArray()
-        val requiredFlag = if (pending?.optString("target") == "Lock") WallpaperManager.FLAG_LOCK else WallpaperManager.FLAG_SYSTEM
+        val waiting = pending
+        val requiredFlag = targetFlag(waiting?.optString("target"))
         val active = if (allowed) runCatching { CompanionInventory(context).activeFlags() and requiredFlag != 0 }.getOrDefault(false) else false
-        val needsSetup = allowed && LiveActivationPolicy.needsPicker(liveEnabled(), pending?.has("manifest") == true, active, lastLiveAttempt == pending?.optString("id"))
+        val currentScreen = (0 until displays.length()).map { displays.getJSONObject(it) }.firstOrNull { it.optBoolean("isPrimary") }
+        val needsSetup = allowed && waiting?.optString("nativeId") == currentScreen?.optString("nativeId") &&
+            LiveActivationPolicy.needsPicker(liveEnabled(), waiting?.has("manifest") == true, active, lastLiveAttempt == waiting?.optString("id"))
         return mapOf("server" to state.optString("server"), "account" to user?.optString("email"),
             "username" to (profile?.optString("username") ?: user?.optString("username")),
             "profileImageUrl" to profile?.optString("profileImageUrl")?.takeIf { it.startsWith("https://") }, "plan" to plan,
@@ -127,6 +132,8 @@ internal object CompanionRuntime {
             "osVersion" to (if (allowed) "Android ${Build.VERSION.RELEASE}" else ""), "displays" to (0 until displays.length()).map {
                 val item = displays.getJSONObject(it)
                 mapOf("name" to item.optString("name"), "width" to item.optInt("width"), "height" to item.optInt("height"),
+                    "active" to item.optBoolean("isPrimary"), "foldScreen" to CompanionFoldScreens.isFoldScreen(item.optString("nativeId")),
+                    "innerScreen" to (item.optString("nativeId") == CompanionFoldScreens.INNER),
                     "refreshRateHz" to item.optDouble("refreshRateHz").takeIf { hz -> hz.isFinite() }, "canApply" to item.optBoolean("canApplyWallpaper"))
             })
     }
@@ -193,13 +200,13 @@ internal object CompanionRuntime {
                         if (lastLiveAttempt == item.getString("id")) { done(mapOf("openLivePicker" to false), null); return@execute }
                         lastLiveAttempt = item.getString("id")
                         lease()
-                        context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putString("preview_manifest_path", path).commit()
+                        check(context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putString("preview_manifest_path", path).commit())
                         done(mapOf("openLivePicker" to true), null); return@execute
                     }
                     "completeLiveSetup" -> {
                         check(inventoryAllowed()) { "로그인이 필요합니다." }
-                        val required = if (pending?.optString("target") == "Lock") WallpaperManager.FLAG_LOCK else WallpaperManager.FLAG_SYSTEM
-                        if (CompanionInventory(context).activeFlags() and required == 0) {
+                        val required = targetFlag(pending?.optString("target"))
+                        if (arguments["accepted"] != true && CompanionInventory(context).activeFlags() and required == 0) {
                             preferences().setLive(currentOwner(), false)
                             context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putBoolean("companion_live_enabled", false).putLong("companion_valid_until", 0).apply()
                             message = "Live 2D 적용을 취소했습니다. 설정에서 다시 켤 수 있습니다."
@@ -266,13 +273,13 @@ internal object CompanionRuntime {
     }
     private fun requireLatest(command: JSONObject): JSONObject {
         val clear = command.optString("action", "Apply") == "Clear"
-        api.request("/api/agent/commands/${command.getString("id")}" + if (clear) "" else "/manifest", agent = true)
+        api.request("/api/agent/commands/${command.getString("id")}", agent = true)
         val state = api.request("/api/agent/state", agent = true) as JSONObject
         val displays = state.getJSONArray("displays")
         val display = (0 until displays.length()).map { displays.getJSONObject(it) }.firstOrNull {
             it.getString("id") == command.getString("displayId") && it.getBoolean("isConnected") && it.optBoolean("canApplyWallpaper", true)
         } ?: error("적용 대상 화면이 연결되어 있지 않습니다.")
-        require(display.getString("nativeId") == "android-built-in") { "외부 화면은 정보 조회만 지원합니다." }
+        if (display.getString("nativeId") != CompanionInventory(context).activeId()) throw InactiveWallpaperScreen()
         val assignments = display.getJSONArray("wallpapers")
         require((0 until assignments.length()).any {
             val item = assignments.getJSONObject(it)
@@ -280,6 +287,71 @@ internal object CompanionRuntime {
                 (if (clear) item.isNull("desiredAssetId") else item.optString("desiredAssetId") == command.getString("assetId"))
         }) { "최신 요청으로 변경되었습니다." }
         return display
+    }
+
+    private fun applyStatic(manager: WallpaperManager, flag: Int, manifest: File): Int {
+        val layer = JSONObject(manifest.readText()).getJSONArray("layers").getJSONObject(0)
+        val wallpaperId = File(manifest.parentFile, layer.getString("fileName")).inputStream().use { manager.setStream(it, null, true, flag) }
+        check(wallpaperId > 0 && manager.getWallpaperId(flag) == wallpaperId) { "Android 배경화면 적용을 확인하지 못했습니다." }
+        return wallpaperId
+    }
+
+    private fun selectLive(flag: Int, path: String) {
+        val prefs = context.getSharedPreferences("live_layer", Context.MODE_PRIVATE)
+        val key = CompanionLiveEngines.selectionKey(flag)
+        if (prefs.getString(key, null) == path) return
+        CompanionLiveEngines.reset(flag)
+        check(prefs.edit().putString(key, path).commit()) { "배경화면 선택을 저장하지 못했습니다." }
+    }
+
+    private fun restoreFoldScreen(state: JSONObject, all: JSONObject, saved: JSONObject, display: JSONObject,
+        commands: List<JSONObject>, inventory: CompanionInventory, epoch: Long) {
+        val screen = display.getString("nativeId")
+        val manager = WallpaperManager.getInstance(context)
+        val assignments = display.getJSONArray("wallpapers")
+        var deferred = false
+        var changed = false
+        for (index in 0 until assignments.length()) {
+            val assignment = assignments.getJSONObject(index)
+            val target = assignment.getString("target")
+            if (commands.any { it.optString("target") == target }) continue
+            val receipt = saved.optJSONObject(target) ?: continue
+            if (receipt.optLong("sequence", -1) != assignment.getLong("sequence")) continue
+            if (epoch != generation.get() || !running || inventory.activeId() != screen) return
+            val flag = targetFlag(target)
+            if (receipt.optBoolean("cleared")) {
+                if (!CompanionWallpaperRemoval.isCleared(receipt, manager.getWallpaperId(flag))) {
+                    manager.clear(flag)
+                    receipt.put("wallpaperId", manager.getWallpaperId(flag))
+                    changed = true
+                }
+                continue
+            }
+            if (receipt.optString("assetId") != assignment.optString("desiredAssetId")) continue
+            val manifest = File(receipt.getString("manifest"))
+            if (!manifest.isFile) continue
+            if (receipt.optString("mode") != "Live2D") {
+                if (receipt.optInt("wallpaperId") != manager.getWallpaperId(flag)) {
+                    receipt.put("wallpaperId", applyStatic(manager, flag, manifest))
+                    changed = true
+                }
+            } else if (inventory.activeFlags() and flag != 0 && liveEnabled()) {
+                selectLive(flag, manifest.path)
+            } else {
+                deferred = true
+                if (pending == null) {
+                    pending = JSONObject().put("id", receipt.getString("commandId")).put("assetId", receipt.getString("assetId"))
+                        .put("target", target).put("manifest", manifest.path).put("displayId", display.getString("id"))
+                        .put("sequence", receipt.getLong("sequence")).put("nativeId", screen).put("restoring", true)
+                    message = "이 화면에 저장된 동적 배경화면을 다시 적용하려면 Android 배경화면 선택을 확인해 주세요."
+                }
+            }
+        }
+        if (!deferred) all.put("_activeScreen", screen)
+        if (changed || !deferred) {
+            saveApplied(state, all)
+            inventoryDirty.set(true)
+        }
     }
     private fun poll() {
         val epoch = generation.get()
@@ -289,26 +361,49 @@ internal object CompanionRuntime {
             if (!verified) verifyAccount()
             if (epoch != generation.get() || !running) return
             observeInventory()
-            val state = store.read(); val saved = applied(state)
+            val state = store.read(); val all = applied(state)
             val inventory = CompanionInventory(context)
-            val remote = api.request("/api/agent/state", agent = true) as JSONObject
+            var remote = api.request("/api/agent/state", agent = true) as JSONObject
             if (inventoryDirty.getAndSet(false) || System.currentTimeMillis() >= nextHeartbeat) {
                 val body = JSONObject().put("revision", remote.getLong("inventoryRevision") + 1).put("osVersion", "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
                     .put("agentVersion", context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0.1")
                     .put("supportsLive2D", context.packageManager.hasSystemFeature("android.software.live_wallpaper"))
-                    .put("supportsLockScreen", true).put("supportsWallpaperRemoval", true).put("displays", inventory.read(saved))
-                try { api.request("/api/agent/heartbeat", "POST", body, agent = true); nextHeartbeat = System.currentTimeMillis() + 30000 }
+                    .put("supportsLockScreen", true).put("supportsWallpaperRemoval", true).put("displays", inventory.read(all))
+                try { remote = api.request("/api/agent/heartbeat", "POST", body, agent = true) as JSONObject; nextHeartbeat = System.currentTimeMillis() + 30000 }
                 catch (error: CompanionApiError) { if (error.status != 409) throw error }
             }
             if (epoch != generation.get() || !running) return
             lease()
-            val commands = api.request("/api/agent/commands", agent = true) as JSONArray
+            val queue = api.request("/api/agent/commands", agent = true) as JSONArray
             if (epoch != generation.get() || !running) return
             connectionState = "connected"
-            if (pending != null && !(0 until commands.length()).any { commands.getJSONObject(it).getString("id") == pending!!.getString("id") }) pending = null
-            for (i in 0 until commands.length()) {
+            val screen = inventory.activeId()
+            val displays = remote.getJSONArray("displays")
+            val display = (0 until displays.length()).map { displays.getJSONObject(it) }
+                .firstOrNull { it.optString("nativeId") == screen && it.optBoolean("isConnected") } ?: return
+            val commands = (0 until queue.length()).map { queue.getJSONObject(it) }
+                .filter { it.getString("displayId") == display.getString("id") }
+            val waiting = pending
+            if (waiting != null && (waiting.optString("nativeId") != screen ||
+                    (!waiting.optBoolean("restoring") && commands.none { it.getString("id") == waiting.optString("id") }))) pending = null
+            val saved = if (CompanionFoldScreens.isFoldScreen(screen))
+                all.optJSONObject(screen) ?: JSONObject().also { all.put(screen, it) } else all
+            if (CompanionFoldScreens.isFoldScreen(screen) && all.optString("_activeScreen") != screen)
+                restoreFoldScreen(state, all, saved, display, commands, inventory, epoch)
+            if (epoch != generation.get() || !running) return
+            val restoring = pending
+            if (restoring?.optBoolean("restoring") == true) {
+                val flag = targetFlag(restoring.optString("target"))
+                val path = restoring.getString("manifest")
+                if (commands.any { it.optString("target") == restoring.optString("target") }) pending = null
+                else if (liveEnabled() && inventory.activeFlags() and flag != 0) {
+                    try { requireLatest(restoring); selectLive(flag, path); pending = null }
+                    catch (error: CompanionApiError) { if (error.status !in listOf(404, 409)) throw error; pending = null }
+                }
+            }
+            for (command in commands) {
                 if (epoch != generation.get() || !running) return
-                val command = commands.getJSONObject(i); val id = command.getString("id"); var didApply = false
+                val id = command.getString("id"); var didApply = false
                 try {
                     val target = command.getString("target")
                     require(target in listOf("Home", "Lock")) { "지원하지 않는 배경화면 대상입니다." }
@@ -319,65 +414,70 @@ internal object CompanionRuntime {
                         val oldAsset = saved.optJSONObject(target)?.optString("assetId")
                         val manager = WallpaperManager.getInstance(context)
                         CompanionWallpaperRemoval.clear(screen, id, saved, AndroidWallpaperPlatform(context),
-                            { manager.getWallpaperId(screen.flags) }, { didApply = true }, { saveApplied(state, it) })
+                            { manager.getWallpaperId(screen.flags) }, { didApply = true }, {
+                                saved.put(target, it.getJSONObject(target).put("sequence", command.getLong("sequence")))
+                                saveApplied(state, all)
+                            })
                         if (pending?.optString("target") == target) pending = null
-                        if (!oldAsset.isNullOrBlank() && listOf("Home", "Lock").none { saved.optJSONObject(it)?.optString("assetId") == oldAsset })
+                        val panels = listOfNotNull(all, all.optJSONObject(CompanionFoldScreens.COVER), all.optJSONObject(CompanionFoldScreens.INNER))
+                        if (!oldAsset.isNullOrBlank() && panels.none { panel -> listOf("Home", "Lock").any { panel.optJSONObject(it)?.optString("assetId") == oldAsset } })
                             runCatching { CompanionCache(context).delete(owner(state), state.getString("server"), oldAsset) }
                         api.report(id, "Applied"); message = "배경화면 삭제 완료."; nextHeartbeat = 0
                         continue
                     }
                     require(command.optString("action", "Apply") == "Apply") { "지원하지 않는 명령입니다." }
-                    api.report(id, "Downloading")
+                    if (command.optString("status") == "Pending") api.report(id, "Downloading")
                     val manifest = api.request("/api/agent/commands/$id/manifest", agent = true) as JSONObject
                     require(manifest.getString("assetId") == command.getString("assetId")) { "결과물 정보가 일치하지 않습니다." }
                     val local = CompanionCache(context).download(owner(state), state.getString("server"), manifest)
                     requireLatest(command)
                     if (epoch != generation.get() || !running) return
-                    val flag = if (target == "Home") WallpaperManager.FLAG_SYSTEM else WallpaperManager.FLAG_LOCK
+                    val flag = targetFlag(target)
                     val manager = WallpaperManager.getInstance(context); val mode = manifest.getString("mode")
                     val old = saved.optJSONObject(target)
-                    val screens = inventory.read(saved)
+                    val screens = inventory.read(all)
                     val reports = (0 until screens.length()).map { screens.getJSONObject(it) }.firstOrNull { it.optBoolean("isPrimary") }?.optJSONArray("wallpapers") ?: JSONArray()
                     val already = old?.optString("commandId") == id && (0 until reports.length()).any {
                         val report = reports.getJSONObject(it); report.optString("target") == target && report.optString("observation") == "Managed"
                     }
                     if (!already && mode == "Static") {
-                        val file = File(local.parentFile, JSONObject(local.readText()).getJSONArray("layers").getJSONObject(0).getString("fileName"))
-                        val wallpaperId = file.inputStream().use { manager.setStream(it, null, true, flag) }
-                        check(wallpaperId > 0 && manager.getWallpaperId(flag) == wallpaperId) { "Android 배경화면 적용을 확인하지 못했습니다." }
+                        val wallpaperId = applyStatic(manager, flag, local)
                         didApply = true
-                        saved.put(target, JSONObject().put("assetId", command.getString("assetId")).put("commandId", id).put("mode", mode).put("manifest", local.absolutePath).put("wallpaperId", wallpaperId))
-                        saveApplied(state, saved)
+                        saved.put(target, JSONObject().put("assetId", command.getString("assetId")).put("commandId", id)
+                            .put("sequence", command.getLong("sequence")).put("mode", mode).put("manifest", local.absolutePath).put("wallpaperId", wallpaperId))
+                        saveApplied(state, all)
                     } else if (!already && mode == "Live2D") {
-                        pending = JSONObject(command.toString()).put("manifest", local.absolutePath)
-                        if (!liveEnabled()) {
-                            api.report(id, "NeedsUserAction"); message = "설정에서 Live 2D를 켜면 적용됩니다."; continue
+                        if (!liveEnabled() || inventory.activeFlags() and flag == 0) {
+                            if (pending == null || pending?.optString("id") == id)
+                                pending = JSONObject(command.toString()).put("manifest", local.absolutePath).put("nativeId", screen)
+                            if (notifiedLiveId != id) { notifiedLiveId = id; announce("동적 배경화면을 적용하려면 연결 앱에서 시스템 적용을 확인해 주세요.") }
+                            if (command.optString("status") != "NeedsUserAction") api.report(id, "NeedsUserAction")
+                            message = "연결 앱 설정에서 Live 2D를 켜고 Android 배경화면 선택을 확인해 주세요."
+                            continue
                         }
-                        if (inventory.activeFlags() and flag == 0) {
-                            if (notifiedLiveId != id) { notifiedLiveId = id; announce("Live 2D를 적용하려면 연결 앱을 열어 시스템 적용을 확인해 주세요.") }
-                            api.report(id, "NeedsUserAction"); message = "설정에서 Live 2D를 켜고 시스템 적용을 확인해 주세요."; continue
-                        }
-                        val prefs = context.getSharedPreferences("live_layer", Context.MODE_PRIVATE)
-                        if (prefs.getString("direct_manifest_path", null) != local.absolutePath)
-                            check(prefs.edit().putString("manifest_path", local.absolutePath).putString("direct_manifest_path", local.absolutePath).commit())
-                        if (prefs.getString("companion_rendered_manifest", null) != local.absolutePath) {
-                            api.report(id, "NeedsUserAction"); message = "Live 2D 화면이 표시되기를 기다리고 있습니다."; continue
+                        selectLive(flag, local.absolutePath)
+                        if (!CompanionLiveEngines.hasRendered(flag, local.absolutePath)) {
+                            if (command.optString("status") != "NeedsUserAction") api.report(id, "NeedsUserAction")
+                            message = "선택한 홈 또는 잠금 화면을 열면 동적 배경화면이 적용됩니다."
+                            continue
                         }
                         didApply = true
-                        saved.put(target, JSONObject().put("assetId", command.getString("assetId")).put("commandId", id).put("mode", mode).put("manifest", local.absolutePath))
-                        saveApplied(state, saved); pending = null
+                        saved.put(target, JSONObject().put("assetId", command.getString("assetId")).put("commandId", id)
+                            .put("sequence", command.getLong("sequence")).put("mode", mode).put("manifest", local.absolutePath))
+                        saveApplied(state, all)
+                        if (pending?.optString("id") == id) pending = null
                     }
                     didApply = true; api.report(id, "Applied"); message = "배경화면 적용 완료. 웹의 기기 관리에서 확인할 수 있습니다."; announce("배경화면을 적용했습니다."); nextHeartbeat = 0
                 } catch (error: Exception) {
                     if (epoch != generation.get() || !running) return
                     if (error is CompanionApiError && error.status == 401) throw error
-                    if (error is CompanionApiError && error.status in listOf(404, 409)) continue
+                    if (error is InactiveWallpaperScreen || error is CompanionApiError && error.status in listOf(404, 409)) continue
                     if (error is java.io.IOException || error is CompanionApiError) connectionState = "disconnected"
                     if (!didApply && error !is java.io.IOException) runCatching { api.report(id, "Failed", error.message) }
                     message = if (didApply) "적용 결과 보고를 다시 시도합니다." else error.message ?: "배경화면 적용에 실패했습니다."
                 }
             }
-            if (commands.length() == 0) message = "연결됨 · 웹의 새 배경화면 요청을 기다리고 있습니다."
+            if (commands.isEmpty() && pending == null) message = "연결됨 · 웹의 새 배경화면 요청을 기다리고 있습니다."
         } catch (error: Exception) {
             if (epoch != generation.get() || !running) return
             connectionState = "disconnected"

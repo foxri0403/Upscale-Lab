@@ -1,7 +1,13 @@
 package com.livelayer.app
 
 import android.content.SharedPreferences
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.app.ActivityManager
+import android.app.KeyguardManager
+import android.app.WallpaperManager
 import android.app.wallpaper.WallpaperDescription
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -13,6 +19,7 @@ import android.os.Looper
 import android.os.Build
 import android.os.PersistableBundle
 import androidx.annotation.RequiresApi
+import androidx.core.content.ContextCompat
 import android.service.wallpaper.WallpaperService
 import android.util.Log
 import android.view.SurfaceHolder
@@ -42,6 +49,10 @@ class LiveLayerWallpaperService : WallpaperService() {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         private var loadedManifest: String? = null
         private var previewManifest: String? = null
+        private var renderingTarget = WallpaperManager.FLAG_SYSTEM
+        private val keyguardChanges = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) { lifecycle.selectionChanged() }
+        }
         private var tiltX = 0f
         private var tiltY = 0f
         private var targetTiltX = 0f
@@ -97,9 +108,29 @@ class LiveLayerWallpaperService : WallpaperService() {
                 choreographer.removeFrameCallback(frame); frameScheduled = false; lastFrameNanos = 0L
             })
 
+        private fun flags() = if (Build.VERSION.SDK_INT >= 34) wallpaperFlags else WallpaperManager.FLAG_SYSTEM
+
+        private fun currentTarget(): Int {
+            val flags = flags()
+            if (flags == WallpaperManager.FLAG_LOCK) return WallpaperManager.FLAG_LOCK
+            if (!(getSystemService(KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked) return WallpaperManager.FLAG_SYSTEM
+            val sharedLock = flags and WallpaperManager.FLAG_LOCK != 0 ||
+                (Build.VERSION.SDK_INT < 34 && WallpaperManager.getInstance(this@LiveLayerWallpaperService)
+                    .getWallpaperId(WallpaperManager.FLAG_LOCK) < 0)
+            return if (sharedLock) WallpaperManager.FLAG_LOCK else WallpaperManager.FLAG_SYSTEM
+        }
+
         override fun onCreate(holder: SurfaceHolder) {
             super.onCreate(holder)
             if (isPreview) previewManifest = preferences.getString("preview_manifest_path", null)
+            else {
+                CompanionLiveEngines.attach(this, flags())
+                ContextCompat.registerReceiver(this@LiveLayerWallpaperService, keyguardChanges, IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_ON)
+                    addAction(Intent.ACTION_SCREEN_OFF)
+                    addAction(Intent.ACTION_USER_PRESENT)
+                }, ContextCompat.RECEIVER_NOT_EXPORTED)
+            }
             preferences.registerOnSharedPreferenceChangeListener(this)
             handler.postDelayed(leaseCheck, 15000)
         }
@@ -112,9 +143,18 @@ class LiveLayerWallpaperService : WallpaperService() {
                 if (authorized() && lifecycle.visible && motionEnabled) sensor.start() else { sensor.stop(); tiltX = 0f; tiltY = 0f }
                 scheduleDraw()
             }
-            if ((key == "manifest_path" || key == "direct_manifest_path") && !isPreview) {
+            if ((key == "manifest_path" || key == "direct_manifest_path" ||
+                    key == CompanionLiveEngines.selectionKey(WallpaperManager.FLAG_SYSTEM) ||
+                    key == CompanionLiveEngines.selectionKey(WallpaperManager.FLAG_LOCK)) && !isPreview) {
                 lifecycle.selectionChanged()
             }
+        }
+
+        @RequiresApi(34)
+        override fun onWallpaperFlagsChanged(which: Int) {
+            super.onWallpaperFlagsChanged(which)
+            if (!isPreview) CompanionLiveEngines.attach(this, which)
+            lifecycle.selectionChanged()
         }
 
         override fun onVisibilityChanged(isVisible: Boolean) {
@@ -144,6 +184,10 @@ class LiveLayerWallpaperService : WallpaperService() {
 
         override fun onDestroy() {
             lifecycle.destroy()
+            if (!isPreview) {
+                CompanionLiveEngines.detach(this)
+                unregisterReceiver(keyguardChanges)
+            }
             handler.removeCallbacks(leaseCheck)
             preferences.unregisterOnSharedPreferenceChangeListener(this)
             recycle()
@@ -168,13 +212,17 @@ class LiveLayerWallpaperService : WallpaperService() {
 
         private fun loadActiveProject(width: Int, height: Int) {
             if (width <= 0 || height <= 0) return
+            renderingTarget = if (isPreview) WallpaperManager.FLAG_SYSTEM else currentTarget()
             val base = (if (isPreview) previewManifest else describedManifest)
                 ?: preferences.getString("manifest_path", null)
             val direct = if (isPreview) null else preferences.getString("direct_manifest_path", null)
             fun revision(path: String?): Long = path?.let {
                 runCatching { JSONObject(File(it).readText()).optLong("selectionRevision", 0) }.getOrDefault(0)
             } ?: 0
-            val path = LiveWallpaperSelection.choose(base, revision(base), direct, revision(direct)) ?: return
+            val selection = if (isPreview) null else preferences.getString(CompanionLiveEngines.selectionKey(renderingTarget), null)
+                ?: (if (renderingTarget == WallpaperManager.FLAG_LOCK && flags() != WallpaperManager.FLAG_LOCK)
+                    preferences.getString(CompanionLiveEngines.selectionKey(WallpaperManager.FLAG_SYSTEM), null) else null)
+            val path = selection ?: LiveWallpaperSelection.choose(base, revision(base), direct, revision(direct)) ?: return
             if (loadedManifest == path) return
             recycle()
             loadedManifest = path // Retry failed content only when a new snapshot is selected.
@@ -325,10 +373,9 @@ class LiveLayerWallpaperService : WallpaperService() {
                 post = { if (Build.VERSION.SDK_INT >= 26) surfaceHolder.unlockCanvasAndPost(it)
                     else drawingSurface.unlockCanvasAndPost(it) },
                 failed = { Log.w("Live2D", "Wallpaper surface changed while drawing", it) })
-            if (rendered && layers.isNotEmpty() && agent && !isPreview && authorized() && preferences.getString("companion_rendered_manifest", null) != loadedManifest) {
-                preferences.edit().putString("companion_rendered_manifest", loadedManifest).apply()
-                CompanionRuntime.pollSoon()
-            }
+            val path = loadedManifest
+            if (rendered && layers.isNotEmpty() && agent && !isPreview && authorized() && path != null &&
+                CompanionLiveEngines.rendered(this, renderingTarget, path)) CompanionRuntime.pollSoon()
         }
 
         private fun drawBitmap(canvas: Canvas, bitmap: Bitmap, x: Float, y: Float, rotation: Float, layerScale: Float,

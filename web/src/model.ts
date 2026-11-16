@@ -106,6 +106,7 @@ export type Display = {
   removing?: boolean;
   connected: boolean;
   nativeId?: string;
+  foldPanel?: "cover" | "inner";
   target?: string;
   refreshRateHz?: number | null;
   canApplyWallpaper?: boolean;

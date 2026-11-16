@@ -16,6 +16,10 @@ const devices = [
   { id: "pc", name: "내 PC", platform: "Windows", displays: [display("monitor-1", 2560, 1440, 1.5), display("monitor-2", 1920, 1080, 1, false)] },
   { id: "phone", name: "내 휴대폰", platform: "Android", displays: [display("phone-screen", 1080, 2400, 3)] },
   { id: "tablet", name: "내 태블릿", platform: "Android", displays: [display("tablet-screen", 2560, 1600, 2)] },
+  ...(new URLSearchParams(location.search).has("fold") ? [{ id: "fold", name: "폴더블 휴대폰", platform: "Android", displays: [
+    { ...display("cover", 1080, 2400, 3), nativeId: "android-fold-cover", name: "외부 화면" },
+    { ...display("inner", 1812, 2176, 2.75, false), nativeId: "android-fold-inner", name: "내부 화면" },
+  ] }] : []),
 ].map((d, i) => ({ ...d, deviceName: d.name, osVersion: d.platform === "Windows" ? "Windows 11" : "Android", isLinked: true,
   recentlySeen: true, supportsWallpaperRemoval: true, createdAt: `2026-11-03T00:00:0${i}Z` }));
 const nativeFetch = window.fetch.bind(window);

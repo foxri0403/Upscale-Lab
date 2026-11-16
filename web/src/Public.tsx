@@ -16,7 +16,7 @@ import {
   signIn,
   type Session,
 } from "./auth";
-import { DeviceShowcase, MotionDemo, UpscaleDemo } from "./FeatureDemos";
+import { DeviceShowcase, MotionDemo, UpscaleDemo, type Live2DExample } from "./FeatureDemos";
 import { cloud, cloudLogin } from "./api";
 import { SignupForm } from "./SignupForm";
 import { AccountRecovery, type RecoveryMode } from "./AccountRecovery";
@@ -56,6 +56,7 @@ export function PublicHeader() {
   );
 }
 export function Landing() {
+  const [example, setExample] = useState<Live2DExample>("portrait");
   return (
     <div className="landing">
       <section className="hero">
@@ -178,16 +179,13 @@ export function Landing() {
           <div className="feature-copy">
             <span className="eyebrow">04 — LIVE 2D</span>
             <h2>
-              나의 캐릭터에,
+              인물 사진에,
               <br />
               작은 움직임을.
             </h2>
             <p>
-              좋아하는 2D 캐릭터를 더 생생하게 만나 보세요.
-              <br />
-              얼굴과 눈동자, 머리카락을 각각 분리해
-              <br />
-              고개와 시선이 자연스럽게 움직입니다.
+              인물 사진에 고개와 시선이 따라오는 움직임을 더해 보세요.
+              <br />2D 캐릭터로 바꿔 같은 효과를 체험할 수 있어요.
             </p>
             <div className="feature-points">
               <span>파츠별 움직임</span>
@@ -195,7 +193,15 @@ export function Landing() {
               <span>자이로 센서 반응</span>
             </div>
           </div>
-          <MotionDemo variant="character" />
+          <div className="live2d-example">
+            <div className="live2d-example-options" role="group" aria-label="Live 2D 예시 선택">
+              <button type="button" className="button secondary small" aria-pressed={example === "portrait"}
+                onClick={() => setExample("portrait")}>실사 인물</button>
+              <button type="button" className="button secondary small" aria-pressed={example === "character"}
+                onClick={() => setExample("character")}>2D 캐릭터</button>
+            </div>
+            <MotionDemo variant="character" example={example} />
+          </div>
         </section>
         <section className="feature-section">
           <div className="feature-copy">
@@ -218,7 +224,7 @@ export function Landing() {
               </span>
             </div>
           </div>
-          <DeviceShowcase />
+          <DeviceShowcase example={example} />
         </section>
       </div>
     </div>

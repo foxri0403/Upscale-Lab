@@ -66,6 +66,23 @@ element<HTMLButtonElement>("#run-tests").onclick = async () => {
     catch (error) { failed++; output.textContent += `FAIL ${name}: ${(error as Error).message}\n`; }
   }
   try {
+    await check("실사 인물 기본값과 휴대폰 미리보기 연동", async () => {
+      const options = element(".live2d-example-options");
+      const [portrait, character] = options.querySelectorAll("button");
+      const phone = () => element<HTMLImageElement>(".phone-character-wallpaper > img");
+      const demo = element(".character-demo .demo-stage");
+      demo.scrollIntoView({ block: "center" }); await frame();
+      const photo = element<HTMLImageElement>(".demo-portrait > img");
+      await photo.decode();
+      assert(portrait.getAttribute("aria-pressed") === "true", "portrait must be selected by default");
+      assert(photo.src === phone().src, "phone must match the portrait");
+      character.click();
+      await until(() => phone().src.endsWith("live2d-character-v2.png") && !!demo.querySelector(".demo-character-rig"), "character did not update both previews");
+      portrait.click();
+      await until(() => phone().src === photo.src && !!demo.querySelector(".demo-portrait"), "portrait did not restore both previews");
+      character.click();
+      await until(() => !!demo.querySelector(".demo-character-rig"), "character rig did not remount");
+    });
     await check("호수 비교·기기 이미지 유지, 조작/파츠 버튼 제거, 항상 전체 합성", () => {
       assert(element<HTMLImageElement>(".compare-art > img").src === element<HTMLImageElement>(".mock-monitor > img").src, "lake must match monitor");
       assert(document.querySelectorAll(".motion-demo button").length === 0, "demo controls remain");

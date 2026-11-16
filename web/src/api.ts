@@ -305,6 +305,7 @@ export type CloudState = {
   supportsWallpaperRemoval?: boolean;
   displays: {
     id: string;
+    nativeId?: string;
     name: string;
     width: number;
     height: number;

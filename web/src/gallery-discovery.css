@@ -282,6 +282,8 @@ summary.image-tag-trigger::-webkit-details-marker { display: none; }
 .wallpaper-apply-dialog > .wallpaper-motion-status { margin: 6px 0; }
 .wallpaper-apply-dialog > .notice { margin-top: 12px; }
 @media (max-width: 600px) {
+  .explore-recommendations-rail { overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
+  .explore-recommendation { width: 100%; height: auto; max-height: min(62svh, 490px); scroll-snap-align: start; }
   .gallery-toolbar .tag-selection-footer { flex-wrap: wrap; }
   .wallpaper-fit-options .button { flex-basis: 100px; font-size: .82rem; }
   .wallpaper-frame-settings label:has(input[type="range"]) { gap: 4px; }

@@ -3,9 +3,11 @@ import { BatteryFull, Check, ChevronsLeftRight, MousePointer2, Signal, Smartphon
 import { useParallax } from "./use-parallax";
 import { useCharacterRig } from "./use-character-rig";
 import { showcaseCharacter, showcaseRig } from "./showcase-character";
+import { PortraitMotion, portraitImage } from "./PortraitMotion";
 import { defaultDemoInput } from "./demo-input";
 
 const characterImage = "/images/live2d-character-v2.png";
+export type Live2DExample = "portrait" | "character";
 
 function currentDemoInput() {
   return defaultDemoInput(window.matchMedia("(pointer: coarse)").matches,
@@ -38,7 +40,7 @@ export function UpscaleDemo() {
 }
 
 /** The same calibrated mouse/gyro input as the editor, applied to prepared demo artwork. */
-export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
+export function MotionDemo({ variant, example = "character" }: { variant: "subject" | "character"; example?: Live2DExample }) {
   const [input, setInput] = useState(currentDemoInput);
   const [sensorMissing, setSensorMissing] = useState(false);
   const [error, setError] = useState("");
@@ -48,10 +50,11 @@ export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
   const [artworkError, setArtworkError] = useState(false);
   const instruction = useId();
   const neckOpening = `${useId()}-neck-opening`;
-  const title = variant === "character" ? "Live 2D 캐릭터" : "배경·피사체 분리";
+  const portrait = variant === "character" && example === "portrait";
+  const title = variant === "character" ? (portrait ? "Live 2D 실사 인물" : "Live 2D 캐릭터") : "배경·피사체 분리";
   const moving = !reduced;
   const motion = useParallax(moving && inView, 85, input === "mouse", input === "gyro", variant, keyboard, true);
-  const rig = useCharacterRig(variant === "character" && moving && inView && !artworkError, showcaseRig, variant, motion.position);
+  const rig = useCharacterRig(variant === "character" && !portrait && moving && inView && !artworkError, showcaseRig, example, motion.position);
 
   useEffect(() => {
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -145,7 +148,7 @@ export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
               <div className="demo-subject-plane">
                 <img src="/images/fox-foreground.png" alt="마우스와 기울기에 따라 움직이는 여우 피사체" loading="lazy" />
               </div>
-            </> : <>
+            </> : portrait ? <PortraitMotion input={motion.position} active={moving && inView} /> : <>
               <div className="character-backdrop" aria-hidden="true"><span /></div>
               <div className="demo-character-plane">
                 <div className="demo-character-rig" ref={rig.layers} role="img" aria-label="얼굴·눈동자·머리카락 파츠가 독립적으로 움직이는 여성 캐릭터"
@@ -170,13 +173,14 @@ export function MotionDemo({ variant }: { variant: "subject" | "character" }) {
           <span className="motion-hint-mobile"><Smartphone size={16} /><span>핸드폰을 기울여서 자이로센서를 이용해 보세요.</span></span>
         </p>
       </div>
-      {variant === "character" && artworkError && <p className="form-error" role="alert">캐릭터 파츠를 불러오지 못했어요. 페이지를 새로고침해 주세요.</p>}
+      {variant === "character" && !portrait && artworkError && <p className="form-error" role="alert">캐릭터 파츠를 불러오지 못했어요. 페이지를 새로고침해 주세요.</p>}
       {status && <p className="demo-status" role="status">{status}</p>}
     </div>
   );
 }
 
-export function DeviceShowcase() {
+export function DeviceShowcase({ example }: { example: Live2DExample }) {
+  const portrait = example === "portrait";
   return (
     <div className="devices-art showcase-devices">
       <div className="mock-monitor">
@@ -188,8 +192,8 @@ export function DeviceShowcase() {
         <span className="tablet-camera" aria-hidden="true" />
       </div>
       <div className="mock-phone android-phone">
-        <div className="phone-character-wallpaper">
-          <img src={characterImage} alt="Live 2D 버튜버 캐릭터 배경화면이 적용된 휴대폰" width="1024" height="1536" loading="lazy" />
+        <div className={`phone-character-wallpaper${portrait ? " phone-portrait-wallpaper" : ""}`}>
+          <img src={portrait ? portraitImage : characterImage} alt={portrait ? "Live 2D 실사 인물 배경화면이 적용된 휴대폰" : "Live 2D 캐릭터 배경화면이 적용된 휴대폰"} width="1024" height="1536" loading="lazy" />
         </div>
         <div className="phone-punch-hole" aria-hidden="true" />
         <div className="android-status-bar" aria-hidden="true"><span>5G</span><Signal size={9} /><BatteryFull size={10} /></div>

@@ -131,7 +131,8 @@ export function Devices() {
         <div className="device-grid">
           {registeredDevices(library.devices).map((device) => {
             const mobile = device.platform === "Android";
-            const tablet = mobile && device.formFactor === "tablet";
+            const foldable = mobile && device.displays.some(display => display.foldPanel);
+            const tablet = mobile && !foldable && device.formFactor === "tablet";
             const DeviceIcon = tablet ? Tablet : mobile ? Smartphone : Monitor;
             const connection = device.connection ?? (device.online ? "connected" : "disconnected");
             const displayConnection = device.displays.some(display => display.connected) ? connection : "disconnected";
@@ -140,7 +141,7 @@ export function Devices() {
             return (
               <article
                 key={device.id}
-                className={`device-card ${mobile ? "mobile-device" : "pc-device"} ${tablet ? "tablet-device" : ""} ${screens >= 3 ? "device-many-screens" : screens === 2 ? "device-two-screens" : "device-one-screen"}`}
+                className={`device-card ${mobile ? "mobile-device" : "pc-device"} ${foldable ? "foldable-device" : tablet ? "tablet-device" : ""} ${screens >= 3 ? "device-many-screens" : screens === 2 ? "device-two-screens" : "device-one-screen"}`}
               >
                 <div className="device-card-header">
                   <span className="device-icon">
@@ -192,6 +193,8 @@ export function Devices() {
                       const desired = display.desired
                         ? findPicture(display.desired)
                         : null;
+                      const tabletPreview = display.foldPanel === "inner" || tablet;
+                      const PreviewIcon = tabletPreview ? Tablet : DeviceIcon;
                       return (
                         <div className="display-card" key={display.id}>
                           <div className="display-label">
@@ -210,7 +213,7 @@ export function Devices() {
                           <div className="display-preview">
                             <div
                               className={
-                                mobile && display.canApplyWallpaper !== false ? (tablet ? "tablet-wallpaper" : "phone-wallpaper") : "monitor-wallpaper"
+                                mobile && display.canApplyWallpaper !== false ? (tabletPreview ? "tablet-wallpaper" : "phone-wallpaper") : "monitor-wallpaper"
                               }
                             >
                               {current ? (
@@ -220,7 +223,7 @@ export function Devices() {
                                   : <PictureView picture={current} />
                               ) : (
                                 <div className="unknown-wallpaper">
-                                  {mobile && display.canApplyWallpaper !== false ? <DeviceIcon size={30} /> : <Monitor size={30} />}
+                                  {mobile && display.canApplyWallpaper !== false ? <PreviewIcon size={30} /> : <Monitor size={30} />}
                                   <span>이미지 정보 없음</span>
                                 </div>
                               )}
@@ -232,13 +235,14 @@ export function Devices() {
                           <p className="display-resolution">
                             {display.resolution}
                             {display.refreshRateHz != null && ` · ${Number(display.refreshRateHz.toFixed(2))} Hz`}
+                            {display.foldPanel && display.isPrimary && <span className="fold-screen-active"> · 사용 중</span>}
                           </p>
                           <p className="display-wallpaper-title" title={current?.name || "이미지 정보 없음"}>
                             {current?.name || "이미지 정보 없음"}
                           </p>
                           {desired && (
                             <div className="pending-wallpaper">
-                              <Clock3 size={14} /> 적용 대기: {desired.name}
+                              <Clock3 size={14} /> {display.foldPanel && !display.isPrimary ? "화면 전환 시 적용:" : "적용 대기:"} {desired.name}
                             </div>
                           )}
                           {display.removing && <div className="pending-wallpaper"><Clock3 size={14} /> 배경화면 삭제 대기</div>}
