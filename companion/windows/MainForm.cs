@@ -5,6 +5,7 @@ namespace UpscaleLab.Companion;
 
 internal sealed class MainForm : Form
 {
+    private static readonly Size DefaultClientSize = new(664, 588);
     private readonly CompanionController controller;
     private readonly TextBox identifier = new() { PlaceholderText = "아이디 또는 이메일", BorderStyle = BorderStyle.None, Dock = DockStyle.Fill };
     private readonly TextBox password = new() { PlaceholderText = "비밀번호", UseSystemPasswordChar = true, BorderStyle = BorderStyle.None, Dock = DockStyle.Fill };
@@ -18,14 +19,21 @@ internal sealed class MainForm : Form
     private PlaybackRules playbackRules = PlaybackRules.Load();
     private readonly BrandButton login = new() { Text = "로그인", Primary = true, CornerRadius = 0, Dock = DockStyle.Top };
     private readonly BrandButton logout = new() { Text = "로그아웃", AutoSize = true, Margin = new(16, 0, 0, 0) };
-    private readonly Label status = new() { AutoSize = true, ForeColor = AppBrand.Muted, Margin = new(0, 12, 0, 0) };
+    private readonly Label status = new() { Dock = DockStyle.Top, AutoEllipsis = true, Height = 22,
+        ForeColor = AppBrand.Muted, Margin = Padding.Empty };
+    private readonly Label trayHint = new() { Text = "창을 닫아도 트레이에서 동기화합니다.", Dock = DockStyle.Top,
+        Height = 22, ForeColor = AppBrand.Muted, Margin = Padding.Empty };
     private readonly Label connection = new() { AutoSize = true, Anchor = AnchorStyles.Right, Font = new("맑은 고딕", 12, FontStyle.Bold) };
     private readonly Label username = new() { AutoSize = true, Font = new("맑은 고딕", 14, FontStyle.Bold), Margin = Padding.Empty };
     private readonly Label email = new() { AutoSize = true, ForeColor = AppBrand.Muted, Font = new("맑은 고딕", 9), Margin = new(0, 4, 0, 0) };
     private readonly Label plan = new() { AutoSize = true, ForeColor = AppBrand.Primary, Margin = new(0, 4, 0, 0) };
     private readonly CircularAvatar avatar = new() { Size = new(64, 64), Margin = new(0, 0, 14, 0) };
     private readonly TableLayoutPanel account = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Top | AnchorStyles.Right, ColumnCount = 2, Margin = Padding.Empty };
-    private readonly Label screens = new() { AutoSize = true, Font = new("맑은 고딕", 11), Margin = new(0, 8, 0, 6) };
+    private readonly Label screens = new() { AutoEllipsis = true, Dock = DockStyle.Top, Height = 26,
+        TextAlign = ContentAlignment.MiddleLeft, Font = new("맑은 고딕", 11), Margin = new(0, 4, 0, 6), UseMnemonic = false };
+    private readonly ComboBox monitorPicker = new() { DropDownStyle = ComboBoxStyle.DropDownList, MaxDropDownItems = 8,
+        AccessibleName = "연결된 화면 선택", DisplayMember = nameof(MonitorInfo.Name), Width = 148, Anchor = AnchorStyles.Right };
+    private MonitorInfo[] shownMonitors = [];
     private readonly TableLayoutPanel credentials = Stack();
     private readonly TableLayoutPanel connected = Stack();
     private readonly NotifyIcon tray = new() { Icon = AppBrand.Icon(), Text = "Upscale Lab Connect", Visible = true };
@@ -48,10 +56,12 @@ internal sealed class MainForm : Form
     internal MainForm(CompanionController? companion = null)
     {
         controller = companion ?? new(); Text = CompanionConfiguration.AppName; Icon = AppBrand.Icon(); ShowIcon = false;
-        Font = new("맑은 고딕", 10); AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new(900, 460); MinimumSize = new(680, 360); AutoScroll = true;
+        SuspendLayout();
+        Font = new("맑은 고딕", 10); AutoScaleDimensions = new SizeF(96, 96); AutoScaleMode = AutoScaleMode.Dpi;
+        ClientSize = DefaultClientSize;
+        MinimumSize = Size;
         ForeColor = AppBrand.Ink; BackColor = AppBrand.Background; StartPosition = FormStartPosition.CenterScreen;
-        var content = Stack(); content.Padding = new(24);
+        var content = Stack(); content.Padding = new(24, 24, 24, 12);
         var header = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, Height = 82, Margin = new(0, 0, 0, 10) };
         header.ColumnStyles.Add(new(SizeType.Percent, 57)); header.ColumnStyles.Add(new(SizeType.Percent, 43));
         header.Controls.Add(new Label { Text = "Upscale Lab Connect", Font = new(Font.FontFamily, 22, FontStyle.Bold), Dock = DockStyle.Fill, TextAlign = ContentAlignment.TopLeft, Margin = Padding.Empty });
@@ -72,8 +82,17 @@ internal sealed class MainForm : Form
         var deviceHeader = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = new(0, 0, 0, 12) };
         deviceHeader.ColumnStyles.Add(new(SizeType.Percent, 65)); deviceHeader.ColumnStyles.Add(new(SizeType.Percent, 35));
         deviceHeader.Controls.Add(Copy("내 Windows PC", 17, true)); deviceHeader.Controls.Add(connection); deviceContent.Controls.Add(deviceHeader);
-        deviceContent.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Color.FromArgb(220, 224, 235), Margin = new(0, 0, 0, 18) });
-        deviceContent.Controls.Add(Copy("연결된 화면", 13, true)); deviceContent.Controls.Add(screens);
+        deviceContent.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Color.FromArgb(220, 224, 235), Margin = new(0, 0, 0, 14) });
+        var screensHeader = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = Padding.Empty };
+        screensHeader.ColumnStyles.Add(new(SizeType.Percent, 100));
+        screensHeader.ColumnStyles.Add(new(SizeType.AutoSize));
+        var screensTitle = Copy("연결된 화면", 13, true);
+        screensTitle.Margin = new(0, 0, 0, 6);
+        screensHeader.Controls.Add(screensTitle);
+        screensHeader.Controls.Add(monitorPicker);
+        monitorPicker.SelectedIndexChanged += (_, _) => ShowSelectedMonitor();
+        deviceContent.Controls.Add(screensHeader);
+        deviceContent.Controls.Add(screens);
         var deviceCard = new BrandPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new(14), CornerRadius = 2, Margin = new(0, 0, 0, 6) }; deviceCard.Controls.Add(deviceContent); connected.Controls.Add(deviceCard);
         var footer = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = new(0, 12, 0, 0) };
         footer.ColumnStyles.Add(new(SizeType.Percent, 48)); footer.ColumnStyles.Add(new(SizeType.Percent, 52));
@@ -87,11 +106,10 @@ internal sealed class MainForm : Form
         connected.Controls.Add(PlaybackSettings());
         playbackTimer.Tick += (_, _) => UpdatePlayback();
         UpdatePlayback();
-        connected.Controls.Add(Copy("창을 닫아도 트레이에서 동기화합니다."));
+        connected.Controls.Add(trayHint);
         content.Controls.Add(connected); content.Controls.Add(status); Controls.Add(content);
         content.SizeChanged += (_, _) => {
             var width = Math.Max(300, content.ClientSize.Width - content.Padding.Horizontal);
-            status.MaximumSize = new(width, 0); screens.MaximumSize = new(width - 48, 0);
             username.MaximumSize = email.MaximumSize = plan.MaximumSize = new(Math.Max(180, (int)(width * .43) - 90), 0);
         };
         identifier.Text = LoginPreferences.Current.Read(); saveIdentifier.Checked = identifier.Text.Length > 0;
@@ -111,12 +129,18 @@ internal sealed class MainForm : Form
         menu.Items.Add("종료", null, async (_, _) => await ExitAsync());
         tray.ContextMenuStrip = menu;
         FormClosing += (_, e) => { SaveIdentity(); if (e.CloseReason == CloseReason.UserClosing && !quitting && controller.LoggedIn) { e.Cancel = true; Hide(); } };
-        FormClosed += (_, _) => { restoreTimer.Dispose(); playbackTimer.Dispose(); var icon = tray.Icon; tray.Dispose(); icon?.Dispose(); avatar.Image?.Dispose(); controller.Dispose(); };
+        Disposed += (_, _) => {
+            controller.Changed -= RefreshState;
+            restoreTimer.Dispose(); playbackTimer.Dispose();
+            var icon = tray.Icon; tray.Dispose(); icon?.Dispose();
+            avatar.Image?.Dispose(); controller.Dispose();
+        };
         Shown += (_, _) => RoundWindow();
         SizeChanged += (_, _) => { if (IsHandleCreated) RoundWindow(); };
         Activated += async (_, _) => { if (controller.LoggedIn && !busy && DateTime.UtcNow - lastProfileRefresh > TimeSpan.FromMinutes(1)) {
             lastProfileRefresh = DateTime.UtcNow; await controller.RefreshProfile(); } };
         RefreshState();
+        ResumeLayout(performLayout: true);
     }
 
     private GroupBox PlaybackSettings()
@@ -219,12 +243,36 @@ internal sealed class MainForm : Form
         playbackTimer.Enabled = controller.LoggedIn;
         if (replaceStatus) status.Text = "";
         status.Visible = status.Text.Length > 0;
+        trayHint.Visible = status.Text.Length == 0;
         username.Text = controller.Username; email.Text = controller.Account; plan.Text = controller.Plan + " 플랜";
         connection.Text = controller.Connection switch { ConnectionState.Connected => "● 연결됨", ConnectionState.Connecting => "● 연결중", _ => "● 연결안됨" };
         connection.ForeColor = controller.Connection switch { ConnectionState.Connected => Color.FromArgb(38, 153, 83), ConnectionState.Connecting => Color.FromArgb(230, 139, 32), _ => Color.FromArgb(208, 64, 64) };
-        screens.Text = controller.Monitors.Length == 0 ? "화면 정보를 확인하고 있습니다." : string.Join("\n", controller.Monitors.Select(FormatMonitor));
+        RefreshMonitors();
         _ = RefreshAvatar();
     }
+
+    private void RefreshMonitors()
+    {
+        var monitors = controller.Monitors;
+        if (!shownMonitors.SequenceEqual(monitors))
+        {
+            var selected = (monitorPicker.SelectedItem as MonitorInfo)?.NativeId;
+            shownMonitors = monitors;
+            monitorPicker.DataSource = monitors.Length > 1 ? monitors : null;
+            var index = Array.FindIndex(monitors, monitor => monitor.NativeId == selected);
+            if (index < 0) index = Array.FindIndex(monitors, monitor => monitor.IsPrimary);
+            if (monitors.Length > 1) monitorPicker.SelectedIndex = Math.Max(0, index);
+        }
+        monitorPicker.Visible = monitors.Length > 1;
+        ShowSelectedMonitor();
+    }
+
+    private void ShowSelectedMonitor()
+    {
+        var monitor = monitorPicker.SelectedItem as MonitorInfo ?? shownMonitors.FirstOrDefault();
+        screens.Text = monitor is null ? "화면 정보를 확인하고 있습니다." : FormatMonitor(monitor);
+    }
+
     internal static string FormatMonitor(MonitorInfo m) => $"{m.Name} | {m.Width} × {m.Height} | {(m.RefreshRateHz?.ToString("0.##") ?? "—")} Hz{(m.IsPrimary ? " - 주 화면" : "")}";
     private async Task RefreshAvatar() {
         var url = controller.Profile?.ProfileImageUrl;

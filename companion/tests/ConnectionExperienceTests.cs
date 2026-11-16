@@ -64,4 +64,61 @@ public sealed class ConnectionExperienceTests
         Assert.Equal("화면 A | 2560 × 1440 | 144 Hz - 주 화면", MainForm.FormatMonitor(monitor));
         Assert.DoesNotContain("주 화면", MainForm.FormatMonitor(monitor with { IsPrimary = false }));
     }
+
+    [Fact]
+    public async Task MainWindowKeepsItsDefaultSizeAndFitsControlsWithoutScroll()
+    {
+        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                MonitorInfo[] displays = [];
+                var controller = new CompanionController(new(new ProfileHandler(Guid.NewGuid(), true)),
+                    () => true, () => displays, () => null, _ => { });
+                using var form = new MainForm(controller) { ShowInTaskbar = false, Opacity = 0 };
+                form.Show();
+                var initial = form.Size;
+                var resize = new Size(200, 80);
+                Assert.False(form.AutoScroll);
+                Assert.Equal(form.MinimumSize, initial);
+                Assert.Equal((int)Math.Round(664 * form.DeviceDpi / 96.0), form.ClientSize.Width);
+                Assert.Equal((int)Math.Round(588 * form.DeviceDpi / 96.0), form.ClientSize.Height);
+                Assert.All(Controls(form).Where(x => x.Visible), control =>
+                    Assert.True(form.ClientRectangle.Contains(Bounds(control)), $"{control.Text}: {Bounds(control)}"));
+
+                // Establish a verified mock account without an agent connection.
+                Assert.Throws<InvalidOperationException>(() => controller.SignIn("owner", "password", false).GetAwaiter().GetResult());
+                displays = Enumerable.Range(1, 6).Select(index => new MonitorInfo(index.ToString(), $"화면 {index}",
+                    1920, 1080, 1, 0, 0, 0, index == 1, true, 60)).ToArray();
+                controller.RefreshInventory();
+                var screenList = Assert.Single(Controls(form).OfType<ComboBox>(), x => x.AccessibleName == "연결된 화면 선택");
+                Assert.True(screenList.Visible);
+                Assert.Equal(6, screenList.Items.Count);
+                screenList.SelectedIndex = 5;
+                Assert.Contains(Controls(form), x => x.Text == MainForm.FormatMonitor(displays[5]));
+                Assert.All(Controls(form).Where(x => x.Visible), control =>
+                    Assert.True(form.ClientRectangle.Contains(Bounds(control)), $"{control.Text}: {Bounds(control)}"));
+
+                var logout = Assert.Single(Controls(form).OfType<Button>(), x => x.Text == "로그아웃");
+                var oldRight = Bounds(logout).Right;
+                form.Size = initial + resize;
+                Assert.Equal(oldRight + resize.Width, Bounds(logout).Right);
+                form.Size = initial - resize;
+                Assert.Equal(initial, form.Size);
+                Assert.False(form.VerticalScroll.Visible);
+                Assert.False(form.HorizontalScroll.Visible);
+                completed.SetResult();
+
+                Rectangle Bounds(Control control) => form.RectangleToClient(control.RectangleToScreen(control.ClientRectangle));
+            }
+            catch (Exception error) { completed.SetException(error); }
+        }) { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        await completed.Task.WaitAsync(TimeSpan.FromSeconds(15));
+    }
+
+    private static IEnumerable<Control> Controls(Control control) =>
+        control.Controls.Cast<Control>().SelectMany(child => Controls(child).Prepend(child));
 }

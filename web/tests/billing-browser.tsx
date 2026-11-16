@@ -17,6 +17,7 @@ window.fetch = async (input, init) => {
   const path = url.pathname.slice(base.length);
   if (path === "/api/auth/me" || path === "/api/account") return json(account);
   if (path === "/api/tokens/me") return json({ plan: "Free", monthlyBalance: 8, purchasedBalance: 10, totalBalance: 18 });
+  if (path === "/api/payments/account") return json({ hasRegisteredCard: false, purchasedBalance: 10, purchasedTokensReserved: false, payments: [] });
   if (path === "/api/payments/products") return json([
     { code: "PLUS", name: "Plus", price: 3900, tokens: 20, isSubscription: true },
     { code: "PRO", name: "Pro", price: 6900, tokens: 40, isSubscription: true },
