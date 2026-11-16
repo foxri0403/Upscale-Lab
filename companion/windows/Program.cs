@@ -26,8 +26,10 @@ internal static class Program
                 try
                 {
                     var installer = CompanionInstaller.ForCurrentUser();
-                    if (installer.OpenOrUpgrade(Environment.ProcessPath!)) return;
-                    Application.Run(new InstallForm());
+                    var source = Environment.ProcessPath!;
+                    if (!installer.IsInstalled(source) && installer.InstalledVersion is { } installed)
+                        Application.Run(new ReinstallForm(installer, source, installed));
+                    else Application.Run(new InstallForm());
                 }
                 finally { installerLock.ReleaseMutex(); }
             }

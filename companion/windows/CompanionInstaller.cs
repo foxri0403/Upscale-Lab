@@ -15,28 +15,32 @@ internal sealed class CompanionInstaller(string installDirectory, string startMe
 
     internal bool IsInstalled(string source) => string.Equals(Path.GetFullPath(source), Path.GetFullPath(Executable), StringComparison.OrdinalIgnoreCase);
 
-    internal bool OpenOrUpgrade(string source)
+    internal Version? InstalledVersion => File.Exists(Executable) ? ReadVersion(Executable) : null;
+    internal void OpenInstalled() => Process.Start(new ProcessStartInfo(Executable, "--run") { UseShellExecute = true });
+
+    internal void Reinstall(string source, IProgress<string> progress)
     {
-        if (IsInstalled(source) || !File.Exists(Executable)) return false;
-        if (ReadVersion(source) > ReadVersion(Executable))
-            ReplaceExecutable(source, StopInstalledInstance);
-        Process.Start(new ProcessStartInfo(Executable, "--run") { UseShellExecute = true });
-        return true;
+        if (InstalledVersion is not { } installed || IsInstalled(source) || ReadVersion(source) < installed)
+            throw new InvalidOperationException("설치 파일 버전을 확인해 주세요.");
+        ReplaceExecutable(source, StopInstalledInstance, progress);
     }
 
-    private static Version ReadVersion(string path)
+    internal static Version ReadVersion(string path)
     {
         var info = FileVersionInfo.GetVersionInfo(path);
         return new(info.FileMajorPart, info.FileMinorPart, info.FileBuildPart, info.FilePrivatePart);
     }
 
-    internal void ReplaceExecutable(string source, Action stopInstalledInstance)
+    internal void ReplaceExecutable(string source, Action stopInstalledInstance, IProgress<string>? progress = null)
     {
         var candidate = Path.Combine(installDirectory, $".{Guid.NewGuid():N}.exe");
         try
         {
+            progress?.Report("새 설치 파일을 준비하고 있습니다.");
             File.Copy(source, candidate);
+            progress?.Report("실행 중인 앱을 종료하고 있습니다.");
             stopInstalledInstance();
+            progress?.Report("설치 파일을 교체하고 있습니다.");
             File.Move(candidate, Executable, overwrite: true);
         }
         finally { File.Delete(candidate); }

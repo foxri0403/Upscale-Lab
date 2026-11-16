@@ -4,17 +4,25 @@ namespace UpscaleLab.Companion;
 
 internal sealed class BrandPanel : Panel
 {
-    internal BrandPanel() { DoubleBuffered = true; BackColor = Color.White; Padding = new(20); Margin = new(0, 0, 0, 16); }
+    internal BrandPanel()
+    {
+        DoubleBuffered = true;
+        SetStyle(ControlStyles.ResizeRedraw, true);
+        BackColor = Color.White;
+        Padding = new(20);
+        Margin = new(0, 0, 0, 16);
+    }
     internal Color Fill { get; set; } = Color.White;
     internal int CornerRadius { get; set; } = 16;
     protected override void OnPaintBackground(PaintEventArgs e) {
         e.Graphics.Clear(AppBrand.Surface(Parent));
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        using var path = Shape(new Rectangle(0, 0, Width - 1, Height - 1), CornerRadius);
+        if (ClientSize.Width < 2 || ClientSize.Height < 2) return;
+        using var path = Shape(new RectangleF(.5f, .5f, ClientSize.Width - 1, ClientSize.Height - 1), CornerRadius);
         using var fill = new SolidBrush(Fill); using var border = new Pen(Color.FromArgb(222, 226, 241));
         e.Graphics.FillPath(fill, path); e.Graphics.DrawPath(border, path);
     }
-    internal static GraphicsPath Shape(Rectangle area, int radius) {
+    internal static GraphicsPath Shape(RectangleF area, int radius) {
         var path = new GraphicsPath(); var size = radius * 2;
         if (radius <= 0) { path.AddRectangle(area); return path; }
         path.AddArc(area.Left, area.Top, size, size, 180, 90);

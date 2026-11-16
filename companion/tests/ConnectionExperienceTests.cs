@@ -101,9 +101,20 @@ public sealed class ConnectionExperienceTests
                     Assert.True(form.ClientRectangle.Contains(Bounds(control)), $"{control.Text}: {Bounds(control)}"));
 
                 var logout = Assert.Single(Controls(form).OfType<Button>(), x => x.Text == "로그아웃");
+                var deviceCard = Assert.Single(Controls(form).OfType<BrandPanel>(), x => x.Visible);
+                var oldCardWidth = deviceCard.Width;
                 var oldRight = Bounds(logout).Right;
                 form.Size = initial + resize;
                 Assert.Equal(oldRight + resize.Width, Bounds(logout).Right);
+                using (var bitmap = new Bitmap(deviceCard.Width, deviceCard.Height))
+                {
+                    deviceCard.DrawToBitmap(bitmap, deviceCard.ClientRectangle);
+                    var center = bitmap.Width / 2;
+                    Assert.True(bitmap.GetPixel(center, 0).R < 245, "Top edge");
+                    Assert.True(bitmap.GetPixel(bitmap.Width - 1, 8).R < 245, "Right edge");
+                    Assert.True(bitmap.GetPixel(center, bitmap.Height - 1).R < 245, "Bottom edge");
+                    Assert.Equal(Color.White.ToArgb(), bitmap.GetPixel(oldCardWidth - 1, 8).ToArgb());
+                }
                 form.Size = initial - resize;
                 Assert.Equal(initial, form.Size);
                 Assert.False(form.VerticalScroll.Visible);

@@ -55,7 +55,7 @@ $env:UPSCALE_SIGNING_PROPERTIES_FILE = 'C:\UpscaleLab-Secrets\key.properties'
 
 스크립트는 서명을 검증한 APK와 Windows EXE를 무시되는 `web/public/downloads/`에 복사하고 버전·SHA-256·바이트 크기·동일 출처 다운로드 URL을 `manifest.json`에 기록합니다. 그 후 `web`에서 `pnpm run build:cloud`를 실행하고 정적 파일 전체를 수동 배포합니다. 바이너리/서명키는 Git에 커밋하지 않습니다. `/downloads/`는 SPA fallback 없이 파일 부재 시 404를 반환해야 하며 manifest는 캐시하지 않습니다.
 
-Windows에서 상위 버전의 다운로드 EXE를 실행하면 설치된 앱을 종료하고 같은 경로의 실행 파일을 자동으로 교체한 뒤 새 버전을 엽니다. 기존 자동 로그인, 연결 기기, 바로 가기 및 시작 설정을 유지합니다.
+Windows에서 같은 버전이나 상위 버전의 다운로드 EXE를 실행하면 재설치 여부를 묻습니다. 재설치를 선택하면 설치 파일 준비, 기존 앱 종료, 파일 교체, 완료 상태가 표시됩니다. 기존 자동 로그인, 연결 기기, 바로 가기 및 시작 설정을 유지합니다.
 
 `build:cloud`는 빌드 전후에 Windows·Android 설치 파일의 존재, 버전, 크기와 SHA-256을 검사합니다. 기존 1.2.2 배포본을 재사용할 때는 검증된 `downloads/` 전체를 `web/public/downloads/`에 준비해야 합니다. 수동 웹 설치 도구 `deploy/install-web.sh`는 다운로드 디렉터리가 없는 이전 형식의 웹 묶음을 설치할 때 기존 릴리스의 다운로드 디렉터리를 보존하며, manifest와 EXE·APK가 없으면 전환을 중단합니다. 이 복구로 새 APK를 생성하거나 앱 버전을 올리지 않습니다.
 

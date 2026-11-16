@@ -195,7 +195,8 @@ export function Workspace({
   const [message, setMessage] = useState<ToastMessage | null>(null);
   const toastPointer = useRef({ x: innerWidth / 2, y: innerHeight / 2 });
   const toastSequence = useRef(0);
-  const [dialog, setDialog] = useState<"settings" | "billing" | "downloads" | null>(null);
+  const [dialog, setDialog] = useState<"settings" | "billing" | "downloads" | null>(() =>
+    cloud && new URLSearchParams(location.search).has("cardChange") ? "billing" : null);
   function openAccountDialog(next: "settings" | "billing") {
     if (accountMenu.current) {
       accountMenu.current.open = false;

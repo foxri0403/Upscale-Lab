@@ -7,7 +7,7 @@ using UpscaleLab.Infrastructure.Database;
 
 namespace UpscaleLab.Infrastructure.Payments;
 
-public sealed record AccountSubscription(string Plan, string Status, DateTime? CurrentPeriodEndUtc, bool CancelAtPeriodEnd);
+public sealed record AccountSubscription(string Plan, string Status, DateTime? CurrentPeriodEndUtc, bool CancelAtPeriodEnd, DateTime? NextBillingAtUtc);
 public sealed record AccountPayment(string OrderId, string ProductName, int Amount, string Status, DateTime PaidAt,
     DateTime? RefundedAt, int? RefundAmount, int? RefundTokens, int RefundableAmount, int RefundableTokens, bool RefundDeclined);
 public sealed record AccountBilling(AccountSubscription? Subscription, bool HasRegisteredCard, PaymentCard? Card,
@@ -20,7 +20,7 @@ public sealed class AccountBillingService(ApplicationDbContext db, TossPaymentsC
     public async Task<AccountBilling> GetAsync(Guid userId, CancellationToken ct)
     {
         var subscription = await db.UserSubscriptions.AsNoTracking().Where(x => x.UserId == userId)
-            .Select(x => new { x.Id, x.Plan, x.Status, x.CurrentPeriodStartUtc, x.CurrentPeriodEndUtc, x.CancelAtPeriodEnd,
+            .Select(x => new { x.Id, x.Plan, x.Status, x.CurrentPeriodStartUtc, x.CurrentPeriodEndUtc, x.NextBillingAtUtc, x.CancelAtPeriodEnd,
                 Registered = x.BillingKeyCiphertext != null, x.CardIssuerCode, x.CardNumberSuffix })
             .SingleOrDefaultAsync(ct);
         var walletBalance = await db.UserTokenWallets.AsNoTracking().Where(x => x.UserId == userId)
@@ -54,7 +54,7 @@ public sealed class AccountBillingService(ApplicationDbContext db, TossPaymentsC
         }
 
         var plan = subscription is null ? null : new AccountSubscription(subscription.Plan.ToString(),
-            subscription.Status.ToString(), subscription.CurrentPeriodEndUtc, subscription.CancelAtPeriodEnd);
+            subscription.Status.ToString(), subscription.CurrentPeriodEndUtc, subscription.CancelAtPeriodEnd, subscription.NextBillingAtUtc);
         return new(plan, registered, card, walletBalance, reserved, history);
     }
 

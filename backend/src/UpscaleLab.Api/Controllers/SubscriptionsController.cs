@@ -27,6 +27,18 @@ public sealed class SubscriptionsController(
     SubscriptionFulfillmentService fulfillment,
     Microsoft.Extensions.Configuration.IConfiguration configuration) : ControllerBase
 {
+    [HttpPost("billing/card-change/start")]
+    public Task<SubscriptionCardChange> StartCardChange([FromServices] SubscriptionCardService cards, CancellationToken ct) =>
+        cards.StartAsync(User.GetRequiredUserId(), ct);
+
+    public sealed record ChangeCardRequest(string Challenge, string CustomerKey, string AuthKey);
+
+    [HttpPost("billing/card-change")]
+    public async Task<IActionResult> ChangeCard(ChangeCardRequest request, [FromServices] SubscriptionCardService cards, CancellationToken ct)
+    {
+        await cards.ChangeAsync(User.GetRequiredUserId(), request.Challenge, request.CustomerKey, request.AuthKey, ct);
+        return NoContent();
+    }
 
     public sealed record IssueBillingKeyRequest(
         Guid SubscriptionId,

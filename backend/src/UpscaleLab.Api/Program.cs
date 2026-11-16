@@ -140,6 +140,7 @@ builder.Services.AddHttpClient<UpscaleLab.Infrastructure.Payments.TossPaymentsCl
     client => client.Timeout = TimeSpan.FromSeconds(30)).RemoveAllLoggers();
 builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.PaymentFulfillmentService>();
 builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.AccountBillingService>();
+builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.SubscriptionCardService>();
 builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.SubscriptionFulfillmentService>();
 builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.SubscriptionChargeClaimService>();
 builder.Services.AddScoped<UpscaleLab.Infrastructure.Payments.SubscriptionRenewalOrderService>();

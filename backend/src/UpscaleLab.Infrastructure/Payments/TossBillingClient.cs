@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
@@ -24,6 +25,8 @@ public sealed class TossBillingClient(
     HttpClient http,
     IConfiguration configuration)
 {
+    internal bool IsConfigured => !string.IsNullOrWhiteSpace(configuration["TossPayments:SecretKey"]);
+
     private void SetAuthentication(HttpRequestMessage request)
     {
         var key = configuration["TossPayments:SecretKey"];
@@ -56,6 +59,9 @@ public sealed class TossBillingClient(
             "https://api.tosspayments.com/v1/billing/authorizations/issue");
 
         SetAuthentication(request);
+        var authorizationHash = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(authKey)))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        request.Headers.Add("Idempotency-Key", "upscalelab-card-" + authorizationHash);
 
         request.Content = JsonContent.Create(new
         {
