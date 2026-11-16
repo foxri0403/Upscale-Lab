@@ -42,7 +42,7 @@ Windows 연결 앱의 `재생` 설정은 Live 2D와 배경 분리 배경화면�
 
 ## 빌드와 다운로드 배포
 
-APK 버전/빌드 번호는 `AGENTS.md`, `mobile/pubspec.yaml`, `mobile/README.md`를 함께 갱신합니다. Windows 버전은 `companion/windows/UpscaleLab.Companion.Windows.csproj`에서 관리합니다. 공유 서명 설정은 Git 밖 파일을 지정하고 `apksigner verify --print-certs`로 반드시 검증합니다. 최신 APK는 **1.8.1+49**, Windows 앱은 **1.9.5**입니다. Android 연결 앱은 폴더블의 외부·내부 화면과 화면별 홈·잠금 배경을 지원합니다. 신규 Android 기기는 OS에 설정된 이름으로 등록하며 이름을 읽을 수 없을 때만 일반 이름을 사용합니다.
+APK 버전/빌드 번호는 `AGENTS.md`, `mobile/pubspec.yaml`, `mobile/README.md`를 함께 갱신합니다. Windows 버전은 `companion/windows/UpscaleLab.Companion.Windows.csproj`에서 관리합니다. 공유 서명 설정은 Git 밖 파일을 지정하고 `apksigner verify --print-certs`로 반드시 검증합니다. 최신 APK는 **1.8.2+50**, Windows 앱은 **1.9.5**입니다. Android 연결 앱은 폴더블의 외부·내부 화면과 화면별 홈·잠금 배경을 지원합니다. 신규 Android 기기는 OS에 설정된 이름으로 등록하며 이름을 읽을 수 없을 때만 일반 이름을 사용합니다.
 
 Windows Live 2D는 아이콘 아래·시스템 배경 위의 layered child 창을 사용하며 테마 변경 후 순서를 재확인한다. Android는 gyroEnabled와 센서 지원에 따라 회전 벡터 또는 원시 자이로를 사용한다. 배경화면 삭제는 선택 화면의 OS 초기화를 확인한 뒤 보고하며 다른 화면과 개인 보관함은 보존한다. 실기기별 동작은 별도 확인한다.
 

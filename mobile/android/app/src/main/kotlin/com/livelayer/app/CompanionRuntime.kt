@@ -39,6 +39,9 @@ internal object CompanionRuntime {
     @Volatile private var profile: JSONObject? = null
     @Volatile private var plan = "확인 중"
     @Volatile private var lastLiveAttempt: String? = null
+    private data class LivePickerAttempt(val commandId: String, val target: Int)
+    @Volatile private var livePickerAttempt: LivePickerAttempt? = null
+    @Volatile private var waitingForLiveFrame = false
     private var notifiedLiveId: String? = null
     private fun preferences() = CompanionPreferences(context)
     private fun currentOwner() = store.read().optJSONObject("session")?.optJSONObject("user")?.optString("id") ?: ""
@@ -97,6 +100,7 @@ internal object CompanionRuntime {
     }
     fun invalidate() {
         generation.incrementAndGet(); running = false; connectionState = "disconnected"; pending = null
+        lastLiveAttempt = null; livePickerAttempt = null; waitingForLiveFrame = false
         stopObservingInventory()
         api.cancelUpdates()
         context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putLong("companion_valid_until", 0).apply()
@@ -118,17 +122,21 @@ internal object CompanionRuntime {
         val requiredFlag = targetFlag(waiting?.optString("target"))
         val active = if (allowed) runCatching { CompanionInventory(context).activeFlags() and requiredFlag != 0 }.getOrDefault(false) else false
         val currentScreen = (0 until displays.length()).map { displays.getJSONObject(it) }.firstOrNull { it.optBoolean("isPrimary") }
-        val needsSetup = allowed && waiting?.optString("nativeId") == currentScreen?.optString("nativeId") &&
-            LiveActivationPolicy.needsPicker(liveEnabled(), waiting?.has("manifest") == true, active, lastLiveAttempt == waiting?.optString("id"))
+        val canOpenPicker = allowed && waiting?.optString("nativeId") == currentScreen?.optString("nativeId") &&
+            livePickerAttempt == null && LiveActivationPolicy.needsPicker(liveEnabled(), waiting?.has("manifest") == true,
+                active, attempted = false)
+        val attempted = lastLiveAttempt == waiting?.optString("id")
         return mapOf("server" to state.optString("server"), "account" to user?.optString("email"),
             "username" to (profile?.optString("username") ?: user?.optString("username")),
             "profileImageUrl" to profile?.optString("profileImageUrl")?.takeIf { it.startsWith("https://") }, "plan" to plan,
             "saveIdentifier" to state.optBoolean("saveIdentifier"), "savedIdentifier" to state.optString("identifier"),
-            "liveEnabled" to liveEnabled(), "alarmsEnabled" to alarmsEnabled(), "needsLiveSetup" to needsSetup,
+            "liveEnabled" to liveEnabled(), "alarmsEnabled" to alarmsEnabled(),
+            "needsLiveSetup" to (canOpenPicker && !attempted), "retryLiveSetup" to (canOpenPicker && attempted),
+            "lockLiveSetup" to (canOpenPicker && requiredFlag == WallpaperManager.FLAG_LOCK),
             "notificationPermissionGranted" to (Build.VERSION.SDK_INT < 33 || androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED),
             "privacyAccepted" to CompanionPrivacy(context).accepted,
             "loggedIn" to (allowed && user != null), "enabled" to running, "connectionState" to connectionState, "message" to message,
-            "pendingLive" to (pending != null),
+            "pendingLive" to (waiting != null || waitingForLiveFrame),
             "osVersion" to (if (allowed) "Android ${Build.VERSION.RELEASE}" else ""), "displays" to (0 until displays.length()).map {
                 val item = displays.getJSONObject(it)
                 mapOf("name" to item.optString("name"), "width" to item.optInt("width"), "height" to item.optInt("height"),
@@ -196,19 +204,33 @@ internal object CompanionRuntime {
                         check(inventoryAllowed() && liveEnabled()) { "설정에서 Live 2D를 켜 주세요." }
                         val item = pending ?: error("대기 중인 Live 2D 요청이 없습니다.")
                         requireLatest(item)
-                        val path = item.getString("manifest")
-                        if (lastLiveAttempt == item.getString("id")) { done(mapOf("openLivePicker" to false), null); return@execute }
-                        lastLiveAttempt = item.getString("id")
+                        val id = item.getString("id")
+                        val destination = targetFlag(item.optString("target"))
+                        if (livePickerAttempt != null ||
+                            CompanionInventory(context).activeFlags() and destination != 0 ||
+                            lastLiveAttempt == id && arguments["retry"] != true) {
+                            done(mapOf("openLivePicker" to false), null)
+                            return@execute
+                        }
                         lease()
-                        check(context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putString("preview_manifest_path", path).commit())
+                        check(context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit()
+                            .putString("preview_manifest_path", item.getString("manifest"))
+                            .putInt("preview_manifest_target", destination).commit())
+                        lastLiveAttempt = id
+                        livePickerAttempt = LivePickerAttempt(id, destination)
                         done(mapOf("openLivePicker" to true), null); return@execute
                     }
                     "completeLiveSetup" -> {
                         check(inventoryAllowed()) { "로그인이 필요합니다." }
-                        val required = targetFlag(pending?.optString("target"))
-                        if (arguments["accepted"] != true && CompanionInventory(context).activeFlags() and required == 0) {
+                        val attempt = livePickerAttempt
+                        livePickerAttempt = null
+                        val prefs = context.getSharedPreferences("live_layer", Context.MODE_PRIVATE)
+                        prefs.edit().remove("preview_manifest_path").remove("preview_manifest_target").apply()
+                        val attached = CompanionInventory(context).activeFlags()
+                        if (attempt != null && pending?.optString("id") == attempt.commandId &&
+                            arguments["accepted"] != true && attempt.target == WallpaperManager.FLAG_SYSTEM && attached == 0) {
                             preferences().setLive(currentOwner(), false)
-                            context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit().putBoolean("companion_live_enabled", false).putLong("companion_valid_until", 0).apply()
+                            prefs.edit().putBoolean("companion_live_enabled", false).putLong("companion_valid_until", 0).apply()
                             message = "Live 2D 적용을 취소했습니다. 설정에서 다시 켤 수 있습니다."
                         } else { lease(); inventoryDirty.set(true); pollSoon() }
                     }
@@ -304,6 +326,18 @@ internal object CompanionRuntime {
         check(prefs.edit().putString(key, path).commit()) { "배경화면 선택을 저장하지 못했습니다." }
     }
 
+    private fun clearLiveSelection(flag: Int) {
+        CompanionLiveEngines.reset(flag)
+        context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).edit()
+            .remove(CompanionLiveEngines.selectionKey(flag)).apply()
+    }
+
+    private fun liveSetupMessage(flag: Int) = when {
+        !liveEnabled() -> "연결 앱 설정에서 Live 2D를 켜 주세요."
+        flag == WallpaperManager.FLAG_LOCK -> "Android 적용 화면에서 잠금화면 또는 홈화면 및 잠금화면을 선택해 주세요."
+        else -> "Android 적용 화면에서 홈화면을 선택해 주세요."
+    }
+
     private fun restoreFoldScreen(state: JSONObject, all: JSONObject, saved: JSONObject, display: JSONObject,
         commands: List<JSONObject>, inventory: CompanionInventory, epoch: Long) {
         val screen = display.getString("nativeId")
@@ -322,6 +356,7 @@ internal object CompanionRuntime {
             if (receipt.optBoolean("cleared")) {
                 if (!CompanionWallpaperRemoval.isCleared(receipt, manager.getWallpaperId(flag))) {
                     manager.clear(flag)
+                    clearLiveSelection(flag)
                     receipt.put("wallpaperId", manager.getWallpaperId(flag))
                     changed = true
                 }
@@ -333,6 +368,7 @@ internal object CompanionRuntime {
             if (receipt.optString("mode") != "Live2D") {
                 if (receipt.optInt("wallpaperId") != manager.getWallpaperId(flag)) {
                     receipt.put("wallpaperId", applyStatic(manager, flag, manifest))
+                    clearLiveSelection(flag)
                     changed = true
                 }
             } else if (inventory.activeFlags() and flag != 0 && liveEnabled()) {
@@ -377,6 +413,7 @@ internal object CompanionRuntime {
             val queue = api.request("/api/agent/commands", agent = true) as JSONArray
             if (epoch != generation.get() || !running) return
             connectionState = "connected"
+            waitingForLiveFrame = false
             val screen = inventory.activeId()
             val displays = remote.getJSONArray("displays")
             val display = (0 until displays.length()).map { displays.getJSONObject(it) }
@@ -418,6 +455,7 @@ internal object CompanionRuntime {
                                 saved.put(target, it.getJSONObject(target).put("sequence", command.getLong("sequence")))
                                 saveApplied(state, all)
                             })
+                        clearLiveSelection(screen.flags)
                         if (pending?.optString("target") == target) pending = null
                         val panels = listOfNotNull(all, all.optJSONObject(CompanionFoldScreens.COVER), all.optJSONObject(CompanionFoldScreens.INNER))
                         if (!oldAsset.isNullOrBlank() && panels.none { panel -> listOf("Home", "Lock").any { panel.optJSONObject(it)?.optString("assetId") == oldAsset } })
@@ -442,6 +480,7 @@ internal object CompanionRuntime {
                     }
                     if (!already && mode == "Static") {
                         val wallpaperId = applyStatic(manager, flag, local)
+                        clearLiveSelection(flag)
                         didApply = true
                         saved.put(target, JSONObject().put("assetId", command.getString("assetId")).put("commandId", id)
                             .put("sequence", command.getLong("sequence")).put("mode", mode).put("manifest", local.absolutePath).put("wallpaperId", wallpaperId))
@@ -452,13 +491,16 @@ internal object CompanionRuntime {
                                 pending = JSONObject(command.toString()).put("manifest", local.absolutePath).put("nativeId", screen)
                             if (notifiedLiveId != id) { notifiedLiveId = id; announce("동적 배경화면을 적용하려면 연결 앱에서 시스템 적용을 확인해 주세요.") }
                             if (command.optString("status") != "NeedsUserAction") api.report(id, "NeedsUserAction")
-                            message = "연결 앱 설정에서 Live 2D를 켜고 Android 배경화면 선택을 확인해 주세요."
+                            message = liveSetupMessage(flag)
                             continue
                         }
                         selectLive(flag, local.absolutePath)
                         if (!CompanionLiveEngines.hasRendered(flag, local.absolutePath)) {
+                            waitingForLiveFrame = true
                             if (command.optString("status") != "NeedsUserAction") api.report(id, "NeedsUserAction")
-                            message = "선택한 홈 또는 잠금 화면을 열면 동적 배경화면이 적용됩니다."
+                            message = if (flag == WallpaperManager.FLAG_LOCK)
+                                "화면을 잠갔다 켜면 잠금화면 적용을 확인합니다."
+                            else "홈화면을 열면 동적 배경화면 적용을 확인합니다."
                             continue
                         }
                         didApply = true

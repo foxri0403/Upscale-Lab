@@ -475,6 +475,13 @@ class _CompanionPageState extends State<CompanionPage>
         if (state['pendingLive'] == true)
           Text(state['message'] as String? ?? '',
               style: const TextStyle(color: muted, height: 1.5)),
+        if (state['retryLiveSetup'] == true)
+          OutlinedButton(
+              onPressed:
+                  busy ? null : () => act('activateLive', {'retry': true}),
+              child: Text(state['lockLiveSetup'] == true
+                  ? '잠금화면 적용 다시 열기'
+                  : '배경화면 적용 다시 열기')),
       ])),
       const SizedBox(height: 10),
       ExpansionTile(

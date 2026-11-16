@@ -67,15 +67,14 @@ internal class CompanionInventory(private val context: Context) {
     fun activeFlags(): Int {
         val manager = WallpaperManager.getInstance(context)
         val component = ComponentName(context, LiveLayerWallpaperService::class.java)
-        val attached = CompanionLiveEngines.activeFlags()
-        val home = if (Build.VERSION.SDK_INT >= 34)
-            runCatching { manager.getWallpaperInfo(WallpaperManager.FLAG_SYSTEM)?.component == component }.getOrDefault(false)
-        else attached and WallpaperManager.FLAG_SYSTEM != 0
-        val lock = runCatching {
-            if (Build.VERSION.SDK_INT >= 34) manager.getWallpaperInfo(WallpaperManager.FLAG_LOCK)?.component == component ||
-                (home && manager.getWallpaperId(WallpaperManager.FLAG_LOCK) < 0)
-            else home && manager.getWallpaperId(WallpaperManager.FLAG_LOCK) < 0
-        }.getOrDefault(false)
-        return (if (home) WallpaperManager.FLAG_SYSTEM else 0) or (if (lock) WallpaperManager.FLAG_LOCK else 0)
+        var flags = CompanionLiveEngines.activeFlags()
+        if (Build.VERSION.SDK_INT >= 34) {
+            for (target in listOf(WallpaperManager.FLAG_SYSTEM, WallpaperManager.FLAG_LOCK)) {
+                if (runCatching { manager.getWallpaperInfo(target)?.component == component }.getOrDefault(false))
+                    flags = flags or target
+            }
+        }
+        val lockId = runCatching { manager.getWallpaperId(WallpaperManager.FLAG_LOCK) }.getOrNull()
+        return LiveWallpaperDestinations.withInheritedLock(flags, lockId)
     }
 }

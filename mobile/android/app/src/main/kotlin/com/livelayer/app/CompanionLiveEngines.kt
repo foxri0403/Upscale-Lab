@@ -15,8 +15,9 @@ internal object CompanionLiveEngines {
     @Synchronized fun activeFlags() = engines.values.fold(0) { flags, engine -> flags or engine.flags }
 
     @Synchronized fun rendered(engine: Any, target: Int, path: String): Boolean {
-        val frames = engines[engine]?.frames ?: return false
-        return frames.put(target, path) != path
+        val attachment = engines[engine] ?: return false
+        if (attachment.flags and target == 0) return false
+        return attachment.frames.put(target, path) != path
     }
 
     @Synchronized fun hasRendered(target: Int, path: String) =

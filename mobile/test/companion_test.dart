@@ -81,7 +81,7 @@ void main() {
             'needsLiveSetup': call.arguments['enabled']
           };
         case 'activateLive':
-          state = {...state, 'needsLiveSetup': false};
+          state = {...state, 'needsLiveSetup': false, 'retryLiveSetup': false};
           return {'openLivePicker': false};
         case 'logout':
           state = {...state, 'loggedIn': false, 'enabled': false};
@@ -214,6 +214,30 @@ void main() {
           lessThan(tester.getBottomLeft(find.text('연결된 화면')).dy));
       expect(find.text(state['message'] as String), findsNothing);
     }
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+  testWidgets('lock-screen setup can reopen after the Android picker returns',
+      (tester) async {
+    state = {
+      ...state,
+      'loggedIn': true,
+      'enabled': true,
+      'pendingLive': true,
+      'liveEnabled': true,
+      'lockLiveSetup': true,
+      'retryLiveSetup': true,
+      'message': 'Android 적용 화면에서 잠금화면을 선택해 주세요.'
+    };
+    await entry.main();
+    await tester.pumpAndSettle();
+    expect(calls.where((call) => call.method == 'activateLive'), isEmpty);
+    final retry = find.text('잠금화면 적용 다시 열기');
+    await reveal(tester, retry);
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+    expect(calls.singleWhere((call) => call.method == 'activateLive').arguments,
+        {'retry': true});
+    expect(find.text('잠금화면 적용 다시 열기'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
   testWidgets('failed login clears password and remains on login screen',
