@@ -36,7 +36,7 @@ export function StudioCanvas({ picture, edit, tool, layered, background, foregro
   const palette = { dark: darkPalette, toggle: () => setDarkPalette(value => !value) };
   const visible = visibleLayers(tool === "live" ? "all" : selectedLayer);
   const showingLayers = layered && (tool === "layers" || tool === "live");
-  const usingCharacterRig = tool === "live" && hasSeeThroughRigLayers(picture.layers);
+  const usingCharacterRig = tool === "live" && hasSeeThroughRigLayers(picture.layers, picture.features);
   const transparentPreview = usingCharacterRig || (showingLayers && tool === "layers" && selectedLayer === "subject");
   const moving = motion.active && !usingCharacterRig;
   const dimensionsCallback = useRef(onDimensions);

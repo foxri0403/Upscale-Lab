@@ -142,7 +142,7 @@ export function Studio({ route }: { route: string }) {
   const settingsScroll = useRef<HTMLDivElement>(null);
   const [upscaleSelection, setUpscaleSelection] = useState<{ pictureId: string; jobId?: string; edge: number }>();
   const [imageDimensions, setImageDimensions] = useState({ src: "", width: 0, height: 0 });
-  const [dialog, setDialog] = useState<"apply" | "info" | "layerStack" | null>(null);
+  const [dialog, setDialog] = useState<"apply" | "info" | "layerStack" | "liveBackground" | null>(null);
   const [busy, setBusy] = useState(false);
   const [startingProcessing, setStartingProcessing] = useState(false);
   const [cancelPrompt, setCancelPrompt] = useState(false);
@@ -217,7 +217,7 @@ export function Studio({ route }: { route: string }) {
   const isFox =
     !picture?.separationDisabled && (!!(picture?.background && picture.foregrounds?.length) ||
     (!cloud && !!picture?.src.endsWith("/fox.png")));
-  const isCharacterProject = hasSeeThroughRigLayers(picture?.layers);
+  const isCharacterProject = hasSeeThroughRigLayers(picture?.layers, picture?.features);
   const hasCharacterSeparation = isCharacterProject || (isFox && picture?.features?.includes("Live 2D") &&
     !picture.features.includes("배경 분리"));
   const hasBackgroundSeparation = isFox && !hasCharacterSeparation;
@@ -227,6 +227,8 @@ export function Studio({ route }: { route: string }) {
       ? "Live 2D를 적용하려면 배경 분리 탭에서 기존 적용을 취소해 주세요."
       : undefined;
   const activeLivePartId = selectedLivePartId(picture?.layers ?? [], requestedLivePartId);
+  const pinnedLiveBackground = isCharacterProject
+    ? (picture?.layers ?? []).filter(layer => layer.layerType === "Background").map(layer => layer.id) : [];
   const backgroundSrc = picture?.background || (!cloud && isFox ? "/images/fox-background.png" : "");
   const foregroundSrcs = picture?.foregrounds?.length
     ? picture.foregrounds
@@ -411,7 +413,7 @@ export function Studio({ route }: { route: string }) {
     } catch (error) { toast((error as Error).message); }
     finally { setCopyingAsset(false); }
   }
-  async function startProcessing() {
+  async function startProcessing(keepBackground?: boolean) {
     if (!picture || published || busy || processing || checkingJob || cropAutosave.pending || separationConflict ||
         separation.tracing || separation.drawing || separation.polygonPoints) return;
     if (tool === "upscale" && !resolution) return;
@@ -420,12 +422,17 @@ export function Studio({ route }: { route: string }) {
       setSelectedLayer("all"); separation.setView("overlay");
     }
     if (tool !== "layers" && separation.dirty) return;
+    if (tool === "live" && !hasCharacterSeparation && keepBackground === undefined) {
+      setDialog("liveBackground");
+      return;
+    }
     setBusy(true); setStartingProcessing(true);
     try {
       const value = await processProject(
         picture,
         tool === "upscale" ? "Upscale" : tool === "live" ? "CharacterLayers" : "Layers",
         tool === "upscale" ? resolution : undefined,
+        keepBackground,
       );
       subjectJob.current = null;
       setJob(value);
@@ -487,6 +494,7 @@ export function Studio({ route }: { route: string }) {
             }));
             change("scale", 1);
             const refined = subjectJob.current === status.jobId;
+            if (status.operation === "CharacterLayers") setRequestedLivePartId(null);
             if (status.operation === "Layers") {
               if (refined) { separation.markApplied(); subjectJob.current = null; }
               else { separation.reload(true); setSelectedLayer("all"); separation.setView("overlay"); }
@@ -853,21 +861,33 @@ export function Studio({ route }: { route: string }) {
       </Modal>}
       {shareFeedback && <div className="studio-share-feedback" role="status" aria-live="polite"
         style={{ left: shareFeedback.x, top: shareFeedback.y - 18 }}>{shareFeedback.text}</div>}
+      {dialog === "liveBackground" && <Modal title="배경을 유지할까요?" close={() => setDialog(null)}>
+        <p>배경을 유지하면 배경을 먼저 분리하고 피사체에 Live 2D를 적용합니다. 두 단계는 한 작업으로 진행되며 Live 2D 토큰만 사용합니다.</p>
+        {capabilities?.layers === false && <Notice>현재 배경 분리 서비스에 연결할 수 없습니다.</Notice>}
+        <div className="modal-actions">
+          <button type="button" className="button secondary" onClick={() => { setDialog(null); void startProcessing(false); }}>
+            배경 없이 적용
+          </button>
+          <button type="button" className="button primary" disabled={capabilities?.layers !== true}
+            onClick={() => { setDialog(null); void startProcessing(true); }}>배경 유지</button>
+        </div>
+      </Modal>}
       {dialog === "layerStack" && <LayerStackEditor
-        layers={picture.layers ?? []}
+        layers={(picture.layers ?? []).filter(layer => !pinnedLiveBackground.includes(layer.id))}
         rig={isCharacterProject ? normalizeRig(edit.rig) : undefined}
         close={() => setDialog(null)}
         onSave={async (order, assignments) => {
           if (order) {
+            const layerIds = [...pinnedLiveBackground, ...order];
             let refreshed = picture;
             if (cloud && picture.projectId) {
               await request(`/api/projects/${picture.projectId}/layers/order`, {
-                method: "PUT", body: JSON.stringify({ layerIds: order }),
+                method: "PUT", body: JSON.stringify({ layerIds }),
               });
               refreshed = await detailPicture(picture);
             } else {
               const byId = new Map(picture.layers?.map(layer => [layer.id, layer]));
-              refreshed = { ...picture, layers: order.map((id, layerOrder) => ({ ...byId.get(id)!, layerOrder })) };
+              refreshed = { ...picture, layers: layerIds.map((id, layerOrder) => ({ ...byId.get(id)!, layerOrder })) };
             }
             if (!update(value => ({ ...value,
               images: value.images.map(item => item.id === refreshed.id ? refreshed : item),

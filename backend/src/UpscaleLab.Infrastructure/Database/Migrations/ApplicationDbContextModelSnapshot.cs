@@ -914,6 +914,11 @@ namespace UpscaleLab.Infrastructure.Database.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<bool>("KeepBackground")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("Operation")
                         .IsRequired()
                         .ValueGeneratedOnAdd()

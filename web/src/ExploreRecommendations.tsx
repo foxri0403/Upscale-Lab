@@ -8,7 +8,7 @@ import { defaultDemoInput } from "./demo-input";
 import { motionStrength } from "./editor-defaults";
 import { useCharacterRig } from "./use-character-rig";
 import { useMediaQuery } from "./use-media-query";
-import { useGyroPermission, useParallax } from "./use-parallax";
+import { useAutomaticGyro, useGyroPermission, useParallax } from "./use-parallax";
 
 type MotionKind = "scene" | "character";
 type PreviewInput = { gyro: boolean; gyroReady: boolean; reduced: boolean; kind?: MotionKind };
@@ -95,9 +95,9 @@ export function ExploreRecommendations({ pictures, selectedId, toggleDetails, ra
   const fine = useMediaQuery("(any-pointer: fine)");
   const reduced = useMediaQuery("(prefers-reduced-motion: reduce)");
   const gyro = defaultDemoInput(coarse, fine, navigator.maxTouchPoints) === "gyro";
-  const { gyroReady, gyroPending, requestGyro, gyroSupported } = useGyroPermission(gyro && !reduced);
-  const [sensorError, setSensorError] = useState("");
+  const { gyroReady, requestGyro, gyroSupported } = useGyroPermission(gyro && !reduced);
   const cards = pictures.map(picture => ({ picture, kind: motionKind(picture) }));
+  const sensorError = useAutomaticGyro(gyro && !reduced && gyroSupported && cards.some(card => card.kind), gyroReady, requestGyro);
   const order = JSON.stringify(pictures.map(picture => picture.id));
 
   useEffect(() => {
@@ -118,11 +118,6 @@ export function ExploreRecommendations({ pictures, selectedId, toggleDetails, ra
   }, [order]);
 
   if (!pictures.length) return null;
-  async function enableGyro() {
-    setSensorError("");
-    try { await requestGyro(); }
-    catch (error) { setSensorError((error as Error).message); }
-  }
   function slide(direction: -1 | 1) {
     const row = rail.current;
     if (!row) return;
@@ -136,8 +131,6 @@ export function ExploreRecommendations({ pictures, selectedId, toggleDetails, ra
   return <section className="explore-recommendations" aria-labelledby={id}>
     <div className="explore-recommendations-heading">
       <div><h2 id={id}>추천 이미지</h2><p>{ranked ? "좋아요가 많은 배경화면" : "무작위로 둘러보는 배경화면"}</p></div>
-      {gyro && !reduced && gyroSupported && !gyroReady && cards.some(card => card.kind) &&
-        <button type="button" className="button secondary" disabled={gyroPending} onClick={() => void enableGyro()}>기울기 센서 사용</button>}
     </div>
     {gyro && !reduced && !gyroReady && sensorError && <p className="notice" role="status">{sensorError}</p>}
     <div className="explore-recommendations-carousel">

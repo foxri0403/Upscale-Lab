@@ -358,6 +358,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         job.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
         job.Property(x => x.ErrorMessage).HasMaxLength(2000);
         job.Property(x => x.Operation).HasConversion<string>().HasMaxLength(30).HasDefaultValue(UpscaleLab.Domain.Enums.ProcessingOperation.Layers);
+        job.Property(x => x.KeepBackground).HasDefaultValue(false);
         job.Property(x => x.UpscaleFactor).HasDefaultValue(2);
         job.Property(x => x.TargetLongEdge).IsRequired(false);
         job.Property(x => x.SubjectMaskObjectKey).HasMaxLength(1024);

@@ -453,6 +453,7 @@ export async function processProject(
   picture: Picture,
   operation: string,
   targetLongEdge?: number,
+  keepBackground?: boolean,
 ) {
   if (!picture.projectId)
     throw new Error(
@@ -461,6 +462,7 @@ export async function processProject(
   return post<Job>(`/api/projects/${picture.projectId}/process`, {
     operation,
     ...(operation === "Upscale" ? { targetLongEdge } : {}),
+    ...(operation === "CharacterLayers" && keepBackground !== undefined ? { keepBackground } : {}),
   });
 }
 

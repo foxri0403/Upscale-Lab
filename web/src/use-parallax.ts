@@ -40,6 +40,38 @@ export function useGyroPermission(detectGranted = false) {
   return { gyroReady, gyroPending, requestGyro, gyroSupported: gyroSupported() };
 }
 
+/** Request sensor access automatically, using the first page gesture where the browser requires it. */
+export function useAutomaticGyro(enabled: boolean, ready: boolean, requestGyro: () => Promise<void>) {
+  const [error, setError] = useState("");
+  useEffect(() => {
+    setError("");
+    if (!enabled) return;
+    const orientation = typeof DeviceOrientationEvent !== "undefined"
+      ? DeviceOrientationEvent as OrientationConstructor : undefined;
+    let disposed = false;
+    let attempted = false;
+    const remove = () => {
+      window.removeEventListener("pointerup", activate, true);
+      window.removeEventListener("click", activate, true);
+      window.removeEventListener("keydown", activate, true);
+    };
+    function activate() {
+      if (attempted) return;
+      attempted = true;
+      remove();
+      void requestGyro().catch(failure => { if (!disposed) setError((failure as Error).message); });
+    }
+    if (orientation?.requestPermission) {
+      if (ready) return;
+      window.addEventListener("pointerup", activate, { capture: true, passive: true });
+      window.addEventListener("click", activate, { capture: true, passive: true });
+      window.addEventListener("keydown", activate, true);
+    } else activate();
+    return () => { disposed = true; remove(); };
+  }, [enabled, ready, requestGyro]);
+  return error;
+}
+
 type PreviewInput = { gyroReady?: boolean; pointerPadding?: number; onPointerSettled?: () => void };
 
 export function useParallax(enabled: boolean, strength: number, mouseEnabled: boolean, gyroEnabled: boolean,

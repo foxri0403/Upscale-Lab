@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, type KeyboardEvent, type Ref } from "react";
 import { BatteryFull, Check, ChevronsLeftRight, MousePointer2, Repeat2, Signal, Smartphone } from "lucide-react";
-import { useParallax } from "./use-parallax";
+import { useAutomaticGyro, useParallax } from "./use-parallax";
 import { useCharacterRig } from "./use-character-rig";
 import { characterImage, portraitImage, portraitRig, showcaseCharacter, showcasePortrait, showcaseRig, type Live2DExample } from "./showcase-character";
 import { defaultDemoInput } from "./demo-input";
@@ -78,7 +78,6 @@ export function MotionDemo(props: MotionDemoProps) {
   const example = props.variant === "character" ? props.example : "character";
   const [input, setInput] = useState(currentDemoInput);
   const [sensorMissing, setSensorMissing] = useState(false);
-  const [error, setError] = useState("");
   const [inView, setInView] = useState(false);
   const [reduced, setReduced] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const [keyboard, setKeyboard] = useState({ x: 0, y: 0 });
@@ -89,6 +88,7 @@ export function MotionDemo(props: MotionDemoProps) {
   const title = variant === "character" ? (portrait ? "Live 2D 실사 인물" : "Live 2D 캐릭터") : "배경·피사체 분리";
   const moving = !reduced;
   const motion = useParallax(moving && inView, 85, input === "mouse", input === "gyro", variant, keyboard, true);
+  const error = useAutomaticGyro(input === "gyro" && moving, motion.gyroReady, motion.requestGyro);
   const rig = useCharacterRig(variant === "character" && moving && inView && !artworkError,
     portrait ? portraitRig : showcaseRig, example, motion.position);
 
@@ -105,34 +105,6 @@ export function MotionDemo(props: MotionDemoProps) {
     queries.forEach(query => query.addEventListener("change", change));
     return () => queries.forEach(query => query.removeEventListener("change", change));
   }, []);
-
-  useEffect(() => {
-    setError("");
-    if (input !== "gyro" || !moving) return;
-    let disposed = false;
-    let attempted = false;
-    const remove = () => {
-      window.removeEventListener("pointerup", activate, true);
-      window.removeEventListener("click", activate, true);
-      window.removeEventListener("keydown", activate, true);
-    };
-    function activate() {
-      if (attempted) return;
-      attempted = true;
-      remove();
-      // Invoked directly from the first page gesture on permission-gated browsers.
-      void motion.requestGyro().catch(failure => { if (!disposed) setError((failure as Error).message); });
-    }
-    const orientation = typeof DeviceOrientationEvent !== "undefined"
-      ? DeviceOrientationEvent as typeof DeviceOrientationEvent & { requestPermission?: () => Promise<string> } : undefined;
-    if (orientation?.requestPermission) {
-      if (motion.gyroReady) return;
-      window.addEventListener("pointerup", activate, { capture: true, passive: true });
-      window.addEventListener("click", activate, { capture: true, passive: true });
-      window.addEventListener("keydown", activate, true);
-    } else activate();
-    return () => { disposed = true; remove(); };
-  }, [input, moving, motion.gyroReady, motion.requestGyro]);
 
   useEffect(() => {
     const stage = motion.stage.current;

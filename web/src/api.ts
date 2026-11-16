@@ -251,6 +251,7 @@ export type Project = {
 };
 export type Job = {
   targetLongEdge?: number | null;
+  keepBackground?: boolean;
   jobId: string;
   status: string;
   progress: number;
