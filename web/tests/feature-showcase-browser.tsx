@@ -76,7 +76,8 @@ element<HTMLButtonElement>("#run-tests").onclick = async () => {
       await until(() => getComputedStyle(portrait()).visibility === "visible", "portrait layers did not load");
       assert(toggle.textContent === "2D 캐릭터로 전환", "portrait must be selected by default");
       assert(phone().src.endsWith("live2d-portrait.jpg"), "phone must match the portrait");
-      assert(copy.textContent?.includes("인물 사진에") && copy.textContent.includes("머리카락은 고개가 기운 뒤"), "portrait copy missing");
+      assert(copy.textContent?.includes("인물 사진에 자연스러운 움직임을 더해 보세요.") &&
+        copy.textContent.includes("시선이 따라오고 머리카락이 살짝 흔들립니다."), "portrait copy missing");
       const button = toggle.getBoundingClientRect(), stage = demo.getBoundingClientRect();
       assert(stage.right - button.right < 20 && button.right < stage.right &&
         button.top - stage.top < 20 && button.top > stage.top, "toggle is outside the image's upper-right corner");
@@ -150,7 +151,8 @@ element<HTMLButtonElement>("#run-tests").onclick = async () => {
         assert(permissionCalls === 1, "duplicate native prompt");
         sensorMove(); await frame(); assert(motionX("character") === 0, "denied sensor moved avatar");
       } else {
-        neutral(); await frame();
+        neutral();
+        await until(() => Math.abs(motionX("character")) < .1, "demo did not return to neutral");
         if (mobile) {
           point(.95); await frame(); assert(Math.abs(motionX("character")) < .1, "mobile should use gyro, not mouse");
           sensorMove();
