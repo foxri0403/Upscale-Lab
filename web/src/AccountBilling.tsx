@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { post, request } from "./api";
 import { clientKey, getTossSdk } from "./toss-payments";
 import { Busy, Modal } from "./ui";
@@ -35,7 +36,7 @@ const count = new Intl.NumberFormat("ko-KR");
 const date = new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeZone: "Asia/Seoul" });
 const paymentDate = (value: string) => date.format(new Date(value));
 const compactDate = new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Seoul" });
-const renewalDate = (value: string) => compactDate.format(new Date(value)).replace(/\s/g, "");
+const planDate = (value: string) => compactDate.format(new Date(value)).replace(/\s/g, "");
 const money = (amount: number) => `${count.format(amount)}원`;
 const tokens = (amount: number) => `${count.format(amount)}개`;
 const address = "/api/payments/account";
@@ -49,6 +50,7 @@ export function AccountBilling({ close }: { close: () => void }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [refunding, setRefunding] = useState(false);
+  const [authorizingCard, setAuthorizingCard] = useState(false);
   const lock = useRef(false);
   const refundTerms = useRef<HTMLHeadingElement>(null);
   const refundTrigger = useRef<HTMLButtonElement>(null);
@@ -126,12 +128,16 @@ export function AccountBilling({ close }: { close: () => void }) {
       sessionStorage.setItem(cardChangeStorage, JSON.stringify(change));
       const returnUrl = new URL("/app/billing", location.origin);
       try {
+        // Browser-native modal dialogs cover SDK iframes inserted outside the dialog.
+        flushSync(() => setAuthorizingCard(true));
         await sdk(clientKey).payment({ customerKey: change.customerKey }).requestBillingAuth({
           method: "CARD", successUrl: returnUrl + "?cardChange=success", failUrl: returnUrl + "?cardChange=fail",
         });
       } catch (cause) {
         sessionStorage.removeItem(cardChangeStorage);
         throw cause;
+      } finally {
+        setAuthorizingCard(false);
       }
       return "토스페이먼츠 인증 창에서 새 카드를 등록해 주세요.";
     });
@@ -163,7 +169,8 @@ export function AccountBilling({ close }: { close: () => void }) {
     : [{ payment, at: payment.paidAt, refund: false }]).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   const refundable = details?.payments.filter(payment => payment.refundableTokens > 0);
 
-  return <Modal title={refunding ? "토큰 환불" : "결제 정보"} wide close={refunding ? backToBilling : close} dismissible={!busy}>
+  return <Modal title={refunding ? "토큰 환불" : "결제 정보"} wide close={refunding ? backToBilling : close}
+    dismissible={!busy} suspended={authorizingCard}>
     <div className="account-billing" aria-busy={busy || (!details && !error)}>
       {error && <p className="form-error" role="alert">{error}</p>}
       {message && <p className="notice" role="status">{message}</p>}
@@ -206,12 +213,12 @@ export function AccountBilling({ close }: { close: () => void }) {
             <dt>구독 플랜</dt>
             <dd>{currentPlan}
               {subscribed && !subscription.cancelAtPeriodEnd && subscription.nextBillingAtUtc &&
-                ` - 재결제일 ${renewalDate(subscription.nextBillingAtUtc)}`}
+                ` - 재결제일 ${planDate(subscription.nextBillingAtUtc)}`}
+              {subscribed && subscription.cancelAtPeriodEnd && ` - 해지 예약됨${subscription.currentPeriodEndUtc
+                ? ` · ${planDate(subscription.currentPeriodEndUtc)} 종료` : ""}`}
               {subscription?.status === "PastDue" && " · 갱신 결제 미완료"}</dd>
             {subscription?.status === "Active" && !subscription.cancelAtPeriodEnd && <dd className="account-billing-action">
               <button className="button secondary" type="button" disabled={busy} onClick={() => void cancelSubscription()}>구독 해지 예약</button></dd>}
-            {subscribed && subscription.cancelAtPeriodEnd && <dd className="account-billing-date">해지 예약됨
-              {subscription.currentPeriodEndUtc && ` · ${paymentDate(subscription.currentPeriodEndUtc)} 종료`}</dd>}
           </div>
           <div>
             <dt>잔여 추가 구매 토큰</dt>

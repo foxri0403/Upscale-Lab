@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { X, Layers3, LoaderCircle } from "lucide-react";
 import { filterStyle, type Picture } from "./model";
 export { navigate } from "./navigation";
@@ -54,6 +54,7 @@ export function Modal({
   close,
   wide = false,
   dismissible = true,
+  suspended = false,
   className = "",
 }: {
   title: string;
@@ -61,16 +62,24 @@ export function Modal({
   close: () => void;
   wide?: boolean;
   dismissible?: boolean;
+  suspended?: boolean;
   className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
   const titleId = useId();
   const closeRef = useRef(close);
   closeRef.current = dismissible ? close : () => {};
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
+  useLayoutEffect(() => {
     const dialog = ref.current!;
-    dialog.showModal();
+    if (suspended) { if (dialog.open) dialog.close(); }
+    else if (!dialog.open) {
+      opener.current ??= document.activeElement as HTMLElement | null;
+      dialog.showModal();
+    }
+  }, [suspended]);
+  useEffect(() => {
+    const dialog = ref.current!;
     const cancel = (e: Event) => {
       e.preventDefault();
       closeRef.current();
@@ -78,8 +87,8 @@ export function Modal({
     dialog.addEventListener("cancel", cancel);
     return () => {
       dialog.removeEventListener("cancel", cancel);
-      dialog.close();
-      previous?.focus();
+      if (dialog.open) dialog.close();
+      opener.current?.focus();
     };
   }, []);
   return (

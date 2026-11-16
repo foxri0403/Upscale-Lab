@@ -95,6 +95,7 @@ window.fetch = async (input, init) => {
 Object.assign(window, { TossPayments: () => ({
   payment: () => ({
     async requestBillingAuth({ successUrl, failUrl }: { successUrl: string; failUrl: string }) {
+      if (document.querySelector("dialog:modal")) throw new Error("결제 정보가 카드 인증창을 가리고 있습니다.");
       const accepted = window.confirm("모의 결제사에서 새 카드 인증을 승인할까요?");
       const callback = new URL(accepted ? successUrl : failUrl);
       if (accepted) {

@@ -196,6 +196,11 @@ summary.image-tag-trigger::-webkit-details-marker { display: none; }
 .explore-recommendation:focus-visible { outline-offset: -3px; }
 .explore-recommendation .picture-view { width: 100%; height: 100%; }
 .explore-recommendation img { object-fit: contain; }
+.recommendation-motion { width: 100%; height: 100%; }
+.recommendation-motion-active .picture-view img:not(:first-child),
+.recommendation-motion-active.recommendation-motion-character-only .picture-view img {
+  translate: var(--motion-x, 0px) var(--motion-y, 0px);
+}
 .explore-recommendation-title {
   position: absolute;
   left: 0;
@@ -206,6 +211,7 @@ summary.image-tag-trigger::-webkit-details-marker { display: none; }
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  pointer-events: none;
   background: linear-gradient(transparent, #151a24e8);
 }
 .explore-recommendations-arrow {

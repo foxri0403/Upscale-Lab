@@ -16,7 +16,7 @@ export function FramedWallpaper({ picture, size, frame, motion, rig }: {
   const characterRig = useCharacterRig(character && picture.edit?.foreground !== false && !!motion?.active, rig, layerKey, motion?.position);
   const partForSource = characterRig.active ? (source: string) => {
     const layer = picture.layers?.find(value => value.imageUrl === source);
-    const file = picture.wallpaperParts?.find(value => value.source === source);
+    const file = picture.background ? undefined : picture.wallpaperParts?.find(value => value.source === source);
     return rigPart(layer?.layerType ?? file?.role ?? "", layer?.id ?? file?.layerId ?? undefined, rig?.partAssignments);
   } : undefined;
   return <div className={`wallpaper-framed-image ${character ? "wallpaper-character-frame" : ""}`} ref={characterRig.stage} aria-label={picture.name}>
