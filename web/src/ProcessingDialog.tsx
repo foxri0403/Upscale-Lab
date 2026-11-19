@@ -1,10 +1,11 @@
 import type { Job } from "./api";
+import type { ReactNode } from "react";
 import { JobProgress } from "./JobProgress";
 import { processingLabel } from "./processing-status";
 import { Busy, Modal } from "./ui";
 
 export function ProcessingDialog({ job, operation, checkingJob = false, cancelPrompt = false,
-  cancelling = false, canCancel, onCancelPrompt, onCancel }: {
+  cancelling = false, canCancel, onCancelPrompt, onCancel, footer }: {
   job?: Job | null;
   operation: string;
   checkingJob?: boolean;
@@ -13,6 +14,7 @@ export function ProcessingDialog({ job, operation, checkingJob = false, cancelPr
   canCancel: boolean;
   onCancelPrompt: (show: boolean) => void;
   onCancel: () => void;
+  footer?: ReactNode;
 }) {
   return <Modal title={cancelPrompt ? "작업을 취소할까요?" : "이미지 처리 중"} close={() => {}} dismissible={false}>
     {cancelPrompt ? <>
@@ -27,5 +29,6 @@ export function ProcessingDialog({ job, operation, checkingJob = false, cancelPr
       <p className="notice">작업이 끝날 때까지 다른 기능이나 화면으로 전환할 수 없습니다.</p>
       <button type="button" className="button secondary full" disabled={!canCancel} onClick={() => onCancelPrompt(true)}>작업 취소</button>
     </>}
+    {footer}
   </Modal>;
 }

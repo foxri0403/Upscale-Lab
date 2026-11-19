@@ -11,7 +11,8 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     // Reuse the deployed cloud UI without local sample accounts or LOCAL PREVIEW labels.
-    define: mode === "production-ui" ? { "import.meta.env.VITE_APP_MODE": JSON.stringify("cloud") } : {},
+    define: mode === "production-ui" ? { "import.meta.env.VITE_APP_MODE": JSON.stringify("cloud") }
+      : mode === "local-test" ? { "import.meta.env.VITE_APP_MODE": JSON.stringify("demo") } : {},
     server: {
       host: "127.0.0.1",
       proxy: {

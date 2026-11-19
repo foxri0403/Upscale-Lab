@@ -152,6 +152,20 @@ async function until(fn, label) {
     const zeroLikeOrder = await evaluate("[...document.querySelectorAll('.explore-recommendation-title')].map(el => el.textContent)");
     await navigate("/app/explore?zero-likes-repeat", "!!document.querySelector('.explore-recommendation')");
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.explore-recommendation-title')].map(el => el.textContent)"), zeroLikeOrder);
+    await navigate("/tests/local-preview.html", "!!document.querySelector('.local-preview-links')");
+    await click("Live 2D 작업실 열기");
+    await until(() => evaluate("location.pathname === '/app/studio' && !!document.querySelector('.studio-editor')").catch(() => false), "local preview studio");
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"얼굴 반응 세부 설정\"]').disabled"), true);
+    await navigate(fixture, "!!document.querySelector('[aria-label=\"처리 기능\"]')");
+    await click("0~100% 자동 재생");
+    await until(() => evaluate("document.querySelector('dialog progress')?.value > 0"), "automatic progress starts");
+    await until(() => evaluate("document.querySelector('dialog progress')?.value >= 30"), "automatic progress advances");
+    await click("작업 취소");
+    await until(() => evaluate("!document.querySelector('dialog progress')"), "auto cancel prompt");
+    await click("작업 계속하기");
+    await until(() => evaluate("!!document.querySelector('dialog progress')"), "auto continues");
+    // The full replay takes twelve seconds, so check it in two bounded waits.
+    await until(() => evaluate("!document.querySelector('dialog[open]') && document.body.textContent.includes('가상 작업 100% 완료')"), "automatic completion");
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ passed: true, milestones, operations: Object.keys(operations), controls: "equal widths, gated details, gray text", gallery: "likes descending, saved image clicks inert", screenshots: ["tmp/editor-ui-mobile.png", "tmp/editor-ui-desktop.png"] }, null, 2));
   } finally {
