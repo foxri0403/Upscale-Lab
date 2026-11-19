@@ -1,0 +1,110 @@
+name: Android unsigned APK
+
+on:
+  push:
+    branches:
+      - inho/eyemotionfix
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    env:
+      FLUTTER_VERSION: '3.47.9'
+      FLUTTER_ARCHIVE_SHA256: 25ed8c3c29d51a7353f2a944310b478af8214920639524b19c50a19e6c044c5a
+      ANDROID_BUILD_TOOLS: '36.0.0'
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter and Android SDK packages
+        run: |
+          archive="$RUNNER_TEMP/flutter.tar.xz"
+          curl --fail --silent --show-error --location --retry 3 \
+            "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_$FLUTTER_VERSION-stable.tar.xz" \
+            --output "$archive"
+          printf '%s  %s\n' "$FLUTTER_ARCHIVE_SHA256" "$archive" | sha256sum --check
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          rm -- "$archive"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+          sdkmanager --sdk_root="$ANDROID_HOME" 'platforms;android-36' "build-tools;$ANDROID_BUILD_TOOLS" 'ndk;28.2.13676358'
+
+      - name: Build unsigned release APK
+        working-directory: mobile
+        env:
+          API_BASE_URL: ${{ vars.UPSCALE_COMPANION_API_BASE_URL }}
+          ORG_GRADLE_PROJECT_ciUnsignedRelease: 'true'
+        run: |
+          if [[ "$API_BASE_URL" != https://* ]]; then
+            echo "::error::Set UPSCALE_COMPANION_API_BASE_URL to the existing public HTTPS origin."
+            exit 1
+          fi
+          chmod +x android/gradlew
+          flutter pub get --enforce-lockfile
+          flutter build apk --release --no-pub \
+            --dart-define="API_BASE_URL=$API_BASE_URL" \
+            --dart-define=COMPANION_LOCAL_TEST=false \
+            --dart-define=COMPANION_ALLOW_HTTP=false
+
+      - name: Verify and stage unsigned APK
+        id: apk
+        working-directory: mobile
+        run: |
+          read -r version build < <(sed -nE 's/^version: ([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)$/\1 \2/p' pubspec.yaml)
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          tools="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS"
+          badging=$("$tools/aapt2" dump badging "$apk")
+          if ! grep -Fq "package: name='com.livelayer.app' versionCode='$build' versionName='$version' " <<< "$badging" ||
+              grep -q '^application-debuggable' <<< "$badging"; then
+            echo 'Unexpected APK package ID, version, or debuggable flag.'
+            exit 1
+          fi
+          # A failed verification alone cannot distinguish an unsigned APK from an invalid signature.
+          python3 - "$apk" <<'PY'
+          import re
+          import sys
+          import zipfile
+
+          with open(sys.argv[1], "rb") as source, zipfile.ZipFile(source) as archive:
+              if archive.start_dir >= 16:
+                  source.seek(archive.start_dir - 16)
+                  if source.read(16) == b"APK Sig Block 42":
+                      sys.exit("Unexpected APK signing block.")
+              jar_signature = re.compile(r"META-INF/(?:[^/]+\.(?:SF|RSA|DSA|EC)|SIG-[^/]+)", re.IGNORECASE)
+              if any(jar_signature.fullmatch(name) for name in archive.namelist()):
+                  sys.exit("Unexpected JAR signature entries.")
+          PY
+          if verification=$("$tools/apksigner" verify --print-certs "$apk" 2>&1); then
+            echo 'Expected an unsigned APK, but apksigner found a valid signature.'
+            exit 1
+          elif [[ $? -ne 1 || "$verification" != *'DOES NOT VERIFY'* ]]; then
+            printf '%s\n' "$verification"
+            echo 'apksigner could not verify the unsigned state.'
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/android-apk"
+          filename="Upscale_Lab-$version+$build-unsigned.apk"
+          cp "$apk" "$RUNNER_TEMP/android-apk/$filename"
+          cd "$RUNNER_TEMP/android-apk"
+          sha256sum "$filename" > "$filename.sha256"
+          echo "artifact_name=android-$version-$build-unsigned" >> "$GITHUB_OUTPUT"
+
+      - name: Upload unsigned APK and checksum
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.apk.outputs.artifact_name }}
+          path: ${{ runner.temp }}/android-apk
+          if-no-files-found: error
+          compression-level: 0

@@ -34,3 +34,45 @@ cd android
 릴리스 서명은 Git 밖 `C:\UpscaleLab-Secrets\key.properties`를 `UPSCALE_SIGNING_PROPERTIES_FILE`로 지정한다. [서명 설정 예시](android/key.properties.example)의 네 항목을 로컬에서 채우고, `keytool -list -v`로 지정한 JKS 별칭의 인증서 SHA-256을 기존 배포 APK와 대조한다. 빌드 후 각 APK를 `apksigner verify --print-certs`로 검사해 서명 인증서 SHA-256이 같은지 확인한다. `aapt2 dump badging`에서 같은 패키지 ID `com.livelayer.app`과 더 높은 `versionCode`를 확인한 다음 기존 앱을 삭제하지 않고 업데이트를 검증한다. [버전 관리 및 서명 규칙](../AGENTS.md)
 
 배경화면 동기화는 로그인한 동안 활성화한다. Live 2D 설정은 계정·서버별로 저장하며 기본은 꺼짐이다. 켜면 앱 내 사용 의사를 기록하고, 대기 중인 결과물이 있을 때 최초 Android 시스템 적용 화면을 연다. 첫 홈화면 설정을 취소하면 설정을 끄고, 잠금화면 적용은 기존 설정을 유지한 채 다시 시도할 수 있다. 실제 엔진의 적용 확인 전에는 서버에 완료를 보고하지 않는다. 끄거나 로그아웃하면 움직임을 중지하고 정적인 화면은 유지한다. 일반 알람을 꺼도 Android의 필수 foreground service 실행 알림은 유지한다. 계정 정보는 조회 전용이다.
+
+## GitHub Actions에서 빌드하고 PC에서 서명하기
+
+1. GitHub 저장소의 **Settings → Secrets and variables → Actions → Variables**에 공개 운영 HTTPS origin을 `UPSCALE_COMPANION_API_BASE_URL` 저장소 변수로 등록한다. 기존 APK와 같은 origin을 사용한다. URL 경로·인증 정보는 넣지 않는다.
+2. 워크플로가 포함된 변경을 `inho/eyemotionfix`에 push하면 Ubuntu에서 무서명 릴리스 APK를 빌드한다. 성공한 실행의 **Actions → Artifacts**에서 `android-1.8.4-51-unsigned`를 내려받아 압축을 푼다. APK와 SHA-256 파일이 들어 있다.
+3. 서명은 Android SDK Build Tools 36.0.0과 Java가 설치된 PC에서 진행한다. JKS는 Git 밖에 둔다. 아래 PowerShell 예시에서 도구·JKS·기존 APK 경로를 지정하고, 비밀번호는 `apksigner`의 로컬 프롬프트에 입력한다.
+
+```powershell
+$env:JAVA_HOME = '<JDK 17 경로>'
+$tools = '<Android SDK 경로>\build-tools\36.0.0'
+$store = '<팀 JKS의 전체 경로>'
+$previous = '<기존 1.8.2 APK의 전체 경로>'
+$unsigned = 'Upscale_Lab-1.8.4+51-unsigned.apk'
+$aligned = 'Upscale_Lab-1.8.4+51-aligned-unsigned.apk'
+$signed = 'Upscale_Lab-1.8.4-.apk'
+$expected = (Get-Content -LiteralPath "$unsigned.sha256" -TotalCount 1) -split '\s+' | Select-Object -First 1
+if ((Get-FileHash -LiteralPath $unsigned -Algorithm SHA256).Hash -ine $expected) { throw '다운로드 SHA-256 불일치' }
+
+& "$tools\zipalign.exe" -P 16 4 $unsigned $aligned
+if ($LASTEXITCODE) { throw 'APK 정렬 실패' }
+if (Test-Path -LiteralPath $signed) { throw '같은 이름의 출력 APK가 있습니다.' }
+& "$tools\apksigner.bat" sign --ks $store --ks-key-alias upscalelab --out $signed $aligned
+if ($LASTEXITCODE) { throw 'APK 서명 실패' }
+& "$tools\zipalign.exe" -c -P 16 4 $signed
+if ($LASTEXITCODE) { throw '서명된 APK 정렬 검증 실패' }
+
+$certificates = foreach ($apk in @($previous, $signed)) {
+    $report = & "$tools\apksigner.bat" verify --print-certs $apk
+    if ($LASTEXITCODE) { throw 'APK 서명 검증 실패' }
+    $signers = @($report | Select-String '^Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]{64})$')
+    if ($signers.Count -ne 1) { throw 'APK 서명자 정보를 확인할 수 없습니다.' }
+    $signers[0].Matches[0].Groups[1].Value
+}
+if ($certificates[0] -ine $certificates[1]) { throw '기존 APK와 서명 인증서가 다릅니다.' }
+$badging = & "$tools\aapt2.exe" dump badging $signed
+if ($LASTEXITCODE -or !($badging -match "^package: name='com\.livelayer\.app' versionCode='51' versionName='1\.8\.4'( |$)")) {
+    throw '신규 APK의 패키지 ID 또는 버전이 예상과 다릅니다.'
+}
+$badging | Select-String '^package:'
+```
+
+이 명령은 기존·신규 APK의 서명 인증서 SHA-256이 같은지, 신규 APK가 `com.livelayer.app`의 `1.8.4+51`인지 확인한다. 서명된 APK의 업데이트 검증은 기존 앱을 설치한 기기에서 앱을 삭제하지 않고 진행한다.

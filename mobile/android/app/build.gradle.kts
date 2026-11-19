@@ -9,17 +9,19 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val ciUnsignedRelease = providers.gradleProperty("ciUnsignedRelease").orNull?.toBooleanStrict() ?: false
+
 // Credentials stay outside Git. Environment variables override local properties.
 val sharedSigningFile = rootProject.file(
     providers.environmentVariable("UPSCALE_SIGNING_PROPERTIES_FILE")
         .orElse("key.properties").get()
 )
 val sharedSigningProperties = Properties().apply {
-    if (sharedSigningFile.isFile) sharedSigningFile.reader(Charsets.UTF_8).use { load(it) }
+    if (!ciUnsignedRelease && sharedSigningFile.isFile) sharedSigningFile.reader(Charsets.UTF_8).use { load(it) }
 }
 fun signingValue(property: String, environment: String): String? =
-    providers.environmentVariable(environment).orNull
-        ?: sharedSigningProperties.getProperty(property)
+    if (ciUnsignedRelease) null
+    else providers.environmentVariable(environment).orNull ?: sharedSigningProperties.getProperty(property)
 
 val sharedStorePath = signingValue("storeFile", "UPSCALE_KEYSTORE_FILE")
 val sharedStorePassword = signingValue("storePassword", "UPSCALE_KEYSTORE_PASSWORD")
@@ -70,7 +72,8 @@ val validateSharedSigning = tasks.register("validateSharedSigning") {
     }
 }
 
-tasks.matching { it.name == "validateSigningRelease" }.configureEach {
+// AGP can omit validateSigningRelease when no usable signing config is present.
+tasks.matching { !ciUnsignedRelease && (it.name == "packageRelease" || it.name == "validateSigningRelease") }.configureEach {
     dependsOn(validateSharedSigning)
 }
 
@@ -102,7 +105,7 @@ android {
         }
         getByName("release") {
             // Never silently substitute this machine's debug certificate.
-            signingConfig = signingConfigs.getByName("shared")
+            signingConfig = if (ciUnsignedRelease) null else signingConfigs.getByName("shared")
             buildConfigField("String", "COMPANION_API_BASE_URL", configuredServer ?: "\"\"")
         }
     }
