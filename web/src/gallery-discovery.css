@@ -1,4 +1,5 @@
 .image-card-cover, .explore-recommendation { position: relative; }
+.image-card-cover:disabled, .image-title:disabled { opacity: 1; cursor: default; }
 .image-platform-badges, .image-engagement-badges {
   position: absolute;
   z-index: 1;

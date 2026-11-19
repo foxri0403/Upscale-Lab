@@ -39,7 +39,6 @@ import { isImageShared, projectSharing } from "./image-sharing";
 import { mapDeviceLibrary } from "./device-state";
 import { galleryImages } from "./gallery-library";
 import { validateImageUpload } from "./image-upload";
-import { croppedLive2dFileName, live2dCropRequired, maxLive2dInputBytes } from "./live2d-crop-input";
 import type { WallpaperFrame } from "./wallpaper-frame";
 
 const manifests = new Map<string, { picture: Picture; until: number }>();
@@ -287,54 +286,6 @@ export async function prepareEditableProject(picture: Picture): Promise<Picture>
   // The new project has its own ID and processing quota/ownership.
   // The original shared asset remains in the library for direct application.
   return project;
-}
-
-/**
- * Bake the current visible crop into a NEW editable project, without mutating
- * the original image or feeding an un-cropped source to See-through.
- * If an upscale result is present, renderImage reads that latest processed image.
- * Keep filters, zoom and animation out of the inference input.
- */
-export async function createCroppedLive2dProject(picture: Picture, edit: Edit): Promise<Picture> {
-  if (!picture.projectId) throw new Error("편집 가능한 프로젝트에서만 Live2D 분리를 시작할 수 있습니다.");
-  if (!live2dCropRequired(edit)) throw new Error("자르기 탭에서 16:9, 9:16 또는 사용자 영역을 먼저 선택해 주세요.");
-
-  let image = await renderImage(picture, {
-    ...defaultEdit,
-    crop: edit.crop,
-    cropRegion: edit.cropRegion,
-    filter: "original",
-    scale: 1,
-    foreground: true,
-  });
-  let extension: "png" | "jpg" = "png";
-  let mime = "image/png";
-  // See-through accepts at most 16MiB. A 4K PNG can exceed the limit;
-  // when necessary encode a high-quality JPEG WITHOUT changing its dimensions.
-  if (image.size > maxLive2dInputBytes) {
-    const bitmap = await createImageBitmap(image);
-    try {
-      const canvas = document.createElement("canvas");
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("이미지 변환 기능을 사용할 수 없습니다.");
-      context.fillStyle = "#fff";
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(bitmap, 0, 0);
-      const compressed = await new Promise<Blob>((resolve, reject) =>
-        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("JPEG 변환에 실패했습니다.")), "image/jpeg", 0.93));
-      image = compressed;
-      extension = "jpg";
-      mime = "image/jpeg";
-    } finally {
-      bitmap.close();
-    }
-  }
-  if (image.size > maxLive2dInputBytes) {
-    throw new Error("Live2D 모델 입력 제한(16MB)을 초과했습니다. 더 작은 영역을 선택해 주세요.");
-  }
-  return uploadProject(new File([image], croppedLive2dFileName(picture.name, edit.crop, extension), { type: mime }), false);
 }
 
 export async function loadProjectPicture(id: string): Promise<Picture> {

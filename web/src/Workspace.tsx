@@ -79,7 +79,7 @@ import { ToastBubble, type ToastMessage } from "./ToastBubble";
 import { AccountSettings, AccountAvatar, profileSession, type AccountProfile } from "./AccountSettings";
 import { AccountBilling } from "./AccountBilling";
 import type { PlatformTag } from "./platform-tags";
-import { randomRecommendations, sortExplore } from "./explore-feed";
+import { sortExplore } from "./explore-feed";
 import { ExploreRecommendations } from "./ExploreRecommendations";
 import { useExploreResults } from "./use-explore-results";
 import "./gallery-discovery.css";
@@ -746,7 +746,6 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   ]);
   const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformTag[]>([]);
   const [sort, setSort] = useState("recent");
-  const [recommendationSeed] = useState(() => Math.floor(Math.random() * 2 ** 32));
   const [localEngagement, setLocalEngagement] = useState(() => read<Record<string, { users: string[]; downloads: number }>>("upscale.demo.engagement.v1", {}));
   const [engagement, setEngagement] = useState<Record<string, Pick<Picture, "likes" | "liked">>>({});
   const [liking, setLiking] = useState(false);
@@ -771,7 +770,6 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const [editing, setEditing] = useState<Picture | null>(null);
   const [unpublishing, setUnpublishing] = useState<Picture | null>(null);
   const [unpublishBusy, setUnpublishBusy] = useState(false);
-  const [viewing, setViewing] = useState<Picture | null>(null);
   const [deleting, setDeleting] = useState<Picture | null>(null);
   const [importing, setImporting] = useState(false);
   const [applyingPicture, setApplyingPicture] = useState<Picture | null>(null);
@@ -887,7 +885,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   }
   async function openOwnPicture(picture: Picture) {
     if (importing) return;
-    if (picture.isReadOnly) { setViewing(picture); return; }
+    if (picture.isReadOnly) return;
     if (!cloud || !picture.assetId || picture.projectId) {
       navigate(`/app/studio?id=${encodeURIComponent(picture.id)}`);
       return;
@@ -909,9 +907,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const rankedRecommendations = sortExplore([...new Map(
     [...all, ...(ranked?.pictures || [])].map(picture => [picture.id, picture]),
   ).values()].map(withEngagement), "likes");
-  const hasLikedRecommendations = (rankedRecommendations[0]?.likes ?? 0) > 0;
-  const recommendations = hasLikedRecommendations ? rankedRecommendations.slice(0, likedRecommendationLimit)
-    : randomRecommendations(all.map(withEngagement), recommendationSeed);
+  const recommendations = rankedRecommendations.slice(0, likedRecommendationLimit);
   async function importPicture(p: Picture, open: boolean) {
     if (importing || (open && !isOwnExplorePicture(p, session.id, ownedPictures))) return;
     setImporting(true);
@@ -997,7 +993,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
         )}
       </div>
       {explore && <ExploreRecommendations pictures={recommendations} selectedId={preview?.id}
-        toggleDetails={toggleDetails} ranked={hasLikedRecommendations} />}
+        toggleDetails={toggleDetails} />}
       {explore && <h2 className="explore-list-title">공유 이미지</h2>}
       <div className="gallery-toolbar">
         <label className="search-field">
@@ -1076,6 +1072,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
               editMetadata={() => setEditing(p)}
               unpublish={explore && isOwnExplorePicture(p, session.id, ownedPictures) ? () => setUnpublishing(p) : undefined}
               remove={() => setDeleting(p)}
+              apply={p.isReadOnly && !explore ? () => setApplyingPicture(p) : undefined}
             />
           ))}
         </div>
@@ -1092,14 +1089,6 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
         toggleLike={isOwnExplorePicture(selectedPicture, session.id, ownedPictures) ? undefined : () => void toggleLike(selectedPicture)}
         liking={liking}
       />}
-      {viewing && <Modal title={viewing.name} close={() => setViewing(null)}>
-        <div className="explore-details-preview saved-image-preview"><PictureView picture={viewing} /></div>
-        <Notice>다른 사용자의 저장 이미지입니다. 기기에 적용할 때 화면 비율과 위치를 조절할 수 있습니다.</Notice>
-        <button type="button" className="button primary full" onClick={() => {
-          setApplyingPicture(viewing);
-          setViewing(null);
-        }}><Monitor size={18} /> 연결된 기기에 적용</button>
-      </Modal>}
       {applyingPicture && <ApplyWallpaperDialog
         picture={(explore ? ownedExplorePicture(applyingPicture, session.id, ownedPictures)
           : ownedPictures.find(item => item.id === applyingPicture.id)) ?? applyingPicture}

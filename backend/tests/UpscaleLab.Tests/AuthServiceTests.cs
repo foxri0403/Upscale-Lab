@@ -13,6 +13,38 @@ public sealed partial class AuthServiceTests
     private const string ValidPassword = "Correct-horse1!";
 
     [Fact]
+    public async Task Cleanup_RemovesExpiredLegacyUsers_AndFreesEmailAndUsername()
+    {
+        await using var db = CreateDbContext(); var clock = new TestClock();
+        var (service, provider) = CreateService(db, clock);
+        var expired = new User { Email = "legacy@example.com", Username = "legacy", EmailVerificationExpiresAt = clock.Now };
+        var active = new User { Email = "active@example.com", Username = "active", EmailVerificationExpiresAt = clock.Now.AddMinutes(1) };
+        var member = new User { Email = "member@example.com", Username = "member", IsEmailVerified = true, EmailVerificationExpiresAt = clock.Now };
+        db.AddRange(expired, active, member, new UserSetting { UserId = expired.Id });
+        await db.SaveChangesAsync();
+        await service.DeleteExpiredRegistrationsAndSessionsAsync(default);
+        Assert.False(await db.Users.AnyAsync(x => x.Id == expired.Id)); Assert.Empty(db.UserSettings);
+        Assert.Equal(2, await db.Users.CountAsync()); Assert.Equal(expired.Email, Assert.Single(provider.Deletions));
+        await service.RegisterAsync(new(expired.Email, expired.Username, ValidPassword), default);
+        Assert.Equal(expired.Email, (await db.PendingRegistrations.SingleAsync()).Email);
+    }
+
+    [Fact]
+    public async Task LegacyCleanup_ProtectsConfirmedIdentitiesAndRetriesProviderFailure()
+    {
+        await using var db = CreateDbContext(); var clock = new TestClock();
+        var (service, provider) = CreateService(db, clock);
+        db.Users.Add(new User { Email = "legacy@example.com", Username = "legacy", EmailVerificationExpiresAt = clock.Now });
+        await db.SaveChangesAsync();
+        provider.DeleteFailure = true;
+        await service.DeleteExpiredRegistrationsAndSessionsAsync(default); Assert.Single(db.Users);
+        provider.DeleteFailure = false; provider.RemoteConfirmed = true;
+        await service.DeleteExpiredRegistrationsAndSessionsAsync(default); Assert.Single(db.Users);
+        provider.RemoteConfirmed = false;
+        await service.DeleteExpiredRegistrationsAndSessionsAsync(default); Assert.Empty(db.Users);
+    }
+
+    [Fact]
     public async Task Verification_ExpiresAfterLastSentWindowAndCleanupPreservesMembers()
     {
         await using var db = CreateDbContext();

@@ -82,11 +82,10 @@ function Recommendation({ picture, selected, toggleDetails, input }: {
   </button>;
 }
 
-export function ExploreRecommendations({ pictures, selectedId, toggleDetails, ranked }: {
+export function ExploreRecommendations({ pictures, selectedId, toggleDetails }: {
   pictures: Picture[];
   selectedId?: string;
   toggleDetails: (picture: Picture) => void;
-  ranked: boolean;
 }) {
   const id = useId();
   const rail = useRef<HTMLDivElement>(null);
@@ -130,7 +129,7 @@ export function ExploreRecommendations({ pictures, selectedId, toggleDetails, ra
   }
   return <section className="explore-recommendations" aria-labelledby={id}>
     <div className="explore-recommendations-heading">
-      <div><h2 id={id}>추천 이미지</h2><p>{ranked ? "좋아요가 많은 배경화면" : "무작위로 둘러보는 배경화면"}</p></div>
+      <div><h2 id={id}>추천 이미지</h2><p>좋아요가 많은 배경화면</p></div>
     </div>
     {gyro && !reduced && !gyroReady && sensorError && <p className="notice" role="status">{sensorError}</p>}
     <div className="explore-recommendations-carousel">

@@ -4,8 +4,7 @@
 .studio-job-progress { display: grid; gap: 8px; min-width: 0; }
 .studio-job-progress-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-weight: 600; }
 .studio-job-progress-percent { font-size: 1.4rem; font-variant-numeric: tabular-nums; color: var(--primary); }
-.studio-job-progress-stage { margin: 0; line-height: 1.6; }
-.studio-job-progress-note { margin: 0; color: #687793; font-size: .75rem; line-height: 1.5; }
+.studio-job-progress-stage { margin: 0; line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere; }
 .studio-processing-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .studio-cancel-warning { line-height: 1.8; }
 .app-main.studio-main:has(.studio-editor) {
@@ -281,8 +280,9 @@
 .studio-rig-slider input[type="number"] { width: 4rem; min-height: 34px; padding: 4px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); text-align: center; font-variant-numeric: tabular-nums; }
 .studio-rig-slider > input { display: block; width: 100%; margin: 9px 0 3px; accent-color: var(--primary); }
 .studio-rig-reset { margin-top: 8px; }
-.studio-rig-actions { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px; }
+.studio-rig-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
 .studio-rig-actions .button { font-size: 0.8571429rem; }
+.studio-rig-actions .studio-rig-settings { color: #687793; }
 .studio-rig-details { padding-top: 8px; }
 .studio-rig-details h3 { margin-top: 12px; }
 
@@ -292,8 +292,3 @@
 .studio-live-layer-items { max-height: 250px; overflow-y: auto; display: grid; gap: 8px; }
 .studio-editor .studio-live-layer-items .layer-thumb img { object-fit: contain; }
 .studio-live-layer-items small { color: var(--muted); font-variant-numeric: tabular-nums; }
-
-/* Follow-on workflow: use an upscaled or baked-crop source for Live2D. */
-.studio-editor .studio-followup-action { margin: 18px 0 6px; border-top: 1px solid var(--line); padding-top: 14px; }
-.studio-editor .studio-followup-action h3 { margin: 0 0 8px; }
-.studio-editor .studio-followup-action p { color: var(--muted); font-size: .78rem; line-height: 1.6; margin: 7px 0 12px; }

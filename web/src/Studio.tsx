@@ -29,9 +29,10 @@ import {
 } from "./model";
 import { Modal, Notice, Busy, Empty, Link, navigate } from "./ui";
 import { ApiError, cloud, request, post, type Job } from "./api";
-import { createCroppedLive2dProject, detailPicture, discardDraft, loadProjectPicture, prepareEditableProject, processProject, refineSubject, resetProjectEffects, saveImageEdit } from "./cloud-store";
+import { detailPicture, discardDraft, loadProjectPicture, prepareEditableProject, processProject, refineSubject, resetProjectEffects, saveImageEdit } from "./cloud-store";
 import { processingStatus } from "./processing-status";
 import { JobProgress } from "./JobProgress";
+import { ProcessingDialog } from "./ProcessingDialog";
 import { TokenUsageHelp } from "./TokenUsageHelp";
 import { useUnsavedWarning } from "./use-unsaved-warning";
 import { LayerPreviewSelector } from "./LayerPreviewSelector";
@@ -56,7 +57,6 @@ import { useMediaQuery } from "./use-media-query";
 import { useSubjectSeparation, SubjectSeparationControls } from "./SubjectSeparation";
 import { useCropAutosave } from "./use-crop-autosave";
 import { sameCrop } from "./crop-geometry";
-import { live2dCropRequired } from "./live2d-crop-input";
 import { motionStrength } from "./editor-defaults";
 
 import { LayerStackEditor } from "./LayerStackEditor";
@@ -149,7 +149,6 @@ export function Studio({ route }: { route: string }) {
   const [cancelling, setCancelling] = useState(false);
   const [checkingJob, setCheckingJob] = useState(cloud && !!picture?.projectId);
   const [copyingAsset, setCopyingAsset] = useState(false);
-  const [createdLive2dProjectId, setCreatedLive2dProjectId] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const saving = useRef(false);
   const [job, setJob] = useState<Job | null>(null);
@@ -174,7 +173,7 @@ export function Studio({ route }: { route: string }) {
   useEffect(() => {
     setJob(null); setBusy(false); setStartingProcessing(false); setCancelPrompt(false); setCancelling(false);
     setCheckingJob(cloud && !!picture?.projectId);
-    setTool(requestedTool); setCreatedLive2dProjectId(null); setShareFeedback(null); setSelectedLayer("all"); setRequestedLivePartId(null); discarding.current = false;
+    setTool(requestedTool); setShareFeedback(null); setSelectedLayer("all"); setRequestedLivePartId(null); discarding.current = false;
     subjectJob.current = null;
   }, [picture?.id]);
   useEffect(() => {
@@ -242,13 +241,6 @@ export function Studio({ route }: { route: string }) {
     name.trim() !== picture?.name || JSON.stringify(tags) !== JSON.stringify(picture ? imageTags(picture) : []) ||
     JSON.stringify(platformTags) !== JSON.stringify(picture?.platformTags ?? []);
   const saved = !!picture && !picture.isDraft;
-  useEffect(() => {
-    if (!createdLive2dProjectId || busy || cropAutosave.pending || dirty || !saved) return;
-    // Saving before the switch prevents the draft cleanup from deleting the source.
-    discarding.current = true;
-    navigate(`/app/studio?id=${encodeURIComponent(createdLive2dProjectId)}&tool=live`);
-    setCreatedLive2dProjectId(null);
-  }, [createdLive2dProjectId, busy, cropAutosave.pending, dirty, saved]);
   useUnsavedWarning(!!picture && !picture.isReadOnly && (!saved || dirty), () => {
     if (!picture || discarding.current) return;
     discarding.current = true;
@@ -387,21 +379,6 @@ export function Studio({ route }: { route: string }) {
       showShareFeedback("링크가 복사되었습니다!");
     } catch (error) { showShareFeedback((error as Error).message); }
     finally { sharePending.current = false; setBusy(false); }
-  }
-  async function createLive2dFromCrop() {
-    if (!picture?.projectId || published || !cloud || busy || processing || checkingJob ||
-        cropAutosave.pending || separation.dirty || !live2dCropRequired(edit)) return;
-    // Keep the original as a saved project; only the COPY bakes in the crop.
-    if (!await save(true)) return;
-    setBusy(true);
-    try {
-      const copy = await createCroppedLive2dProject(picture, edit);
-      if (!update(value => ({ ...value, images: [copy, ...value.images.filter(p => p.id !== copy.id)] })))
-        throw new Error("새 Live2D 프로젝트를 보관함에 표시하지 못했습니다. 보관함을 새로고침해 주세요.");
-      setCreatedLive2dProjectId(copy.id);
-      toast("선택한 비율을 실제 이미지에 적용한 새 프로젝트를 만들었습니다. Live2D 탭에서 파츠 분리를 실행해 주세요.");
-    } catch (error) { toast((error as Error).message); }
-    finally { setBusy(false); }
   }
   async function makeEditableCopy() {
     if (!picture?.assetId || picture.projectId || copyingAsset || busy) return;
@@ -749,21 +726,8 @@ export function Studio({ route }: { route: string }) {
         </div>}
         <fieldset className="photo-settings" disabled={published || busy || processing}>
         {tool === "crop" && (
-          <>
           <CropControls edit={edit} width={sourceWidth} height={sourceHeight} change={changeCrop}
             saving={cropAutosave.pending} error={cropAutosave.error} />
-          {cloud && picture.projectId && <section className="studio-followup-action" aria-label="자른 이미지로 Live2D 진행">
-            <h3>선택한 비율로 Live2D 분리</h3>
-            <p>현재 이미지(업스케일 완료본 포함)에서 지정한 영역을 실제로 잘라 새 프로젝트로 만듭니다. 원본과 업스케일 결과는 남고, 새 프로젝트에서는 자르기가 중복 적용되지 않습니다.</p>
-            <button type="button" className="button secondary full"
-              disabled={published || busy || checkingJob || processing || cropAutosave.pending || separation.dirty || !live2dCropRequired(edit) || !name.trim()}
-              onClick={() => void createLive2dFromCrop()}>
-              {busy ? <Busy /> : <Layers3 size={16} />}
-              자른 이미지로 Live2D 시작
-            </button>
-            <p>{!live2dCropRequired(edit) ? "먼저 16:9 PC, 9:16 모바일 또는 사용자 비율을 선택해 주세요." : "새 프로젝트에서 분리를 실행하면 Live2D 최초 실행 토큰(7개)이 사용됩니다."}</p>
-          </section>}
-          </>
         )}
         {tool === "filter" && (
           <>
@@ -844,21 +808,11 @@ export function Studio({ route }: { route: string }) {
         </div>
         </div>
       </aside>
-      {(startingProcessing || processing || checkingJob) && <Modal title={cancelPrompt ? "작업을 취소할까요?" : "이미지 처리 중"}
-        close={() => {}} dismissible={false}>
-        {cancelPrompt ? <>
-          <p className="studio-cancel-warning" role="alert">작업을 취소하면 결과를 받을 수 없으며, 사용한 토큰은 반환되지 않습니다.</p>
-          <div className="studio-processing-actions">
-            <button type="button" className="button secondary" disabled={cancelling} onClick={() => setCancelPrompt(false)}>작업 계속하기</button>
-            <button type="button" className="button danger" disabled={cancelling} onClick={() => void cancelProcessing()}>{cancelling ? <Busy /> : null}토큰 반환 없이 취소</button>
-          </div>
-        </> : <>
-          <p className="studio-processing-status"><Busy /> 이미지 처리 중</p>
-          <JobProgress job={processing ? job : null} checkingJob={checkingJob} />
-          <p className="notice">작업이 끝날 때까지 다른 기능이나 화면으로 전환할 수 없습니다.</p>
-          <button type="button" className="button secondary full" disabled={!processing || startingProcessing || cancelling} onClick={() => setCancelPrompt(true)}>작업 취소</button>
-        </>}
-      </Modal>}
+      {(startingProcessing || processing || checkingJob) && <ProcessingDialog job={processing ? job : null}
+        operation={tool === "upscale" ? "Upscale" : tool === "live" ? "CharacterLayers" : "Layers"}
+        checkingJob={checkingJob} cancelPrompt={cancelPrompt} cancelling={cancelling}
+        canCancel={processing && !startingProcessing && !cancelling}
+        onCancelPrompt={setCancelPrompt} onCancel={() => void cancelProcessing()} />}
       {shareFeedback && <div className="studio-share-feedback" role="status" aria-live="polite"
         style={{ left: shareFeedback.x, top: shareFeedback.y - 18 }}>{shareFeedback.text}</div>}
       {dialog === "liveBackground" && <Modal title="배경을 유지할까요?" close={() => setDialog(null)}>

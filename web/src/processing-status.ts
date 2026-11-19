@@ -2,6 +2,10 @@ import type { Job } from "./api";
 
 type ProcessingJob = Pick<Job, "status" | "progress"> & Partial<Pick<Job, "operation" | "errorMessage" | "keepBackground">>;
 
+export function processingLabel(operation?: string): string {
+  return operation === "Upscale" ? "업스케일" : operation === "CharacterLayers" ? "Live 2D" : operation === "Layers" ? "배경 분리" : "이미지";
+}
+
 /** The API reports milestone-based progress, not GPU-internal fractional work. */
 export function processingPercent(job: ProcessingJob | null | undefined): number {
   if (job?.status === "Completed") return 100;
@@ -17,12 +21,13 @@ export function processingStage(job: ProcessingJob | null | undefined, checkingJ
   if (job.status === "Completed") return "처리 완료";
   if (job.status === "Queued") return "작업 대기 중";
   const progress = processingPercent(job);
-  if (progress >= 80) return "처리 결과 저장 중";
-  if (progress >= 70) return "AI 처리 결과 수신 및 확인 중";
+  const label = processingLabel(job.operation);
+  if (progress >= 80) return `${label} 결과 저장 중`;
+  if (progress >= 70) return `${label} 결과 수신 및 확인 중`;
   if (job.operation === "CharacterLayers" && job.keepBackground && progress >= 15)
-    return progress < 40 ? "AI 배경 분리 중" : "피사체 Live 2D 파츠 생성 중 (See-through)";
+    return progress < 40 ? "AI 배경 분리 중" : "피사체 Live 2D 파츠 생성 중";
   if (progress >= 45) {
-    if (job.operation === "CharacterLayers") return "캐릭터 파츠 생성 중 (See-through) · 시간이 걸릴 수 있습니다.";
+    if (job.operation === "CharacterLayers") return "Live 2D 캐릭터 파츠 생성 중";
     if (job.operation === "Upscale") return "AI 업스케일 처리 중";
     return "AI 배경 분리 중";
   }

@@ -62,13 +62,3 @@ export function sortExplore(pictures: Picture[], sort: string) {
     return rank || b.created.localeCompare(a.created) || a.id.localeCompare(b.id);
   });
 }
-
-export function randomRecommendations(pictures: Picture[], seed: number, limit = 8) {
-  // The order remains stable while the same page is open.
-  const rank = (id: string) => {
-    let value = seed | 0;
-    for (const character of id) value = Math.imul(value ^ character.charCodeAt(0), 16777619);
-    return value >>> 0;
-  };
-  return [...pictures].sort((a, b) => rank(a.id) - rank(b.id)).slice(0, limit);
-}

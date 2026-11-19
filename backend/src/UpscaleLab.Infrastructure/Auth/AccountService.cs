@@ -77,7 +77,7 @@ public sealed class AccountService(ApplicationDbContext db, IPasswordHasher pass
     {
         if (request.Confirmation != "계정 삭제") throw new ValidationException("‘계정 삭제’를 정확히 입력해 주세요.");
         var email = (await RequireUserAsync(userId, ct)).Email;
-        await AuthUserTransaction.RunAsync(db, email, async () =>
+        var cleanupTask = await AuthUserTransaction.RunAsync(db, email, async () =>
         {
             var user = await RequireUserAsync(userId, ct);
             VerifyPassword(user, request.CurrentPassword);
@@ -94,11 +94,15 @@ public sealed class AccountService(ApplicationDbContext db, IPasswordHasher pass
             user.PasswordHash = passwords.Hash(Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
             foreach (var session in await db.AuthSessions.Where(x => x.UserId == userId && x.RevokedAt == null).ToListAsync(ct))
                 session.RevokedAt = now;
-            db.AccountCleanupTasks.Add(new AccountCleanupTask { UserId = userId, Email = email, IdentitySubject = subject,
-                DeleteAccount = true, NextAttemptAt = now.AddSeconds(30) });
+            var task = new AccountCleanupTask { UserId = userId, Email = email, IdentitySubject = subject,
+                DeleteAccount = true, NextAttemptAt = now.AddSeconds(30) };
+            db.AccountCleanupTasks.Add(task);
             await db.SaveChangesAsync(ct);
-            return true;
+            return task;
         }, ct);
+        // Delete local account data before responding; external identity and S3
+        // cleanup remain durable and retryable even when those services are down.
+        await new AccountCleanupService(db, storage, identity, clock).RemoveAccountDataAsync(cleanupTask, ct);
     }
 
     private async Task<User> RequireUserAsync(Guid id, CancellationToken ct)

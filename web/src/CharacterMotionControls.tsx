@@ -69,16 +69,19 @@ export function CharacterMotionControls({ rig, onChange, disabled }: {
         ["body", "몸", follows, () => onChange({ ...value, bodyMode: follows ? "fixed" : "follow" })],
       ] as const).map(([part, label, applied, toggle]) => <div key={part}>
         <div className="studio-rig-actions">
-          <button className="button secondary" type="button" onClick={toggle}>
+          <button className="button secondary" type="button" onClick={() => {
+            if (applied && details === part) setDetails(null);
+            toggle();
+          }}>
             {label} 반응 {applied ? "제거" : "추가"}
           </button>
-          <button className="button secondary" type="button" aria-label={`${label} 반응 세부 설정`}
-            aria-expanded={details === part} aria-controls={`${detailsId}-${part}`}
+          <button className="button secondary studio-rig-settings" type="button" aria-label={`${label} 반응 세부 설정`}
+            disabled={!applied} aria-expanded={applied && details === part} aria-controls={`${detailsId}-${part}`}
             onClick={() => setDetails(details === part ? null : part)}>
             <Settings2 size={15} /> 세부 설정
           </button>
         </div>
-        <div className="studio-rig-details" id={`${detailsId}-${part}`} hidden={details !== part}>
+        <div className="studio-rig-details" id={`${detailsId}-${part}`} hidden={!applied || details !== part}>
           {part === "face" ? sliders(headSettings) : <>
             <h3>상체 움직임</h3>{sliders(upperSettings)}
             <h3>하체 움직임</h3>{sliders(lowerSettings)}

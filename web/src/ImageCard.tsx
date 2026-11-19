@@ -5,6 +5,7 @@ import {
   Pencil,
   Trash2,
   Upload,
+  Monitor,
 } from "lucide-react";
 import { PictureView } from "./ui";
 import type { Picture } from "./model";
@@ -24,6 +25,7 @@ export function ImageCard({
   editMetadata,
   unpublish,
   remove,
+  apply,
 }: {
   picture: Picture;
   explore: boolean;
@@ -34,6 +36,7 @@ export function ImageCard({
   editMetadata: () => void;
   unpublish?: () => void;
   remove: () => void;
+  apply?: () => void;
 }) {
   const menu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
@@ -74,7 +77,8 @@ export function ImageCard({
     <article className={`image-card ${selected ? "image-card-selected" : ""}`}>
       <button
         className="image-card-cover"
-        aria-label={`${picture.name} ${explore || picture.isReadOnly ? "상세 보기" : "편집하기"}`}
+        aria-label={`${picture.name}${explore ? " 상세 보기" : picture.isReadOnly ? "" : " 편집하기"}`}
+        disabled={!explore && picture.isReadOnly}
         aria-pressed={explore ? selected : undefined}
         aria-controls={explore && selected ? "explore-details" : undefined}
         onClick={open}
@@ -101,7 +105,7 @@ export function ImageCard({
       <div className="image-card-body">
         <div className="image-card-heading">
           <div className="image-card-name-and-resolution">
-            <button className="image-title" onClick={open} title={picture.name}>{picture.name}</button>
+            <button className="image-title" onClick={open} disabled={!explore && picture.isReadOnly} title={picture.name}>{picture.name}</button>
             <p className="image-resolution" aria-label={`${picture.name} 해상도`}>{resolution}</p>
           </div>
           {showMenu ? <details className="card-menu" ref={menu}
@@ -124,6 +128,7 @@ export function ImageCard({
                 </>
               ) : (
                 <>
+                  {apply && <button type="button" onClick={() => runMenuAction(apply)}><Monitor size={15} /> 연결된 기기에 적용</button>}
                   {!picture.isReadOnly && <>
                     <div className="image-sharing-row">
                       <span>업로드 {shared ? "ON" : "OFF"}</span>

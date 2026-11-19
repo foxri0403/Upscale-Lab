@@ -53,15 +53,43 @@ public sealed class AccountServiceTests
         Assert.Null(owner.DeletionRequestedAt); Assert.Empty(db.AccountCleanupTasks);
         await service.RequestDeletionAsync(owner.Id, new(Password, "계정 삭제"), default);
         Assert.NotNull(owner.DeletionRequestedAt); Assert.NotNull(session.RevokedAt); Assert.False(h.Verify(Password, owner.PasswordHash));
+        Assert.Equal(other.Id, (await db.Users.SingleAsync()).Id);
+        Assert.Empty(db.AuthSessions);
+        Assert.Contains(key, (await db.AccountCleanupTasks.SingleAsync()).ObjectKeysJson!);
         clock.Time = clock.Time.AddMinutes(1); identity.Fail = true;
         await new AccountCleanupService(db, store, identity, clock).ProcessPendingAsync(default);
-        Assert.Equal(2, await db.Users.CountAsync()); Assert.Equal(1, (await db.AccountCleanupTasks.SingleAsync()).Attempts);
+        Assert.Single(db.Users); Assert.Equal(1, (await db.AccountCleanupTasks.SingleAsync()).Attempts);
         identity.Fail = false; clock.Time = clock.Time.AddHours(1);
         await new AccountCleanupService(db, store, identity, clock).ProcessPendingAsync(default);
         Assert.Equal(other.Id, (await db.Users.SingleAsync()).Id); Assert.Single(store.Files); Assert.Empty(db.AuthSessions); Assert.Single(identity.Deleted);
         var replacement = User(h, "owner"); db.Add(replacement); await db.SaveChangesAsync(); clock.Time = clock.Time.AddMinutes(11);
         await new AccountCleanupService(db, store, identity, clock).ProcessPendingAsync(default);
         Assert.Equal(2, await db.Users.CountAsync()); Assert.Single(identity.Deleted); Assert.Empty(db.AccountCleanupTasks);
+    }
+    [Fact]
+    public async Task Deletion_RemovesPurchaseAndSubscriptionData_BeforeExternalCleanup()
+    {
+        await using var db = WorkflowData.Db(); var h = new PasswordHasher();
+        var owner = User(h); var other = User(h, "other");
+        var subscription = new UserSubscription { UserId = owner.Id, CustomerKey = "owner-customer", BillingKeyCiphertext = "encrypted" };
+        var order = new PaymentOrder { UserId = owner.Id, SubscriptionId = subscription.Id, OrderId = "owner-order", Amount = 1000 };
+        var otherOrder = new PaymentOrder { UserId = other.Id, OrderId = "other-order", Amount = 1000 };
+        db.AddRange(owner, other, subscription, order, otherOrder, new UserTokenWallet { UserId = owner.Id });
+        await db.SaveChangesAsync();
+        var identity = new Identity { Fail = true };
+        await new AccountService(db, h, new WorkflowStore(), identity).RequestDeletionAsync(owner.Id, new(Password, "계정 삭제"), default);
+        Assert.Equal(other.Id, (await db.Users.SingleAsync()).Id);
+        Assert.Equal(otherOrder.Id, (await db.PaymentOrders.SingleAsync()).Id);
+        Assert.Empty(db.UserSubscriptions); Assert.Empty(db.UserTokenWallets);
+        Assert.Empty(identity.Deleted); Assert.Single(db.AccountCleanupTasks);
+        // A replacement account must survive retries targeting the immutable old subject.
+        var replacement = User(h); db.Add(replacement); await db.SaveChangesAsync();
+        var cleanup = new AccountCleanupService(db, new WorkflowStore(), identity);
+        await cleanup.ProcessTaskAsync((await db.AccountCleanupTasks.SingleAsync()).Id, default);
+        Assert.Equal(2, await db.Users.CountAsync());
+        identity.Fail = false;
+        await cleanup.ProcessTaskAsync((await db.AccountCleanupTasks.SingleAsync()).Id, default);
+        Assert.True(await db.Users.AnyAsync(x => x.Id == replacement.Id)); Assert.Single(identity.Deleted);
     }
     [Fact]
     public void PasswordChanges_AlwaysUseFreshBcryptSalt()

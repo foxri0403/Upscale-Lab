@@ -14,8 +14,8 @@ test("remote queue and character inference are explained as stages", () => {
 test("retaining the background reports both phases of the same Live 2D job", () => {
   const job = { operation: "CharacterLayers", status: "Processing", keepBackground: true };
   assert.equal(processingStatus({ ...job, progress: 28 }), "28% · AI 배경 분리 중");
-  assert.equal(processingStatus({ ...job, progress: 56 }), "56% · 피사체 Live 2D 파츠 생성 중 (See-through)");
-  assert.equal(processingStatus({ ...job, progress: 80 }), "80% · 처리 결과 저장 중");
+  assert.equal(processingStatus({ ...job, progress: 56 }), "56% · 피사체 Live 2D 파츠 생성 중");
+  assert.equal(processingStatus({ ...job, progress: 80 }), "80% · Live 2D 결과 저장 중");
 });
 
 

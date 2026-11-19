@@ -72,21 +72,16 @@ export function Modal({
   closeRef.current = dismissible ? close : () => {};
   useLayoutEffect(() => {
     const dialog = ref.current!;
+    dialog.setAttribute("closedby", dismissible ? "closerequest" : "none");
     if (suspended) { if (dialog.open) dialog.close(); }
     else if (!dialog.open) {
       opener.current ??= document.activeElement as HTMLElement | null;
       dialog.showModal();
     }
-  }, [suspended]);
+  }, [suspended, dismissible]);
   useEffect(() => {
     const dialog = ref.current!;
-    const cancel = (e: Event) => {
-      e.preventDefault();
-      closeRef.current();
-    };
-    dialog.addEventListener("cancel", cancel);
     return () => {
-      dialog.removeEventListener("cancel", cancel);
       if (dialog.open) dialog.close();
       opener.current?.focus();
     };
@@ -96,6 +91,7 @@ export function Modal({
       ref={ref}
       className={`modal ${wide ? "wide" : ""} ${className}`}
       aria-labelledby={titleId}
+      onCancel={event => { event.preventDefault(); closeRef.current(); }}
       onClick={(e) => {
         if (e.target === e.currentTarget) {
           const r = e.currentTarget.getBoundingClientRect();

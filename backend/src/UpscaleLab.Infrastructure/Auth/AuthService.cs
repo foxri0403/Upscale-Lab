@@ -40,6 +40,9 @@ public sealed class AuthService(
             .Where(x => x.ExpiresAt <= Now && (x.Email == email || x.Username == username))
             .Select(x => x.Email).ToListAsync(cancellationToken);
         foreach (var stale in staleEmails) await DeleteExpiredPendingAsync(stale, cancellationToken);
+        var legacyEmails = await ExpiredLegacyRegistrations()
+            .Where(x => x.Email == email || x.Username == username).Select(x => x.Email).ToListAsync(cancellationToken);
+        foreach (var stale in legacyEmails) await DeleteExpiredLegacyRegistrationAsync(stale, cancellationToken);
 
         return await AuthUserTransaction.RunAsync(dbContext, email, async () =>
         {
@@ -369,6 +372,14 @@ public sealed class AuthService(
     public async Task DeleteExpiredRegistrationsAndSessionsAsync(CancellationToken cancellationToken)
     {
         var now = Now;
+        var legacyEmails = await ExpiredLegacyRegistrations().Select(x => x.Email).ToListAsync(cancellationToken);
+        foreach (var email in legacyEmails)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try { await DeleteExpiredLegacyRegistrationAsync(email, cancellationToken); }
+            catch (Exception error) when (error is not OperationCanceledException)
+            { logger?.LogError(error, "Expired legacy registration cleanup failed; it will be retried."); }
+        }
         var emails = await dbContext.PendingRegistrations.AsNoTracking().Where(x => x.ExpiresAt <= now)
             .Select(x => x.Email).ToListAsync(cancellationToken);
         foreach (var email in emails)
@@ -384,6 +395,31 @@ public sealed class AuthService(
         dbContext.AuthSessions.RemoveRange(expiredSessions);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
+
+    private IQueryable<User> ExpiredLegacyRegistrations()
+    {
+        var now = Now;
+        var cutoff = now.Subtract(VerificationLifetime);
+        return dbContext.Users.Where(x => !x.IsEmailVerified && x.EmailVerifiedAt == null && x.DeletionRequestedAt == null &&
+            (x.EmailVerificationExpiresAt != null ? x.EmailVerificationExpiresAt <= now :
+                (x.EmailVerificationSentAt ?? x.CreatedAt) <= cutoff));
+    }
+
+    private Task<bool> DeleteExpiredLegacyRegistrationAsync(string email, CancellationToken cancellationToken) =>
+        AuthUserTransaction.RunAsync(dbContext, email, async () =>
+        {
+            // Older releases created users before email verification. Recheck
+            // under the same lock used by registration to protect real members.
+            var user = await ExpiredLegacyRegistrations().SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+            if (user == null) return false;
+            if (accountCleaner is null) throw new InvalidOperationException("Registration cleanup provider is required.");
+            if (!await accountCleaner.DeleteUnconfirmedAsync(email, cancellationToken)) return false;
+            dbContext.UserSettings.RemoveRange(await dbContext.UserSettings.Where(x => x.UserId == user.Id).ToListAsync(cancellationToken));
+            dbContext.AuthSessions.RemoveRange(await dbContext.AuthSessions.Where(x => x.UserId == user.Id).ToListAsync(cancellationToken));
+            dbContext.Users.Remove(user);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }, cancellationToken);
 
     private Task<bool> DeleteExpiredPendingAsync(string email, CancellationToken cancellationToken) =>
         AuthUserTransaction.RunAsync(dbContext, email, async () =>

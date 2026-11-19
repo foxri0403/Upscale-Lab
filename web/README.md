@@ -36,6 +36,10 @@ pnpm build는 TypeScript 검사와 일반 Vite 빌드를 수행한다. build:clo
 
 ## 작업실 토큰 사용량 팝업 로컬 확인
 
+이미지 처리 중 팝업과 레이어 움직임 버튼은 개발 전용 `/tests/processing-ui.html`에서 확인할 수 있다. `?dialog&operation=Upscale&progress=45`의 `operation`을 `Layers` 또는 `CharacterLayers`로 바꾸거나 `progress`를 0~100으로 지정하면 실제 공통 팝업이 가상 작업으로 표시된다. `status=Queued`, `status=Checking`, `status=Starting`, `status=Completed`와 `keepBackground`도 지원한다. GPU 작업이나 토큰 사용은 발생하지 않으며 운영 번들에는 포함하지 않는다.
+
+Windows와 Chrome이 있는 환경에서 저장소 루트의 `node web/scripts/check-editor-ui.cjs`로 버튼 5:5 배치·반응 적용 후 세부 설정·가상 진행률 27개 상태·취소/계속·추천 정렬·타인 저장 이미지 클릭을 자동 검증한다. 검증용 Vite와 별도 Chrome 프로필만 실행하고, 데스크톱/모바일 팝업 스크린샷을 Git에서 제외된 `tmp/editor-ui-*.png`에 저장한다.
+
 `pnpm dev` 실행 후 [작업실 샘플](http://localhost:5173/tests/studio-restoration.html)을 연다. 로그인이나 API 없이 실제 작업실 컴포넌트로 확인할 수 있다. 업스케일·배경 분리·Live 2D 도구에서 실행 버튼 바로 아래 왼쪽에 정렬된 회색 밑줄 **소모 토큰량 확인**을 클릭하면, 내 계정 메뉴처럼 링크 근처에 요금제 화면과 같은 5행 표가 펼쳐진다. 링크를 다시 클릭하거나 Escape·바깥 클릭·외부로 초점 이동으로 닫을 수 있다. 설정 패널 스크롤 시에도 닫히며 화면 크기를 바꾸면 위치를 맞춘다. 조회에는 토큰이 들지 않으며 실제 GPU 작업도 생성하지 않는다.
 
 ## 결제 정보 로컬 테스트
