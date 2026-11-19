@@ -17,9 +17,11 @@ internal class CompanionCache(private val context: Context) {
         val directory = File(parent, asset)
         check(directory.canonicalFile == directory.absoluteFile) { "잘못된 캐시 경로입니다." }
         if (!directory.exists()) return
-        val direct = context.getSharedPreferences("live_layer", Context.MODE_PRIVATE).getString("direct_manifest_path", null)
-        // A live wallpaper on the other Android target can still reference this shared directory.
-        if (direct != null && File(direct).canonicalFile.parentFile == directory) return
+        val prefs = context.getSharedPreferences("live_layer", Context.MODE_PRIVATE)
+        val selections = listOf("direct_manifest_path", "manifest_path",
+            CompanionLiveEngines.selectionKey(android.app.WallpaperManager.FLAG_SYSTEM),
+            CompanionLiveEngines.selectionKey(android.app.WallpaperManager.FLAG_LOCK))
+        if (selections.any { prefs.getString(it, null)?.let { path -> File(path).canonicalFile.parentFile == directory } == true }) return
         directory.listFiles()?.forEach { file ->
             check(!file.isDirectory && file.canonicalFile.parentFile == directory) { "잘못된 캐시 파일입니다." }
             check(file.delete()) { "배경화면 캐시를 삭제하지 못했습니다." }

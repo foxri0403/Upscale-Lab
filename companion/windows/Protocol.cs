@@ -23,7 +23,7 @@ internal record CharacterRig(bool Enabled = false, int HeadTilt = 60, int EyeMov
     int PivotX = 50, int PivotY = 16, bool Idle = true, string BodyMode = "fixed", int UpperBody = 40,
     int LowerBody = 20, int Torso = 50, int LeftArm = 35, int RightArm = 35,
     int LeftHand = 25, int RightHand = 25, int LeftLeg = 20, int RightLeg = 20,
-    int TorsoPivotY = 40, int LowerPivotY = 68, Dictionary<string, string>? PartAssignments = null);
+    int TorsoPivotY = 40, int LowerPivotY = 68, Dictionary<string, string>? PartAssignments = null, bool FaceEnabled = true);
 internal record WallpaperManifest(int SchemaVersion, Guid AssetId, string Mode, int Width, int Height, WallpaperFile[] Files,
     bool MotionEnabled = true, bool? MouseEnabled = null, bool? GyroEnabled = null, CharacterRig? Rig = null)
 {

@@ -12,6 +12,8 @@
 
 작업실의 Live 2D 탭에서 캐릭터 파츠 분리를 시작한다. CharacterLayers는 RunPodPretrainedSeeThroughProcessor의 전용 See-through RunPod endpoint를 사용한다. SeeThrough:Enabled, Provider=RunPod, endpoint ID와 API key가 준비된 경우에만 처리 가능으로 노출한다. 서버 로컬 Python/GPU 실행 경로는 사용하지 않는다.
 
+프로젝트에 Live 2D를 처음 적용할 때 배경 유지 여부를 선택한다. 배경을 유지하면 기존 배경 분리 공급자가 배경과 피사체를 나누고, See-through가 피사체의 파츠를 생성한다. 한 작업으로 두 단계의 진행률을 표시하며 Live 2D 토큰(최초 7개, 재수정 3개)을 사용한다. 유지한 배경은 Live 2D 목록과 합성에 표시되며 수동 조합에서는 배경을 제외한 파츠를 수정한다.
+
 결과 ZIP과 manifest를 검증하고 최대 64개의 PNG 레이어를 S3에 보관한다. 원격 작업 ID·입력 hash·제출 시각을 저장해 재시작 시 기존 작업을 조회한다. 진행률은 원격 단계이며 추론 완료율을 추정하지 않는다. [클라우드 처리 계약](cloud-processing.md)을 따른다.
 
 웹은 저장된 layerOrder대로 파츠를 합성한다. 얼굴·눈·눈썹·머리카락 등 인식한 파츠에 회전/이동을 적용하고 몸통·의상·팔·장신구 등은 고정한다. 좌우·상하 테스트, 얼굴 회전 중심과 흔들림을 미리볼 수 있다. rig 설정은 기존 SavedEditJson에 저장한다. Cubism mesh/자동 리깅 모델과는 다른 PNG 파츠 변환 기능이며 범용 분할 정확도를 보장하지 않는다.

@@ -54,6 +54,8 @@ public sealed class ProjectProcessingService(
 
         if (!Enum.IsDefined(request.Operation) || request.UpscaleFactor is not (2 or 4))
             throw new ValidationException("지원하는 작업 종류와 배율(2 또는 4)을 선택하세요.");
+        if (request.KeepBackground.HasValue && request.Operation != ProcessingOperation.CharacterLayers)
+            throw new ValidationException("배경 유지 옵션은 Live 2D에만 사용할 수 있습니다.");
         if (request.TargetLongEdge is int edge)
         {
             if (request.Operation != ProcessingOperation.Upscale || !UpscaleResolution.IsSupported(edge))
@@ -158,6 +160,15 @@ public sealed class ProjectProcessingService(
                     "이미 처리 중인 프로젝트입니다.");
 
             RequireCompatibleSeparation(latestProject, request.Operation);
+
+            if (request.Operation == ProcessingOperation.CharacterLayers)
+            {
+                job.KeepBackground = request.KeepBackground ?? currentJobs
+                    .Where(x => x.Operation == ProcessingOperation.CharacterLayers && x.Status == ProcessingJobStatus.Completed)
+                    .OrderByDescending(x => x.CompletedAt ?? x.CreatedAt).FirstOrDefault()?.KeepBackground ?? false;
+                if (job.KeepBackground && !processor.Supports(ProcessingOperation.Layers))
+                    throw new ConfigurationException("배경 유지에는 배경 분리 서비스 연결이 필요합니다.");
+            }
 
             if (request.Operation == ProcessingOperation.Upscale &&
                 request.TargetLongEdge is int targetEdge &&
@@ -419,13 +430,14 @@ public sealed class ProjectProcessingService(
                 job.UpscaleFactor = UpscaleResolution.NativeScale((int)originalInfo.Width, (int)originalInfo.Height, requestedEdge);
             }
             await dbContext.SaveChangesAsync(cancellationToken);
-            var processed = await processor.ProcessAsync(
-                new ProjectProcessingRequest(inputPath, outputPath, job.Operation, job.UpscaleFactor, job.Id,
-                    job.TargetLongEdge, async (progress, ct) => {
-                        job.Progress = Math.Clamp(progress, 15, 75);
-                        await dbContext.SaveChangesAsync(ct);
-                    }, maskPath, job.SubjectMaskObjectKey?.EndsWith(".selection.png", StringComparison.Ordinal) == true),
-                cancellationToken);
+            var request = new ProjectProcessingRequest(inputPath, outputPath, job.Operation, job.UpscaleFactor, job.Id,
+                job.TargetLongEdge, async (progress, ct) => {
+                    job.Progress = Math.Clamp(progress, 15, 75);
+                    await dbContext.SaveChangesAsync(ct);
+                }, maskPath, job.SubjectMaskObjectKey?.EndsWith(".selection.png", StringComparison.Ordinal) == true);
+            var processed = job.KeepBackground
+                ? await CharacterBackgroundPipeline.ProcessAsync(processor, request, cancellationToken)
+                : await processor.ProcessAsync(request, cancellationToken);
             var hasLayers = job.Operation != ProcessingOperation.Upscale;
             var hasImage = job.Operation == ProcessingOperation.Upscale;
             string? imageResultKey = null;
@@ -684,7 +696,7 @@ public sealed class ProjectProcessingService(
         job.StartedAt,
         job.CompletedAt,
         job.UpdatedAt, job.Operation, job.UpscaleFactor, job.ResultObjectKey != null, job.ResultWidth, job.ResultHeight,
-        job.TargetLongEdge);
+        job.TargetLongEdge, job.KeepBackground);
 
     private static void ValidatePng(string filePath, string outputPath, int width, int height)
     {

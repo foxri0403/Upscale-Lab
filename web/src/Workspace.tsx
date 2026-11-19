@@ -16,6 +16,7 @@ import {
   Download,
   Coins,
   ChevronDown,
+  CreditCard,
   LogOut,
   UserRound,
   Plus,
@@ -76,6 +77,7 @@ import { isImageShared, sharingTargets } from "./image-sharing";
 import { canNavigate } from "./navigation";
 import { ToastBubble, type ToastMessage } from "./ToastBubble";
 import { AccountSettings, AccountAvatar, profileSession, type AccountProfile } from "./AccountSettings";
+import { AccountBilling } from "./AccountBilling";
 import type { PlatformTag } from "./platform-tags";
 import { randomRecommendations, sortExplore } from "./explore-feed";
 import { ExploreRecommendations } from "./ExploreRecommendations";
@@ -127,13 +129,15 @@ export function Workspace({
 }) {
   const [session, setSession] = useState(initialSession);
   const accountMenu = useRef<HTMLDetailsElement>(null);
+  const tokenMenu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     const dismissOutside = (event: Event) => {
-      const menu = accountMenu.current;
-      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+      for (const menu of [accountMenu.current, tokenMenu.current]) {
+        if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+      }
     };
     const dismissEscape = (event: KeyboardEvent) => {
-      const menu = accountMenu.current;
+      const menu = [accountMenu.current, tokenMenu.current].find(item => item?.open);
       if (menu?.open && event.key === "Escape") {
         event.preventDefault(); menu.open = false; menu.querySelector("summary")?.focus();
       }
@@ -191,7 +195,15 @@ export function Workspace({
   const [message, setMessage] = useState<ToastMessage | null>(null);
   const toastPointer = useRef({ x: innerWidth / 2, y: innerHeight / 2 });
   const toastSequence = useRef(0);
-  const [dialog, setDialog] = useState<"settings" | "downloads" | null>(null);
+  const [dialog, setDialog] = useState<"settings" | "billing" | "downloads" | null>(() =>
+    cloud && new URLSearchParams(location.search).has("cardChange") ? "billing" : null);
+  function openAccountDialog(next: "settings" | "billing") {
+    if (accountMenu.current) {
+      accountMenu.current.open = false;
+      accountMenu.current.querySelector("summary")?.focus();
+    }
+    setDialog(next);
+  }
   const [tokenWallet, setTokenWallet] = useState<{
     plan?: string;
     monthlyBalance?: number;
@@ -604,7 +616,7 @@ export function Workspace({
           <span className="header-section">{page?.name || "Upscale Lab"}</span>
           <div className="header-right">
             {cloud && tokenWallet && (
-              <details className="header-token-menu">
+              <details className="header-token-menu" ref={tokenMenu}>
                 <summary className="header-token-summary" aria-label={`현재 요금제 ${tokenWallet.plan ?? "-"}, 잔여 토큰 ${tokenWallet.totalBalance ?? 0}`}>
                   <span>{tokenWallet.plan ?? "-"}</span>
                   <Coins size={16} />
@@ -632,9 +644,12 @@ export function Workspace({
               <div className="account-dropdown">
                 <strong>{session.name}</strong>
                 <small>{session.email}</small>
-                <button onClick={() => { if (accountMenu.current) { accountMenu.current.open = false; accountMenu.current.querySelector("summary")?.focus(); } setDialog("settings"); }}>
+                <button type="button" aria-haspopup="dialog" onClick={() => openAccountDialog("settings")}>
                   <UserRound size={16} /> 계정 정보
                 </button>
+                {cloud && <button type="button" aria-haspopup="dialog" onClick={() => openAccountDialog("billing")}>
+                  <CreditCard size={16} /> 결제 정보
+                </button>}
                 <button onClick={() => { if (canNavigate("/login")) logout(); }}>
                   <LogOut size={16} /> 로그아웃
                 </button>
@@ -711,6 +726,7 @@ export function Workspace({
         {dialog === "settings" && (
           <AccountSettings session={session} updated={setSession} close={() => setDialog(null)} logout={logout} />
         )}
+        {dialog === "billing" && <AccountBilling close={() => setDialog(null)} />}
         {dialog === "downloads" && (
           <Modal title="연결 앱 다운로드" close={() => setDialog(null)}>
             <Downloads />

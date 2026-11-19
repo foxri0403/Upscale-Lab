@@ -42,7 +42,7 @@ internal class TiltSensor(context: Context, private val rotation: () -> Int,
         if (displayRotation != lastRotation) { motion.reset(); rawGyro.reset(); lastRotation = displayRotation }
         if (event.sensor.type == Sensor.TYPE_GYROSCOPE) {
             val (roll, pitch) = rawGyro.update(event.values[0], event.values[1], event.timestamp, displayRotation)
-            val (x, y) = motion.update(roll, pitch); changed(x, y); return
+            val (x, y) = motion.update(roll, pitch, event.timestamp); changed(x, y); return
         }
         SensorManager.getRotationMatrixFromVector(matrix, event.values)
         val axes = when (displayRotation) {
@@ -53,7 +53,7 @@ internal class TiltSensor(context: Context, private val rotation: () -> Int,
         }
         SensorManager.remapCoordinateSystem(matrix, axes.first, axes.second, remapped)
         SensorManager.getOrientation(remapped, angles)
-        val (x, y) = motion.update(angles[2], angles[1])
+        val (x, y) = motion.update(angles[2], angles[1], event.timestamp)
         changed(x, y)
     }
 

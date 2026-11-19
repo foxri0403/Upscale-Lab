@@ -7,7 +7,7 @@ public sealed record LayerProcessingRequest(string InputPath, string OutputDirec
     Func<int, CancellationToken, Task>? ReportProgress = null, string? SubjectMaskPath = null, bool RefineSelection = false);
 
 public sealed record ProcessProjectRequest(ProcessingOperation Operation = ProcessingOperation.Layers, int UpscaleFactor = 2,
-    int? TargetLongEdge = null);
+    int? TargetLongEdge = null, bool? KeepBackground = null);
 public sealed record ProjectProcessingRequest(string InputPath, string OutputDirectory, ProcessingOperation Operation,
     int UpscaleFactor, Guid JobId = default, int? TargetLongEdge = null,
     Func<int, CancellationToken, Task>? ReportProgress = null, string? SubjectMaskPath = null, bool RefineSelection = false);

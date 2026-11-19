@@ -373,9 +373,30 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             ((x.UserId == userId && (agentAccess || !x.IsArchived)) || (x.IsPublic && !x.IsArchived)), ct)
             ?? throw new NotFoundException("배경화면을 찾을 수 없습니다.");
         var manifest = ReadManifest(asset);
+        if (agentAccess) manifest = ApplyDeviceRig(manifest);
         return manifest with { Files = manifest.Files.Select(x => x with {
             Source = storage.CreateDownloadUrl(x.Source, UrlLifetime) }).ToList(),
             UrlsExpireAt = DateTime.UtcNow.Add(UrlLifetime) };
+    }
+
+    // Encode fixed face parts in the existing device protocol so installed agents
+    // can honor the switch without changing their renderers or stored settings.
+    internal static WallpaperManifest ApplyDeviceRig(WallpaperManifest manifest)
+    {
+        if (manifest.Rig is not { Enabled: true, FaceEnabled: false } rig) return manifest;
+        var assignments = rig.PartAssignments is { } existing ? new Dictionary<string, string>(existing) : new();
+        var files = manifest.Files.Select(file =>
+        {
+            var part = file.LayerId is { } id && assignments.TryGetValue(id, out var assigned) ? assigned : file.Role switch
+            {
+                "Face" or "Eyebrow" or "Mouth" or "Nose" => "head",
+                "Eye" => "eye", "Hair" or "FrontHair" => "frontHair", "BackHair" => "backHair", _ => "fixed"
+            };
+            if (part is not ("head" or "eye" or "frontHair" or "backHair")) return file;
+            if (file.LayerId is { } layerId) assignments[layerId] = "fixed";
+            return file with { MovementX = 0, MovementY = 0, Role = file.LayerId is null ? "Fixed" : file.Role };
+        }).ToArray();
+        return manifest with { Files = files, Rig = rig with { PartAssignments = assignments } };
     }
 
     public async Task SetSharingAsync(Guid userId, Guid assetId, bool isPublic, CancellationToken ct)

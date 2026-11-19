@@ -27,6 +27,18 @@ public sealed class SubscriptionsController(
     SubscriptionFulfillmentService fulfillment,
     Microsoft.Extensions.Configuration.IConfiguration configuration) : ControllerBase
 {
+    [HttpPost("billing/card-change/start")]
+    public Task<SubscriptionCardChange> StartCardChange([FromServices] SubscriptionCardService cards, CancellationToken ct) =>
+        cards.StartAsync(User.GetRequiredUserId(), ct);
+
+    public sealed record ChangeCardRequest(string Challenge, string CustomerKey, string AuthKey);
+
+    [HttpPost("billing/card-change")]
+    public async Task<IActionResult> ChangeCard(ChangeCardRequest request, [FromServices] SubscriptionCardService cards, CancellationToken ct)
+    {
+        await cards.ChangeAsync(User.GetRequiredUserId(), request.Challenge, request.CustomerKey, request.AuthKey, ct);
+        return NoContent();
+    }
 
     public sealed record IssueBillingKeyRequest(
         Guid SubscriptionId,
@@ -99,6 +111,8 @@ public sealed class SubscriptionsController(
         var encrypted = protector.Encrypt(
             result.BillingKey,
             subscription.CustomerKey);
+        var cardIssuer = result.Card?.IssuerCode;
+        var cardSuffix = result.Card?.NumberSuffix;
 
         // 동일 구독에 빌링키가 이미 저장됐다면 덮어쓰지 않는다.
         var updated = await db.UserSubscriptions
@@ -111,6 +125,8 @@ public sealed class SubscriptionsController(
                 .SetProperty(
                     x => x.BillingKeyCiphertext,
                     encrypted)
+                .SetProperty(x => x.CardIssuerCode, cardIssuer)
+                .SetProperty(x => x.CardNumberSuffix, cardSuffix)
                 .SetProperty(
                     x => x.UpdatedAt,
                     DateTime.UtcNow),

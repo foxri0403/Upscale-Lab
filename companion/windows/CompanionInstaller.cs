@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace UpscaleLab.Companion;
@@ -13,6 +14,62 @@ internal sealed class CompanionInstaller(string installDirectory, string startMe
         Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), CreateShortcut);
 
     internal bool IsInstalled(string source) => string.Equals(Path.GetFullPath(source), Path.GetFullPath(Executable), StringComparison.OrdinalIgnoreCase);
+
+    internal Version? InstalledVersion => File.Exists(Executable) ? ReadVersion(Executable) : null;
+    internal void OpenInstalled() => Process.Start(new ProcessStartInfo(Executable, "--run") { UseShellExecute = true });
+
+    internal void Reinstall(string source, IProgress<string> progress)
+    {
+        if (InstalledVersion is not { } installed || IsInstalled(source) || ReadVersion(source) < installed)
+            throw new InvalidOperationException("설치 파일 버전을 확인해 주세요.");
+        ReplaceExecutable(source, StopInstalledInstance, progress);
+    }
+
+    internal static Version ReadVersion(string path)
+    {
+        var info = FileVersionInfo.GetVersionInfo(path);
+        return new(info.FileMajorPart, info.FileMinorPart, info.FileBuildPart, info.FilePrivatePart);
+    }
+
+    internal void ReplaceExecutable(string source, Action stopInstalledInstance, IProgress<string>? progress = null)
+    {
+        var candidate = Path.Combine(installDirectory, $".{Guid.NewGuid():N}.exe");
+        try
+        {
+            progress?.Report("새 설치 파일을 준비하고 있습니다.");
+            File.Copy(source, candidate);
+            progress?.Report("실행 중인 앱을 종료하고 있습니다.");
+            stopInstalledInstance();
+            progress?.Report("설치 파일을 교체하고 있습니다.");
+            File.Move(candidate, Executable, overwrite: true);
+        }
+        finally { File.Delete(candidate); }
+    }
+
+    private void StopInstalledInstance()
+    {
+        using var current = Process.GetCurrentProcess();
+        using var activation = new InstanceActivation(InstanceActivation.Name);
+        foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(Executable)))
+        {
+            using (process)
+            {
+                if (process.Id == current.Id || process.HasExited || process.SessionId != current.SessionId) continue;
+                string? path;
+                try { path = process.MainModule?.FileName; }
+                catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception) { continue; }
+                if (path is null || !IsInstalled(path)) continue;
+                activation.RequestExit(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+                if (!process.WaitForExit(5000))
+                {
+                    // Versions that predate the update signal still save account state atomically.
+                    try { process.Kill(); }
+                    catch (InvalidOperationException) when (process.HasExited) { }
+                    if (!process.WaitForExit(5000)) throw new IOException("기존 앱이 종료되지 않았습니다.");
+                }
+            }
+        }
+    }
 
     internal string Install(string source, bool desktopShortcut, bool startMenuShortcut, bool privacyAccepted)
     {

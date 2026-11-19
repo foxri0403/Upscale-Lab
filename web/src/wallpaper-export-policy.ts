@@ -4,6 +4,7 @@
  */
 export type WallpaperSource = {
   background?: string; foregrounds?: readonly string[]; layers?: readonly { layerType: string }[];
+  features?: readonly string[];
   assetId?: string;
 };
 export type WallpaperEdits = { foreground: boolean; filter: string; crop: string; scale: number };
@@ -16,8 +17,9 @@ export function wallpaperExportPolicy(picture: WallpaperSource, edit: WallpaperE
   const hasBackgroundLayer = projectLayers.some(layer => layer.layerType === "Background");
   const rigParts = new Set(["Face", "Eye", "Eyebrow", "Mouth", "Nose", "Hair", "FrontHair", "BackHair"]);
   const hasFaceOrHair = projectLayers.some(layer => rigParts.has(layer.layerType));
+  const isLive2D = picture.features?.includes("Live 2D") && !picture.features.includes("배경 분리");
   const characterParts = projectLayers.length >= 2
-    ? ((!picture.background && !hasBackgroundLayer) || hasFaceOrHair)
+    ? ((!picture.background && !hasBackgroundLayer) || hasFaceOrHair || isLive2D === true)
     // Imported/saved Live2D wallpaper manifests have PNGs but no project-layer rows.
     : (projectLayers.length === 0 && !!picture.assetId && (picture.foregrounds?.length ?? 0) >= 2);
   const layered = edit.foreground && (backgroundAndSubject || characterParts);

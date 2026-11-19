@@ -68,7 +68,10 @@ export function normalizeRig(value?: Partial<HeadRig> | null): HeadRig {
   for (const field of intensityFields) result[field] = safe(result[field], defaultHeadRig[field]);
   result.enabled = result.enabled === true;
   result.idle = result.idle !== false;
-  result.bodyMode = result.bodyMode === "follow" ? "follow" : "fixed";
+  result.faceEnabled = result.faceEnabled !== false;
+  // Preserve legacy saved rigs; only newly created rigs get the new default.
+  result.bodyMode = value && !Object.prototype.hasOwnProperty.call(value, "bodyMode")
+    ? "fixed" : result.bodyMode === "follow" ? "follow" : "fixed";
   const provided = result.partAssignments && typeof result.partAssignments === "object" &&
     !Array.isArray(result.partAssignments) ? result.partAssignments : {};
   result.partAssignments = Object.fromEntries(Object.entries(provided)
@@ -86,14 +89,16 @@ export function rigTargets(tilt: number, tiltY: number, look: number, lookY: num
   const active = settings.bodyMode === "follow";
   const upper = active ? head * settings.upperBody / 100 : 0;
   const lower = active ? head * settings.lowerBody / 100 : 0;
-  const torso = upper * settings.torso / 100 * .60;
+  const torso = upper * settings.torso / 100 * 2.0;
   const leftArm = torso + upper * settings.leftArm / 100 * .42;
   const rightArm = torso + upper * settings.rightArm / 100 * .42;
   const leftHand = leftArm + upper * settings.leftHand / 100 * .24;
   const rightHand = rightArm + upper * settings.rightHand / 100 * .24;
-  const lowerBody = lower * .32;
+  const lowerBody = lower * .55;
   const leftLeg = lowerBody + lower * settings.leftLeg / 100 * .18;
   const rightLeg = lowerBody + lower * settings.rightLeg / 100 * .18;
-  return { head, eye, shiftY, eyeY, front: front * settings.hairSway / 100,
-    back: back * settings.hairSway / 100, torso, leftArm, rightArm, leftHand, rightHand, lowerBody, leftLeg, rightLeg };
+  const face = settings.faceEnabled !== false ? 1 : 0;
+  return { head: head * face, eye: eye * face, shiftY: shiftY * face, eyeY: eyeY * face,
+    front: front * settings.hairSway / 100 * face, back: back * settings.hairSway / 100 * face,
+    torso, leftArm, rightArm, leftHand, rightHand, lowerBody, leftLeg, rightLeg };
 }

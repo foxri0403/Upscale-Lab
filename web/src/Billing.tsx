@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Coins, CreditCard, RefreshCw, ShieldCheck } from "lucide-react";
 import { cloud, cloudMe, post, request } from "./api";
 import { TokenUsageTable } from "./TokenUsageTable";
+import { clientKey, getTossSdk } from "./toss-payments";
 import "./billing.css";
 
 type Wallet = {
@@ -35,43 +36,6 @@ type OrderStatus = {
   status: string;
 };
 
-type TossPayment = {
-  requestBillingAuth: (params: {
-    method: "CARD";
-    successUrl: string;
-    failUrl: string;
-  }) => Promise<void>;
-  requestPayment: (params: {
-    method: "CARD";
-    amount: { currency: "KRW"; value: number };
-    orderId: string;
-    orderName: string;
-    successUrl: string;
-    failUrl: string;
-  }) => Promise<void>;
-};
-
-type TossGlobal = (key: string) => {
-  payment: (params: { customerKey: string }) => TossPayment;
-};
-
-async function getTossSdk(): Promise<TossGlobal> {
-  const w = window as Window & { TossPayments?: TossGlobal };
-  if (w.TossPayments) return w.TossPayments;
-
-  await new Promise<void>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://js.tosspayments.com/v2/standard";
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("토스 결제 SDK 로드 실패"));
-    document.head.appendChild(script);
-  });
-
-  if (!w.TossPayments) throw new Error("결제 SDK 초기화 실패");
-  return w.TossPayments;
-}
-
-const clientKey = import.meta.env.VITE_TOSS_CLIENT_KEY ?? "";
 const canTestPay = cloud &&
   clientKey.startsWith("test_ck_") &&
   window.location.protocol === "https:";
@@ -376,29 +340,6 @@ export function Billing() {
     }
   }
 
-  async function cancelSubscription() {
-    if (subscriptionBusy) return;
-    if (!window.confirm(
-      "다음 결제일부터 구독이 갱신되지 않도록 예약할까요?"
-    )) return;
-
-    setSubscriptionBusy(true);
-    setError("");
-
-    try {
-      await post("/api/subscriptions/cancel", {});
-      setSubscriptionMessage(
-        "구독 해지가 예약되었습니다. 현재 이용 기간은 유지됩니다."
-      );
-    } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "구독 해지 실패"
-      );
-    } finally {
-      setSubscriptionBusy(false);
-    }
-  }
-
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const result = params.get("subscription");
@@ -672,18 +613,6 @@ export function Billing() {
           </div>
 
 
-          {wallet &&
-            ["Plus", "Pro"].includes(wallet.plan ?? "") && (
-              <div style={{ marginBottom: 25 }}>
-                <button
-                  type="button"
-                  disabled={subscriptionBusy}
-                  onClick={() => void cancelSubscription()}
-                >
-                  구독 해지 예약
-                </button>
-              </div>
-            )}
 
 
           {wallet?.plan === "Free" && canTestPay && (
@@ -740,6 +669,8 @@ export function Billing() {
               </article>
             ))}
           </div>
+
+          <p className="billing-account-note">구독 해지 및 환불은 <strong>내 계정</strong> 설정을 통해 이용하실 수 있습니다.</p>
 
           <section className="billing-usage" aria-labelledby="token-usage-heading">
             <h2 id="token-usage-heading">작업별 토큰 사용량</h2>

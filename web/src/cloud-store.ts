@@ -136,7 +136,7 @@ function manifestPicture(m: Manifest, a: Asset): Picture {
     sourceProjectId: a.sourceProjectId ?? undefined,
     name: a.title,
     src: files[0]?.source || "",
-    wallpaperParts: a.mode === "Live2D" && !files.some(file => file.role === "Background") ? files : undefined,
+    wallpaperParts: a.mode === "Live2D" ? files : undefined,
     genre: unspecifiedTag,
     tags: a.edit?.tags || [],
     platformTags: a.edit?.platformTags || [],
@@ -453,6 +453,7 @@ export async function processProject(
   picture: Picture,
   operation: string,
   targetLongEdge?: number,
+  keepBackground?: boolean,
 ) {
   if (!picture.projectId)
     throw new Error(
@@ -461,6 +462,7 @@ export async function processProject(
   return post<Job>(`/api/projects/${picture.projectId}/process`, {
     operation,
     ...(operation === "Upscale" ? { targetLongEdge } : {}),
+    ...(operation === "CharacterLayers" && keepBackground !== undefined ? { keepBackground } : {}),
   });
 }
 

@@ -434,7 +434,9 @@ class _CompanionPageState extends State<CompanionPage>
                   Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Icon(
                     raw['canApply'] == true
-                        ? (tablet
+                        ? ((raw['foldScreen'] == true
+                                ? raw['innerScreen'] == true
+                                : tablet)
                             ? Icons.tablet_android_outlined
                             : Icons.phone_android_outlined)
                         : Icons.monitor_outlined,
@@ -446,7 +448,7 @@ class _CompanionPageState extends State<CompanionPage>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                       Text(
-                          raw['canApply'] == true
+                          raw['canApply'] == true && raw['foldScreen'] != true
                               ? '내장 화면'
                               : raw['name'] as String? ?? '외부 화면',
                           style: const TextStyle(fontWeight: FontWeight.w700)),
@@ -459,10 +461,27 @@ class _CompanionPageState extends State<CompanionPage>
                           spacing: 6,
                           runSpacing: 6,
                           children: raw['canApply'] == true
-                              ? [pill('잠금 화면'), pill('홈 화면')]
+                              ? [
+                                  pill('잠금 화면'),
+                                  pill('홈 화면'),
+                                  if (raw['foldScreen'] == true)
+                                    pill(raw['active'] == true
+                                        ? '사용 중'
+                                        : '전환 대기'),
+                                ]
                               : [pill('정보 조회 전용')]),
                     ])),
               ])),
+        if (state['pendingLive'] == true)
+          Text(state['message'] as String? ?? '',
+              style: const TextStyle(color: muted, height: 1.5)),
+        if (state['retryLiveSetup'] == true)
+          OutlinedButton(
+              onPressed:
+                  busy ? null : () => act('activateLive', {'retry': true}),
+              child: Text(state['lockLiveSetup'] == true
+                  ? '잠금화면 적용 다시 열기'
+                  : '배경화면 적용 다시 열기')),
       ])),
       const SizedBox(height: 10),
       ExpansionTile(
@@ -482,7 +501,10 @@ class _CompanionPageState extends State<CompanionPage>
   Widget build(BuildContext context) {
     final accepted = state['privacyAccepted'] == true;
     final loggedIn = accepted && state['loggedIn'] == true;
-    final tablet = MediaQuery.sizeOf(context).shortestSide >= 600;
+    final displays = state['displays'] as List? ?? const [];
+    final tablet = displays.whereType<Map>().any((screen) =>
+            screen['active'] == true && screen['innerScreen'] == true) ||
+        MediaQuery.sizeOf(context).shortestSide >= 600;
     return Scaffold(
         body: DecoratedBox(
             decoration: const BoxDecoration(

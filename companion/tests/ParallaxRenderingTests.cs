@@ -63,6 +63,33 @@ public sealed class ParallaxRenderingTests
         });thread.SetApartmentState(ApartmentState.STA);thread.Start();Assert.True(thread.Join(TimeSpan.FromSeconds(15)));if(failure!=null)throw failure;
     }
 
+    [Fact]
+    public void BodyMotionIsVisibleWhenEnabledAndStillRespectsFixedMode()
+    {
+        var follow = new CharacterRig(Enabled:true, BodyMode:"follow");
+        var fixedRig = follow with { BodyMode = "fixed" };
+        var torso = RigMotion.AngleDegrees("torso", follow, 1);
+        Assert.InRange(torso, 1.4, 2.2);
+        Assert.Equal(0, RigMotion.AngleDegrees("torso", fixedRig, 1));
+        Assert.True(RigMotion.BodyShift("torso", follow, 1, 0.5, 1200, 2000).X > 0);
+        Assert.Equal((0.0, 0.0), RigMotion.BodyShift("torso", fixedRig, 1, 0.5, 1200, 2000));
+    }
+
+    [Fact]
+    public void EyeGazeMovesRelativeToHeadAndRespectsFaceAndEyeSettings()
+    {
+        var rig = new CharacterRig(Enabled: true);
+        var head = RigMotion.FaceShift("head", rig, 1, 1, 1000, 2000);
+        var eye = RigMotion.FaceShift("eye", rig, 1, 1, 1000, 2000);
+        Assert.Equal(6.3, eye.X - head.X, 6);
+        Assert.Equal(9.8, eye.Y - head.Y, 6);
+        Assert.Equal(head, RigMotion.FaceShift("eye", rig with { EyeMove = 0 }, 1, 1, 1000, 2000));
+        Assert.Equal((0.0, 0.0), RigMotion.FaceShift("eye", rig with { FaceEnabled = false }, 1, 1, 1000, 2000));
+        Assert.Equal((0.0, 0.0), RigMotion.FaceShift("fixed", rig, 1, 1, 1000, 2000));
+        Assert.Equal(0, RigMotion.AngleDegrees("head", rig with { FaceEnabled = false }, 1));
+        Assert.True(RigMotion.AngleDegrees("torso", rig with { FaceEnabled = false, BodyMode = "follow" }, 1) > 0);
+    }
+
     private static void PumpFrames(int milliseconds)
     {
         var elapsed = Stopwatch.StartNew();

@@ -15,7 +15,8 @@ public sealed record HeadRigSettings(bool Enabled, int HeadTilt, int EyeMove, in
     int PivotX, int PivotY, bool Idle, string BodyMode = "fixed", int UpperBody = 40,
     int LowerBody = 20, int Torso = 50, int LeftArm = 35, int RightArm = 35,
     int LeftHand = 25, int RightHand = 25, int LeftLeg = 20, int RightLeg = 20,
-    int TorsoPivotY = 40, int LowerPivotY = 68, Dictionary<string, string>? PartAssignments = null)
+    int TorsoPivotY = 40, int LowerPivotY = 68, Dictionary<string, string>? PartAssignments = null,
+    bool FaceEnabled = true)
 {
     private static readonly HashSet<string> Parts = new(StringComparer.Ordinal)
     { "fixed", "head", "eye", "frontHair", "backHair", "torso", "leftArm", "rightArm",

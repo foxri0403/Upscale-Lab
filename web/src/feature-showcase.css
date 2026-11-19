@@ -62,6 +62,38 @@
 .character-demo .demo-stage {
   aspect-ratio: 1 / 1;
 }
+#live-2d { scroll-margin-top: 80px; }
+#live-2d .feature-copy p { word-break: keep-all; }
+.demo-example-toggle {
+  position: absolute;
+  z-index: 3;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #d8d9ea;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-size: .78rem;
+  font-weight: 700;
+  box-shadow: 0 2px 12px #25274b22;
+  cursor: pointer;
+}
+.demo-example-toggle:hover { background: var(--tint); }
+.demo-example-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.demo-portrait-fallback {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 24%;
+}
 .character-backdrop {
   background: linear-gradient(145deg, #f2f1ff, #e5eaff 62%, #f8f5fc);
 }
@@ -95,6 +127,14 @@
   height: 98%;
   max-width: none;
   transform: translateX(-50%);
+}
+.demo-portrait-rig {
+  top: 24%;
+  bottom: auto;
+  left: 0;
+  width: 100%;
+  height: auto;
+  transform: translateY(-24%);
 }
 .demo-character-rig > img {
   position: absolute;
@@ -207,6 +247,7 @@
   object-fit: cover;
   object-position: center top;
 }
+.showcase-devices .phone-portrait-wallpaper > img { bottom: 0; height: 100%; object-position: center; }
 .phone-punch-hole {
   position: absolute;
   z-index: 1;

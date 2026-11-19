@@ -7,7 +7,8 @@ public enum PaymentOrderStatus
     Paid,
     Failed,
     Canceled,
-    Refunded
+    Refunded,
+    Refunding
 }
 
 public sealed class PaymentOrder : BaseEntity
@@ -30,6 +31,10 @@ public sealed class PaymentOrder : BaseEntity
     public DateTime? BillingPeriodStartUtc { get; set; }
 
     public DateTime? PaidAt { get; set; }
+    public int? RefundAmount { get; set; }
+    public int? RefundTokens { get; set; }
+    public DateTime? RefundedAt { get; set; }
+    public bool RefundDeclined { get; set; }
 
     public User User { get; set; } = null!;
 }

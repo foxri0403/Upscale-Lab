@@ -7,7 +7,7 @@ import { stripTypeScriptTypes } from "node:module";
 // the constant defaults used by the actual editor.
 const raw = fs.readFileSync(new URL("../src/character-rig.ts", import.meta.url), "utf8")
   .replace(/^import \{ defaultHeadRig, type HeadRig \} from "\.\/model";/m, `const defaultHeadRig = {
-    enabled: false, headTilt: 60, eyeMove: 35, hairSway: 55, pivotX: 50, pivotY: 16, idle: true, bodyMode: "fixed", upperBody: 40, lowerBody: 20, torso: 50, leftArm: 35, rightArm: 35, leftHand: 25, rightHand: 25, leftLeg: 20, rightLeg: 20, torsoPivotY: 40, lowerPivotY: 68, partAssignments: {},
+    enabled: false, headTilt: 60, eyeMove: 35, hairSway: 55, pivotX: 50, pivotY: 16, idle: true, bodyMode: "follow", upperBody: 40, lowerBody: 20, torso: 50, leftArm: 35, rightArm: 35, leftHand: 25, rightHand: 25, leftLeg: 20, rightLeg: 20, torsoPivotY: 40, lowerPivotY: 68, partAssignments: {},
   };`);
 const js = stripTypeScriptTypes(raw, { mode: "strip" });
 const { rigPart, rigMovementGroup, rigTargets, normalizeRig, toggleRigMovementGroup } = await import(`data:text/javascript,${encodeURIComponent(js)}`);
@@ -90,10 +90,27 @@ test("body fixed vs follow and independent upper/lower strength", () => {
   assert.equal(upperOnly.torso, 0); assert(upperOnly.leftLeg > 0);
 });
 
+test("face off holds facial and hair layers still while the body follows", () => {
+  const saved = normalizeRig({ enabled: true, faceEnabled: false, bodyMode: "follow" });
+  const result = rigTargets(1, 1, 1, 1, 1, saved);
+  for (const key of ["head", "eye", "shiftY", "eyeY", "front", "back"]) assert.equal(Math.abs(result[key]), 0);
+  assert(result.torso > 0 && result.leftLeg > 0);
+  assert.equal(normalizeRig({ enabled: true }).faceEnabled, true);
+});
+
 test("legacy rig saved without body properties defaults to fixed and sanitized assignments", () => {
   const old = normalizeRig({ enabled: true, headTilt: 60, partAssignments: { "id": "leftArm", "other": "notValid" } });
   assert.equal(old.bodyMode, "fixed");
   assert.equal(old.partAssignments.id, "leftArm");
   assert.equal(old.partAssignments.other, undefined);
   assert.equal(rigPart("Background", "bg", old.partAssignments), "fixed");
+});
+
+test("new projects animate the body, while an existing fixed rig stays fixed", () => {
+  assert.equal(normalizeRig(undefined).bodyMode, "follow");
+  assert.equal(normalizeRig({ bodyMode: "fixed", enabled: true }).bodyMode, "fixed");
+  const full = normalizeRig({ ...normalizeRig(undefined), enabled: true, idle: false });
+  const pose = rigTargets(1, 0, 0, 0, 0, full);
+  assert(pose.torso > 0.02, `torso rotation must be visible: ${pose.torso}`);
+  assert(pose.lowerBody > 0.001);
 });
