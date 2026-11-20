@@ -29,7 +29,27 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Flutter and Android SDK packages
+      - name: Set up Android SDK command-line tools
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          cmdline-tools-version: '12266719'
+          packages: ''
+          log-accepted-android-sdk-licenses: false
+
+      - name: Verify sdkmanager and install Android SDK packages
+        run: |
+          if [[ -z "${ANDROID_HOME:-}" || ! -d "$ANDROID_HOME" ]]; then
+            echo '::error::ANDROID_HOME does not point to an installed Android SDK.'
+            exit 1
+          fi
+          if ! sdkmanager_path=$(command -v sdkmanager) || [[ ! -x "$sdkmanager_path" ]]; then
+            echo '::error::sdkmanager is missing or is not executable on PATH after Android SDK setup.'
+            exit 1
+          fi
+          "$sdkmanager_path" --sdk_root="$ANDROID_HOME" --version
+          "$sdkmanager_path" --sdk_root="$ANDROID_HOME" 'platforms;android-36' "build-tools;$ANDROID_BUILD_TOOLS" 'ndk;28.2.13676358'
+
+      - name: Install Flutter
         run: |
           archive="$RUNNER_TEMP/flutter.tar.xz"
           curl --fail --silent --show-error --location --retry 3 \
@@ -39,7 +59,6 @@ jobs:
           tar -xJf "$archive" -C "$RUNNER_TEMP"
           rm -- "$archive"
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
-          sdkmanager --sdk_root="$ANDROID_HOME" 'platforms;android-36' "build-tools;$ANDROID_BUILD_TOOLS" 'ndk;28.2.13676358'
 
       - name: Build unsigned release APK
         working-directory: mobile
