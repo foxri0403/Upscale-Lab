@@ -1,0 +1,127 @@
+name: Windows Release EXE
+
+on:
+  push:
+    branches:
+      - inho/eyemotionfix
+    paths:
+      - .github/workflows/windows-release-exe.yml
+      - companion/**
+      - global.json
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DOTNET_SDK_VERSION: '8.0.428'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: 'true'
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET 8 SDK
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet-8
+        with:
+          dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
+
+      - name: Check Release configuration
+        id: config
+        env:
+          UPSCALE_COMPANION_API_BASE_URL: ${{ vars.UPSCALE_COMPANION_API_BASE_URL }}
+        run: |
+          $sdk = dotnet --version
+          if ($LASTEXITCODE -ne 0 -or $sdk -cne $env:DOTNET_SDK_VERSION) {
+            throw "Expected .NET SDK $env:DOTNET_SDK_VERSION."
+          }
+          dotnet --info
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $origin = $null
+          if (![Uri]::TryCreate($env:UPSCALE_COMPANION_API_BASE_URL, [UriKind]::Absolute, [ref]$origin) -or
+              $origin.Scheme -ne 'https' -or $origin.IsLoopback -or !$origin.Host -or
+              $origin.UserInfo -or $origin.AbsolutePath -ne '/' -or $origin.Query -or $origin.Fragment) {
+            throw 'Set UPSCALE_COMPANION_API_BASE_URL to the existing production HTTPS origin.'
+          }
+          $project = [xml](Get-Content companion/windows/UpscaleLab.Companion.Windows.csproj -Raw)
+          $version = $project.SelectSingleNode('/Project/PropertyGroup/Version').InnerText
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid Windows project version.' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "api_base_url=$($origin.GetLeftPart([UriPartial]::Authority))" >> $env:GITHUB_OUTPUT
+
+      - name: Run Windows Release tests
+        id: tests
+        env:
+          API_BASE_URL: ${{ steps.config.outputs.api_base_url }}
+        run: |
+          $results = Join-Path $env:RUNNER_TEMP 'windows-test-results'
+          New-Item -ItemType Directory -Path $results | Out-Null
+          $PSNativeCommandUseErrorActionPreference = $false
+          dotnet test companion/tests/UpscaleLab.Companion.Tests.csproj -c Release `
+            "-p:CompanionDefaultApiBaseUrl=$env:API_BASE_URL" -p:CompanionLocalTest=false `
+            --results-directory $results --logger 'trx;LogFileName=windows-release.trx' 2>&1 |
+            Tee-Object -FilePath (Join-Path $results 'dotnet-test.log')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          [xml]$report = Get-Content -LiteralPath (Join-Path $results 'windows-release.trx') -Raw
+          $summary = $report.TestRun.ResultSummary
+          $counters = $summary.Counters
+          if ($summary.outcome -notin @('Completed', 'Passed') -or [int]$counters.passed -lt 1 -or
+              [int]$counters.passed -ne [int]$counters.executed -or [int]$counters.failed -gt 0) {
+            throw 'Windows Release tests did not report a passing run.'
+          }
+
+      - name: Upload test logs
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-release-test-results
+          path: ${{ runner.temp }}/windows-test-results
+          if-no-files-found: error
+
+      - name: Publish and verify Windows x64 EXE
+        id: publish
+        env:
+          API_BASE_URL: ${{ steps.config.outputs.api_base_url }}
+          WINDOWS_VERSION: ${{ steps.config.outputs.version }}
+        run: |
+          $publishDir = Join-Path $env:RUNNER_TEMP 'windows-publish'
+          $artifactDir = Join-Path $env:RUNNER_TEMP 'windows-release'
+          dotnet publish companion/windows/UpscaleLab.Companion.Windows.csproj `
+            -c Release -r win-x64 --self-contained true `
+            "-p:CompanionDefaultApiBaseUrl=$env:API_BASE_URL" -p:CompanionLocalTest=false `
+            -p:DebugType=None -o $publishDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $release = ./companion/Verify-WindowsRelease.ps1 -PublishDirectory $publishDir `
+            -ArtifactDirectory $artifactDir -Version $env:WINDOWS_VERSION -ApiBaseUrl $env:API_BASE_URL
+          "artifact_name=windows-$($release.version)-win-x64-unsigned" >> $env:GITHUB_OUTPUT
+          @"
+          ### Windows Release EXE (.NET $($release.runtimeVersion))
+
+          - File: $($release.fileName)
+          - Version: $($release.fileVersion)
+          - Size: $($release.sizeBytes) bytes
+          - SHA-256: $($release.sha256)
+          - Authenticode: $($release.authenticode). SmartScreen may warn.
+          - Manual checks: installer UI, upgrading from 1.9.5, and wallpaper on a real Windows desktop.
+          "@ >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload verified unsigned EXE and checksums
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.publish.outputs.artifact_name }}
+          path: ${{ runner.temp }}/windows-release
+          if-no-files-found: error
+          compression-level: 0
