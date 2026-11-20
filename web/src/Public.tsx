@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   ArrowRight,
   ChevronDown,
@@ -17,6 +17,7 @@ import {
   type Session,
 } from "./auth";
 import { DeviceShowcase, MotionDemo, UpscaleDemo } from "./FeatureDemos";
+import type { Live2DExample } from "./showcase-character";
 import { cloud, cloudLogin } from "./api";
 import { SignupForm } from "./SignupForm";
 import { AccountRecovery, type RecoveryMode } from "./AccountRecovery";
@@ -56,6 +57,11 @@ export function PublicHeader() {
   );
 }
 export function Landing() {
+  const [example, setExample] = useState<Live2DExample>("portrait");
+  useEffect(() => {
+    if (location.hash === "#live-2d") document.getElementById("live-2d")?.scrollIntoView();
+  }, []);
+
   return (
     <div className="landing">
       <section className="hero">
@@ -174,28 +180,32 @@ export function Landing() {
           </div>
           <MotionDemo variant="subject" />
         </section>
-        <section className="feature-section reverse">
+        <section id="live-2d" className="feature-section reverse">
           <div className="feature-copy">
             <span className="eyebrow">04 — LIVE 2D</span>
-            <h2>
-              나의 캐릭터에,
-              <br />
-              작은 움직임을.
-            </h2>
-            <p>
-              좋아하는 2D 캐릭터를 더 생생하게 만나 보세요.
-              <br />
-              얼굴과 눈동자, 머리카락을 각각 분리해
-              <br />
-              고개와 시선이 자연스럽게 움직입니다.
-            </p>
+            {example === "portrait" ? <>
+              <h2>인물 사진에,<br />작은 움직임을.</h2>
+              <p>
+                인물 사진에 자연스러운 움직임을 더해 보세요.
+                <br />얼굴과 눈동자, 머리카락을 파츠로 나눠
+                <br />시선이 따라오고 머리카락이 살짝 흔들립니다.
+              </p>
+            </> : <>
+              <h2>나의 캐릭터에,<br />작은 움직임을.</h2>
+              <p>
+                좋아하는 2D 캐릭터를 더 생생하게 만나 보세요.
+                <br />얼굴과 눈동자, 머리카락을 각각 분리해
+                <br />고개와 시선이 자연스럽게 움직입니다.
+              </p>
+            </>}
             <div className="feature-points">
               <span>파츠별 움직임</span>
               <span>마우스 반응</span>
               <span>자이로 센서 반응</span>
             </div>
           </div>
-          <MotionDemo variant="character" />
+          <MotionDemo variant="character" example={example}
+            switchExample={() => setExample(current => current === "portrait" ? "character" : "portrait")} />
         </section>
         <section className="feature-section">
           <div className="feature-copy">
@@ -218,7 +228,7 @@ export function Landing() {
               </span>
             </div>
           </div>
-          <DeviceShowcase />
+          <DeviceShowcase example={example} />
         </section>
       </div>
     </div>

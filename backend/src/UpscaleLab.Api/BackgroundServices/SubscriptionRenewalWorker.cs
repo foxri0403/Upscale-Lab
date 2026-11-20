@@ -114,10 +114,6 @@ public sealed class SubscriptionRenewalWorker(
                     throw new InvalidOperationException(
                         "갱신 상품 또는 금액 불일치");
 
-                var billingKey = protector.Decrypt(
-                    subscription.BillingKeyCiphertext!,
-                    subscription.CustomerKey);
-
                 // 하나의 실행 주체만 결제를 요청할 수 있다.
                 var claimed = await claims.TryClaimAsync(
                     subscription.UserId, order.OrderId, ct);
@@ -125,11 +121,16 @@ public sealed class SubscriptionRenewalWorker(
                 if (!claimed)
                     continue;
 
+                // Card changes are blocked while the claimed order is being charged.
+                var paymentAccount = await db.UserSubscriptions.AsNoTracking()
+                    .Where(x => x.Id == id).Select(x => new { x.BillingKeyCiphertext, x.CustomerKey }).SingleAsync(ct);
+                var billingKey = protector.Decrypt(paymentAccount.BillingKeyCiphertext!, paymentAccount.CustomerKey);
+
                 // 선점에 성공한 요청만 실제 청구한다.
                 // 여기서 문제가 발생하면 Confirming을 유지한다.
                 var payment = await billing.ChargeAsync(
                     billingKey,
-                    subscription.CustomerKey,
+                    paymentAccount.CustomerKey,
                     order.OrderId,
                     product.Name,
                     order.Amount,

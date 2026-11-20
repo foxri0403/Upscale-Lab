@@ -41,6 +41,30 @@ public sealed class CompanionSetupTests
     }
 
     [Fact]
+    public void UpgradeReplacesOnlyTheInstalledExecutableAfterTheAppStops()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "UpscaleLabInstallerTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var installer = new CompanionInstaller(root, root, root, (_, _) => throw new InvalidOperationException());
+            var source = Path.Combine(root, "download-new.exe");
+            var savedState = Path.Combine(root, "credentials.bin");
+            File.WriteAllText(installer.Executable, "old");
+            File.WriteAllText(source, "new");
+            File.WriteAllText(savedState, "account and device");
+
+            Assert.Throws<IOException>(() => installer.ReplaceExecutable(source, () => throw new IOException()));
+            Assert.Equal("old", File.ReadAllText(installer.Executable));
+            installer.ReplaceExecutable(source, () => Assert.Equal("old", File.ReadAllText(installer.Executable)));
+            Assert.Equal("new", File.ReadAllText(installer.Executable));
+            Assert.Equal("account and device", File.ReadAllText(savedState));
+            Assert.Equal(3, Directory.GetFiles(root).Length);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public void ConsentIsRecordedWithUtcTimeAndDoesNotTransferToAnotherServer()
     {
         var root = Path.Combine(Path.GetTempPath(), "UpscaleLabConsentTests", Guid.NewGuid().ToString("N"));

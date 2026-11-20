@@ -7,7 +7,7 @@ type MotionInputs = {
 };
 
 export function MotionInputButtons({ edit, ready, change, gyroPending, toggleGyro }: MotionInputs) {
-  return <div className="motion-input-options" role="group" aria-label="움직임 사용">
+  return <div className="motion-input-options" role="group" aria-label="움직임 기능 적용">
     <button type="button" aria-pressed={!!edit.mouseEnabled} disabled={!ready}
       onClick={() => change("mouseEnabled", !edit.mouseEnabled)}>
       <MousePointer2 size={19} aria-hidden="true" /><span>마우스</span>
@@ -31,7 +31,7 @@ export function LayerMotionControls(props: Omit<MotionInputs, "change"> & { chan
         min="0" max="100" step="1" value={edit.strength} disabled={!ready}
         onChange={event => strength(event.target.valueAsNumber)} />
     </div>
-    <h3>움직임 사용</h3>
+    <h3>움직임 기능 적용</h3>
     <MotionInputButtons {...props} />
   </>;
 }

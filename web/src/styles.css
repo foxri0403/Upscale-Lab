@@ -3107,6 +3107,11 @@ small {
 .devices-page .tablet-wallpaper .unknown-wallpaper { padding: 10px; text-align: center; }
 .devices-page .tablet-device .display-preview { width: 100%; }
 .devices-page .tablet-device.mobile-device .display-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--device-preview-height) * 1.35)), 1fr)); }
+.devices-page .foldable-device.mobile-device .display-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 24px; }
+.devices-page .fold-screen-active { white-space: nowrap; }
+@container (min-width: 880px) {
+  .devices-page .foldable-device.mobile-device .display-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
 .devices-page .display-resolution, .devices-page .mobile-device .display-resolution { margin: 12px 0 6px; }
 .devices-page .display-wallpaper-title, .devices-page .mobile-device .display-wallpaper-title { display: block; margin: 0 0 14px; min-height: 20px; min-width: 0; line-height: 20px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.7857143rem; font-weight: 500; color: #647591; }
 .devices-page .mobile-device .display-card { padding-top: 14px; }

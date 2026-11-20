@@ -95,4 +95,5 @@ public sealed record ProcessingStatusResponse(
     bool HasImageResult = false,
     int ResultWidth = 0,
     int ResultHeight = 0,
-    int? TargetLongEdge = null);
+    int? TargetLongEdge = null,
+    bool KeepBackground = false);

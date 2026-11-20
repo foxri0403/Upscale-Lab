@@ -40,7 +40,12 @@ class MainActivity : FlutterActivity() {
                             androidx.core.content.ContextCompat.startForegroundService(this, Intent(this, CompanionSyncService::class.java))
                         } else if (call.method == "setAlarms") requestAlertsIfNeeded()
                         result.success(value)
-                    } catch (failure: Exception) { liveSetupOpen = false; result.error("companion_failed", failure.message, null) }
+                    } catch (failure: Exception) {
+                        liveSetupOpen = false
+                        if (call.method == "activateLive")
+                            CompanionRuntime.action("completeLiveSetup", mapOf("accepted" to false)) { _, _ -> }
+                        result.error("companion_failed", failure.message, null)
+                    }
                 }
             }
         }
@@ -49,7 +54,7 @@ class MainActivity : FlutterActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == 2103) {
             liveSetupOpen = false
-            CompanionRuntime.action("completeLiveSetup", emptyMap<Any, Any>()) { _, _ -> }
+            CompanionRuntime.action("completeLiveSetup", mapOf("accepted" to (resultCode == RESULT_OK))) { _, _ -> }
         }
     }
     override fun onResume() { super.onResume(); CompanionRuntime.pollSoon() }

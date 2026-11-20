@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host localhost --port 5173 --strictPort",
+    "dev:local-test": "vite --mode local-test --host 127.0.0.1 --port 5173 --strictPort --open /tests/local-preview.html",
     "dev:production-ui": "vite --mode production-ui --host localhost --port 5173 --strictPort",
     "build": "tsc -b && vite build",
     "build:production-ui": "tsc -b && vite build --mode production-ui",

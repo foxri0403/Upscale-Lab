@@ -197,6 +197,11 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, bu
     {windows && layered && !edit.mouseEnabled && !picture.legacyMotion && <Notice>
       이 이미지에 저장된 마우스 움직임이 꺼져 있어 Windows 배경화면은 정지 상태로 표시됩니다.
     </Notice>}
+    {!windows && layered && !edit.gyroEnabled && !picture.legacyMotion && <Notice>
+      저장된 자이로 움직임이 꺼져 있습니다. 움직이는 배경화면으로 적용하려면 스튜디오에서 자이로 움직임을 켜고 저장해 주세요.
+    </Notice>}
+    {!windows && layered && <Notice>동적 배경화면을 처음 적용할 때는 Android 연결 앱에서 Live 2D를 켜고 시스템 배경화면 선택을 확인해 주세요.</Notice>}
+    {target.display.foldPanel && !target.display.isPrimary && <Notice>24시간 이내에 기기에서 {target.display.foldPanel === "cover" ? "외부 화면" : "내부 화면"}을 열면 적용합니다.</Notice>}
     {testError && <p className="wallpaper-motion-status" role="status">{testError}</p>}
     {fromExplore && <Notice>이미지를 내 이미지에 저장한 뒤 적용 요청을 전송합니다.</Notice>}
     <button className="button primary full" disabled={busy} onClick={() => void submit()}>

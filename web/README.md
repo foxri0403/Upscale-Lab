@@ -4,6 +4,8 @@ React·TypeScript·Vite 웹서비스다. 업로드·편집·업스케일·배경
 
 ## 개발과 빌드
 
+최근 UI 변경을 API·GPU 연결 없이 직접 확인하려면 `cd web` 후 `pnpm dev:local-test`를 실행한다. [로컬 테스트 시작 화면](http://127.0.0.1:5173/tests/local-preview.html)에서 샘플 작업실·추천 이미지·내 이미지·처리 팝업·가입 만료 화면을 선택할 수 있다. 샘플 계정 로그인과 데이터 추가는 브라우저 내부에서만 수행하고 기존 샘플 이미지는 유지한다. 처리 팝업에서는 기능·진행률·상태를 직접 선택하거나 **0~100% 자동 재생**으로 전체 흐름을 확인한다. 개발용 진입 파일은 운영 번들에 포함하지 않는다.
+
 package.json에 지정한 pnpm과 호환되는 Node.js를 사용한다.
 
 ```powershell
@@ -36,7 +38,21 @@ pnpm build는 TypeScript 검사와 일반 Vite 빌드를 수행한다. build:clo
 
 ## 작업실 토큰 사용량 팝업 로컬 확인
 
+이미지 처리 중 팝업과 레이어 움직임 버튼은 개발 전용 `/tests/processing-ui.html`에서 확인할 수 있다. `?dialog&operation=Upscale&progress=45`의 `operation`을 `Layers` 또는 `CharacterLayers`로 바꾸거나 `progress`를 0~100으로 지정하면 실제 공통 팝업이 가상 작업으로 표시된다. `status=Queued`, `status=Checking`, `status=Starting`, `status=Completed`와 `keepBackground`도 지원한다. GPU 작업이나 토큰 사용은 발생하지 않으며 운영 번들에는 포함하지 않는다.
+
+Windows와 Chrome이 있는 환경에서 저장소 루트의 `node web/scripts/check-editor-ui.cjs`로 버튼 5:5 배치·반응 적용 후 세부 설정·가상 진행률 27개 상태·취소/계속·추천 정렬·타인 저장 이미지 클릭을 자동 검증한다. 검증용 Vite와 별도 Chrome 프로필만 실행하고, 데스크톱/모바일 팝업 스크린샷을 Git에서 제외된 `tmp/editor-ui-*.png`에 저장한다.
+
 `pnpm dev` 실행 후 [작업실 샘플](http://localhost:5173/tests/studio-restoration.html)을 연다. 로그인이나 API 없이 실제 작업실 컴포넌트로 확인할 수 있다. 업스케일·배경 분리·Live 2D 도구에서 실행 버튼 바로 아래 왼쪽에 정렬된 회색 밑줄 **소모 토큰량 확인**을 클릭하면, 내 계정 메뉴처럼 링크 근처에 요금제 화면과 같은 5행 표가 펼쳐진다. 링크를 다시 클릭하거나 Escape·바깥 클릭·외부로 초점 이동으로 닫을 수 있다. 설정 패널 스크롤 시에도 닫히며 화면 크기를 바꾸면 위치를 맞춘다. 조회에는 토큰이 들지 않으며 실제 GPU 작업도 생성하지 않는다.
+
+## 결제 정보 로컬 테스트
+
+```powershell
+cd web
+$env:VITE_TOSS_CLIENT_KEY = 'test_ck_local_fixture'
+pnpm dev
+```
+
+[결제 정보 테스트 화면](http://localhost:5173/tests/billing.html)에서 **내 계정 → 결제 정보**를 연다. 미리 준비한 내역을 스크롤하고, 카드 변경에서 모의 인증을 승인하거나 취소할 수 있다. 구독 해지 예약과 토큰 환불의 결과는 브라우저 탭에 저장된다. [초기 데이터로 다시 시작](http://localhost:5173/tests/billing.html?reset=1)하면 결제 정보를 복원한다. 브라우저가 모의 API와 결제창을 제공하므로 실제 카드나 로그인 정보 입력이 필요 없다.
 
 ## Live 2D 작업실 로컬 테스트
 

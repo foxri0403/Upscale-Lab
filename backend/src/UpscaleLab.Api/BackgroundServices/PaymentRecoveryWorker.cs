@@ -47,6 +47,28 @@ public sealed class PaymentRecoveryWorker(
 
         var toss = scope.ServiceProvider
             .GetRequiredService<TossPaymentsClient>();
+        if (!toss.IsConfigured) return;
+
+        var billing = scope.ServiceProvider.GetRequiredService<AccountBillingService>();
+        var refundCutoff = DateTime.UtcNow.AddMinutes(-2);
+        var refunds = await db.PaymentOrders.AsNoTracking()
+            .Where(x => x.Status == PaymentOrderStatus.Refunding && x.UpdatedAt <= refundCutoff)
+            .OrderBy(x => x.UpdatedAt).Take(20).ToListAsync(ct);
+        foreach (var refund in refunds)
+        {
+            try
+            {
+                if (await billing.CompleteRefundAsync(refund, ct) == PaymentOrderStatus.Refunding)
+                {
+                    await db.PaymentOrders.Where(x => x.Id == refund.Id && x.Status == PaymentOrderStatus.Refunding)
+                        .ExecuteUpdateAsync(x => x.SetProperty(o => o.UpdatedAt, DateTime.UtcNow), ct);
+                }
+            }
+            catch (Exception error) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning("환불 결과 복구 실패: {OrderId}, 유형: {ErrorType}", refund.OrderId, error.GetType().Name);
+            }
+        }
 
         var fulfillment = scope.ServiceProvider
             .GetRequiredService<PaymentFulfillmentService>();

@@ -10,3 +10,4 @@
 
 .billing-usage { margin-top: 34px; }
 .billing-usage h2 { margin: 0 0 18px; }
+.billing-account-note { margin: 16px 0 25px; color: var(--muted); }

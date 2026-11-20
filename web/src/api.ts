@@ -251,6 +251,7 @@ export type Project = {
 };
 export type Job = {
   targetLongEdge?: number | null;
+  keepBackground?: boolean;
   jobId: string;
   status: string;
   progress: number;
@@ -305,6 +306,7 @@ export type CloudState = {
   supportsWallpaperRemoval?: boolean;
   displays: {
     id: string;
+    nativeId?: string;
     name: string;
     width: number;
     height: number;

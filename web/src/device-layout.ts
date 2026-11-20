@@ -27,8 +27,8 @@ export function registeredDevices(devices: Device[]): Device[] {
 }
 
 export function deviceDisplays(device: Device) {
-  const rank = (display: Device["displays"][number]) => display.canApplyWallpaper === false ? 2
-    : display.target === "Lock" || display.id === "lock" ? 0 : 1;
+  const rank = (display: Device["displays"][number]) => display.canApplyWallpaper === false ? 4
+    : (display.foldPanel === "inner" ? 2 : 0) + (display.target === "Lock" || display.id === "lock" ? 0 : 1);
   return device.platform === "Android"
     ? [...device.displays].sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id)) : device.displays;
 }

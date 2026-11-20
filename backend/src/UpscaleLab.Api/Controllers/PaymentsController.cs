@@ -19,8 +19,27 @@ namespace UpscaleLab.Api.Controllers;
 public sealed class PaymentsController(
     ApplicationDbContext db,
     TossPaymentsClient toss,
-    PaymentFulfillmentService fulfillment) : ControllerBase
+    PaymentFulfillmentService fulfillment,
+    AccountBillingService accountBilling) : ControllerBase
 {
+    [Authorize]
+    [HttpGet("account")]
+    public Task<AccountBilling> GetAccountBilling(CancellationToken ct) =>
+        accountBilling.GetAsync(User.GetRequiredUserId(), ct);
+
+    public sealed record RefundPaymentRequest(int Tokens, int Amount);
+
+    [Authorize]
+    [HttpPost("orders/{orderId}/refund")]
+    public async Task<IActionResult> RefundPayment(string orderId, RefundPaymentRequest request, CancellationToken ct)
+    {
+        if (orderId.Length > 64) return BadRequest("주문번호가 올바르지 않습니다.");
+        var status = await accountBilling.RefundAsync(User.GetRequiredUserId(), orderId, request.Tokens, request.Amount, ct);
+        return status == PaymentOrderStatus.Refunding ? Accepted(new { status = "Refunding" }) :
+            status == PaymentOrderStatus.Refunded ? Ok(new { status = "Refunded" }) :
+            Conflict(new { message = "결제사에서 환불을 승인하지 않아 토큰을 돌려드렸습니다." });
+    }
+
     [HttpGet("products")]
     public IActionResult GetProducts()
     {

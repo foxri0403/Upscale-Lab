@@ -2,6 +2,26 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { androidFormFactor, registeredDevices, deviceDisplays, wallpaperSourceForDisplay } from "../src/device-layout.ts";
 import { mapDeviceLibrary } from "../src/device-state.ts";
+import { wallpaperTargets } from "../src/explore-actions.ts";
+
+test("foldable panels retain separate phone and tablet targets when the active panel changes", () => {
+  const phone = { id: "cover", nativeId: "android-fold-cover", name: "외부 화면", width: 1080, height: 2400,
+    scale: 3, isPrimary: true, isConnected: true, canApplyWallpaper: true, wallpapers: [] };
+  const tablet = { ...phone, id: "inner", nativeId: "android-fold-inner", name: "내부 화면", width: 1812,
+    height: 2176, isPrimary: false };
+  const legacy = { ...phone, id: "legacy", nativeId: "android-built-in", isConnected: false, isPrimary: false };
+  const device = mapDeviceLibrary([{ id: "fold", name: "Fold", platform: "Android", displays: [tablet, legacy, phone] }]).devices[0];
+  assert.equal(device.physicalDisplayCount, 2);
+  assert.deepEqual(deviceDisplays(device).map(d => [d.id, d.foldPanel, d.name, d.isPrimary]), [
+    ["cover:Lock", "cover", "외부 화면 · 잠금 화면", true],
+    ["cover:Home", "cover", "외부 화면 · 홈 화면", true],
+    ["inner:Lock", "inner", "내부 화면 · 잠금 화면", false],
+    ["inner:Home", "inner", "내부 화면 · 홈 화면", false],
+  ]);
+  assert.deepEqual(wallpaperTargets([device], false).map(d => d.displayId).sort(), [
+    "cover:Home", "cover:Lock", "inner:Home", "inner:Lock",
+  ]);
+});
 test("registration order survives refresh order and uses stable ID ties", () => {
   const devices = [{id:'b',created:'2026-10-28T00:00:00Z'}, {id:'c',created:'2026-10-29T00:00:00Z'}, {id:'a',created:'2026-10-28T00:00:00Z'}];
   assert.deepEqual(registeredDevices(devices).map(d=>d.id), ['a','b','c']);

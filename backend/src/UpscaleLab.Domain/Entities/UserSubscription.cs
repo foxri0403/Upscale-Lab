@@ -25,6 +25,8 @@ public sealed class UserSubscription : BaseEntity
 
     // 빌링키는 평문이 아닌 암호화된 값으로 저장한다.
     public string? BillingKeyCiphertext { get; set; }
+    public string? CardIssuerCode { get; set; }
+    public string? CardNumberSuffix { get; set; }
 
     public DateTime? CurrentPeriodStartUtc { get; set; }
 

@@ -32,8 +32,8 @@ public sealed class AccountCleanupService(ApplicationDbContext db, IStorageServi
                 {
                     if (task.FirstSweepAt == null)
                     {
-                        if (task.IdentitySubject is { } subject) await identity.DeleteAsync(subject, ct);
                         await RemoveAccountDataAsync(task, ct);
+                        if (task.IdentitySubject is { } subject) await identity.DeleteAsync(subject, ct);
                     }
                     foreach (var key in JsonSerializer.Deserialize<string[]>(task.ObjectKeysJson ?? "[]") ?? [])
                         if (OwnsKey(task.UserId, key)) await storage.DeleteAsync(key, ct);
@@ -67,7 +67,7 @@ public sealed class AccountCleanupService(ApplicationDbContext db, IStorageServi
                 logger?.LogError(error, "Account cleanup task {TaskId} will be retried.", id);
             }
         }
-    private async Task RemoveAccountDataAsync(AccountCleanupTask task, CancellationToken ct)
+    internal async Task RemoveAccountDataAsync(AccountCleanupTask task, CancellationToken ct)
     {
         await AuthUserTransaction.RunAsync(db, task.Email ?? "", async () =>
         {
@@ -112,7 +112,15 @@ public sealed class AccountCleanupService(ApplicationDbContext db, IStorageServi
             db.Comments.RemoveRange(await db.Comments.Where(x => x.UserId == userId || postIds.Contains(x.GalleryPostId)).ToListAsync(ct));
             db.GalleryLikes.RemoveRange(await db.GalleryLikes.Where(x => x.UserId == userId || postIds.Contains(x.GalleryPostId)).ToListAsync(ct));
             db.GalleryPosts.RemoveRange(await db.GalleryPosts.Where(x => postIds.Contains(x.Id)).ToListAsync(ct));
+            db.WallpaperLikes.RemoveRange(await db.WallpaperLikes.Where(x => x.UserId == userId || assetIds.Contains(x.WallpaperAssetId)).ToListAsync(ct));
+            // Payment orders restrict deletion of both users and subscriptions.
+            // Remove them first so an account with purchase history can be deleted.
+            db.PaymentOrders.RemoveRange(await db.PaymentOrders.Where(x => x.UserId == userId).ToListAsync(ct));
             await db.SaveChangesAsync(ct);
+            db.UserSubscriptions.RemoveRange(await db.UserSubscriptions.Where(x => x.UserId == userId).ToListAsync(ct));
+            db.UserTokenWallets.RemoveRange(await db.UserTokenWallets.Where(x => x.UserId == userId).ToListAsync(ct));
+            db.TokenTransactions.RemoveRange(await db.TokenTransactions.Where(x => x.UserId == userId).ToListAsync(ct));
+            db.PendingRegistrations.RemoveRange(await db.PendingRegistrations.Where(x => x.Email == user.Email).ToListAsync(ct));
             db.WallpaperAssets.RemoveRange(assets);
             db.ProcessingJobs.RemoveRange(await db.ProcessingJobs.Where(x => x.Project.UserId == userId).ToListAsync(ct));
             db.ImageLayers.RemoveRange(await db.ImageLayers.Where(x => x.Project.UserId == userId).ToListAsync(ct));

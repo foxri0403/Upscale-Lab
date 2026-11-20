@@ -14,7 +14,10 @@ export function mapDeviceLibrary(states: CloudState[], registrations: CloudDevic
     online: s.recentlySeen,
     connection: s.isLinked && s.recentlySeen ? "connected" : s.isLinked && !s.lastSeenAt ? "connecting" : "disconnected",
     supportsWallpaperRemoval: s.supportsWallpaperRemoval ?? false,
-    displays: s.displays.flatMap((d) => {
+    displays: s.displays.filter(d => s.platform !== "Android" || d.isConnected || d.nativeId !== "android-built-in" ||
+      !s.displays.some(screen => screen.isConnected && screen.nativeId?.startsWith("android-fold-"))).flatMap((d) => {
+      const foldPanel = s.platform !== "Android" ? undefined :
+        d.nativeId === "android-fold-cover" ? "cover" : d.nativeId === "android-fold-inner" ? "inner" : undefined;
       const assignments: CloudState["displays"][number]["wallpapers"] = s.platform === "Android" && d.canApplyWallpaper !== false
         ? (["Lock", "Home"] as const).map(target => d.wallpapers.find(w => w.target === target) || { target, observation: "Unknown" })
         : d.wallpapers.length
@@ -30,13 +33,12 @@ export function mapDeviceLibrary(states: CloudState[], registrations: CloudDevic
           ];
       return assignments.map((w) => ({
         id: `${d.id}:${w.target}`,
-        nativeId: d.id,
+        nativeId: d.nativeId ?? d.id,
+        foldPanel,
         target: w.target,
         name:
           s.platform === "Android" && d.canApplyWallpaper !== false
-            ? w.target === "Lock"
-              ? "잠금 화면"
-              : "홈 화면"
+            ? `${foldPanel ? `${d.name} · ` : ""}${w.target === "Lock" ? "잠금 화면" : "홈 화면"}`
             : d.name,
         resolution: `${d.width} × ${d.height}`,
         width: d.width,

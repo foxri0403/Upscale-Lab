@@ -73,14 +73,14 @@ public sealed partial class AuthServiceTests
         await using var db = CreateDbContext();
         var clock = new TestClock();
         var (service, provider) = CreateService(db, clock);
-        db.Users.Add(new User { Email = "legacy@example.com", Username = "legacy", IsEmailVerified = false, CreatedAt = clock.Now.AddDays(-10) });
+        db.Users.Add(new User { Email = "member@example.com", Username = "member", IsEmailVerified = true, EmailVerifiedAt = clock.Now });
         await db.SaveChangesAsync();
         await service.RegisterAsync(new("pending@example.com", "pending", ValidPassword), default);
         await service.VerifyEmailAsync(new("pending@example.com", "000001"), default);
         clock.Now = clock.Now.AddHours(24);
         await service.DeleteExpiredRegistrationsAndSessionsAsync(default);
         Assert.Empty(db.PendingRegistrations);
-        Assert.Equal("legacy@example.com", (await db.Users.SingleAsync()).Email);
+        Assert.Equal("member@example.com", (await db.Users.SingleAsync()).Email);
         Assert.Equal("pending@example.com", Assert.Single(provider.Deletions));
     }
 
