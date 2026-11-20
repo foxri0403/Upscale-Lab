@@ -65,7 +65,7 @@ These are expected to come from local user secrets, environment variables, or a 
 
 ## Mobile versioning
 
-- Current APK version: **1.8.2** (Android build **50**, lock screen live wallpaper detection, rendering and activation retries). Keep only this latest version entry; replace it after every generated APK and never append a version history here.
+- The prepared APK is **1.8.4** (Android build **51**, EyeMotionFix, APK generation pending). Keep a single version entry and update it when the APK is generated.
 - Use semantic version numbers in `major.minor.patch` form for every new APK release.
 - Increase the first number (`major`) by exactly 1 for a large feature or major product update.
 - Increase the second number (`minor`) by exactly 1 for a smaller feature update.
@@ -75,7 +75,7 @@ These are expected to come from local user secrets, environment variables, or a 
 - Keep the APK filename and mobile documentation synchronized with the version in `mobile/pubspec.yaml`.
 - Whenever an APK is generated, update the single current-version entry above, `mobile/pubspec.yaml`, and `mobile/README.md` together. Read the latest recorded version before assigning a new release; feature releases that also include fixes use the feature increment.
 - Verify every generated APK with Android `apksigner` before delivery; never deliver an unsigned release APK.
-- Release APKs must use the team's shared keystore through ignored local `mobile/android/key.properties`, an external `UPSCALE_SIGNING_PROPERTIES_FILE`, or the configured signing environment variables. Never fall back to the machine's debug key for release builds or commit keystores/passwords. Existing team APKs used the local debug certificate; compare certificates before claiming upgrade compatibility.
+- Release APKs must use the team's shared keystore through ignored local `mobile/android/key.properties`, an external `UPSCALE_SIGNING_PROPERTIES_FILE`, or the configured signing environment variables. Never fall back to the machine's debug key for release builds or commit keystores/passwords. Compare the release certificate with the deployed APK before claiming upgrade compatibility. Older APKs may use a debug certificate.
 - Team Windows signing files use the common external directory `C:\UpscaleLab-Secrets`: properties file `C:\UpscaleLab-Secrets\key.properties` and shared keystore `C:\UpscaleLab-Secrets\upscalelab-release.jks`. Set `UPSCALE_SIGNING_PROPERTIES_FILE` to that properties path when building from a worktree. Keep the directory outside Git; never commit its files or credentials.
 
 ## References

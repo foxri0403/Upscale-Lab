@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Drawing;
+using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using System.Windows.Forms.Integration;
 using System.Windows.Media;
@@ -29,10 +31,24 @@ public sealed class ParallaxRenderingTests
                 using var neutral=new Bitmap(Path.Combine(directory,"neutral.png"));
                 Assert.Equal(System.Drawing.Color.Blue.ToArgb(),neutral.GetPixel(160,120).ToArgb());
                 using var view=new ParallaxView(monitor,manifest,layers,()=>{reads++;return input;},playbackPaused:true);
-                using var form=new Form {ShowInTaskbar=false,StartPosition=FormStartPosition.Manual,Location=new Point(-4000,-4000),Size=new Size(320,240)};
+                var bounds = new Rectangle(-4000, -4000, 320, 240);
+                // Exercise the real child-window attachment without requiring the runner's Explorer desktop.
+                using var desktop = desktopChild ? new Form
+                {
+                    ShowInTaskbar = false,
+                    FormBorderStyle = FormBorderStyle.None,
+                    StartPosition = FormStartPosition.Manual,
+                    Bounds = bounds
+                } : null;
+                using var form=new Form {ShowInTaskbar=false,StartPosition=FormStartPosition.Manual,Bounds=bounds};
                 using var host=new ElementHost {Dock=DockStyle.Fill,Child=view};form.Controls.Add(host);
-                if(desktopChild){var worker=DesktopHost.Find(true);Assert.NotEqual(IntPtr.Zero,worker);DesktopHost.Parent(form.Handle,worker,new Rectangle(-4000,-4000,320,240));}
+                if (desktop is not null)
+                {
+                    desktop.Show();
+                    DesktopHost.Parent(form.Handle, desktop.Handle, bounds);
+                }
                 form.Show();
+                if (desktop is not null) Assert.Equal(desktop.Handle, GetParent(form.Handle));
                 PumpFrames(250);
                 Assert.True(view.IsLoaded,$"WPF not loaded; desktopChild={desktopChild}");
                 Assert.Equal(0,reads);
@@ -60,7 +76,38 @@ public sealed class ParallaxRenderingTests
                 if (character) Assert.True(pausedAngle > 0 && rotation.Angle < 0);
                 form.Close();
             }catch(Exception error){failure=error;}finally{Directory.Delete(directory,true);}
-        });thread.SetApartmentState(ApartmentState.STA);thread.Start();Assert.True(thread.Join(TimeSpan.FromSeconds(15)));if(failure!=null)throw failure;
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(15)), "The WPF rendering test did not finish on the STA thread.");
+        if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
+    }
+
+    [Fact]
+    public void BodyMotionIsVisibleWhenEnabledAndStillRespectsFixedMode()
+    {
+        var follow = new CharacterRig(Enabled:true, BodyMode:"follow");
+        var fixedRig = follow with { BodyMode = "fixed" };
+        var torso = RigMotion.AngleDegrees("torso", follow, 1);
+        Assert.InRange(torso, 1.4, 2.2);
+        Assert.Equal(0, RigMotion.AngleDegrees("torso", fixedRig, 1));
+        Assert.True(RigMotion.BodyShift("torso", follow, 1, 0.5, 1200, 2000).X > 0);
+        Assert.Equal((0.0, 0.0), RigMotion.BodyShift("torso", fixedRig, 1, 0.5, 1200, 2000));
+    }
+
+    [Fact]
+    public void EyeGazeMovesRelativeToHeadAndRespectsFaceAndEyeSettings()
+    {
+        var rig = new CharacterRig(Enabled: true);
+        var head = RigMotion.FaceShift("head", rig, 1, 1, 1000, 2000);
+        var eye = RigMotion.FaceShift("eye", rig, 1, 1, 1000, 2000);
+        Assert.Equal(6.3, eye.X - head.X, 6);
+        Assert.Equal(9.8, eye.Y - head.Y, 6);
+        Assert.Equal(head, RigMotion.FaceShift("eye", rig with { EyeMove = 0 }, 1, 1, 1000, 2000));
+        Assert.Equal((0.0, 0.0), RigMotion.FaceShift("eye", rig with { FaceEnabled = false }, 1, 1, 1000, 2000));
+        Assert.Equal((0.0, 0.0), RigMotion.FaceShift("fixed", rig, 1, 1, 1000, 2000));
+        Assert.Equal(0, RigMotion.AngleDegrees("head", rig with { FaceEnabled = false }, 1));
+        Assert.True(RigMotion.AngleDegrees("torso", rig with { FaceEnabled = false, BodyMode = "follow" }, 1) > 0);
     }
 
     private static void PumpFrames(int milliseconds)
@@ -72,4 +119,7 @@ public sealed class ParallaxRenderingTests
             Thread.Sleep(2);
         }
     }
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern IntPtr GetParent(IntPtr window);
 }

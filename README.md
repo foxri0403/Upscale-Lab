@@ -1,3 +1,5 @@
+> 2026-11-17 통합 소스: [패치 병합·눈 움직임 수정 및 적용 안내](INTEGRATION_EYE_MOTION_FIX_20261117_KO.md). 이번 결과물은 소스 수정본이며, 기존 포함 실행파일/APK에는 이번 변경이 반영되지 않았습니다.
+
 # Upscale Lab
 
 Upscale Lab은 React·TypeScript 웹, ASP.NET Core 8 API, PostgreSQL, S3로 구성된 이미지 제작·공유·기기 배경화면 관리 서비스다. 업로드·편집·업스케일·배경 분리·Live 2D는 웹에서 사용하고 Windows/Android 연결 앱은 같은 계정으로 로그인해 기기 정보를 보고하고 OS 배경화면을 적용한다.

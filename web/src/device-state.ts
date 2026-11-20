@@ -33,7 +33,7 @@ export function mapDeviceLibrary(states: CloudState[], registrations: CloudDevic
           ];
       return assignments.map((w) => ({
         id: `${d.id}:${w.target}`,
-        nativeId: d.nativeId ?? d.id,
+        nativeId: d.id, // Wallpaper commands use the API display ID.
         foldPanel,
         target: w.target,
         name:

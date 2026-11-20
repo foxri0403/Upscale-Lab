@@ -21,6 +21,7 @@ test("foldable panels retain separate phone and tablet targets when the active p
   assert.deepEqual(wallpaperTargets([device], false).map(d => d.displayId).sort(), [
     "cover:Home", "cover:Lock", "inner:Home", "inner:Lock",
   ]);
+  assert.deepEqual(deviceDisplays(device).map(d => d.nativeId), ["cover", "cover", "inner", "inner"]);
 });
 test("registration order survives refresh order and uses stable ID ties", () => {
   const devices = [{id:'b',created:'2026-10-28T00:00:00Z'}, {id:'c',created:'2026-10-29T00:00:00Z'}, {id:'a',created:'2026-10-28T00:00:00Z'}];

@@ -13,6 +13,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.RectF
 import android.graphics.Paint
 import android.os.Handler
 import android.os.Looper
@@ -41,7 +42,9 @@ class LiveLayerWallpaperService : WallpaperService() {
 
     private data class Layer(val bitmap: Bitmap, val order: Int, val positionX: Float,
         val positionY: Float, val rotation: Float, val scale: Float, val movementX: Float, val movementY: Float, val background: Boolean = false,
-        val role: String = "Other", val layerId: String = "")
+        val role: String = "Other", val layerId: String = "") {
+        var cachedRigPart: String? = null
+    }
 
     private inner class LiveLayerEngine(private val describedManifest: String? = null,
         private val describedTarget: Int = 0) : Engine(), SharedPreferences.OnSharedPreferenceChangeListener {
@@ -83,6 +86,7 @@ class LiveLayerWallpaperService : WallpaperService() {
         private var canvasWidth = 1f
         private var canvasHeight = 1f
         private var decodeSide = maxDecodedSide
+        private val layerRect = RectF()
         private fun authorized() = !agent || LiveActivationPolicy.mayAnimate(preferences.getBoolean("companion_live_enabled", false),
             preferences.getString("companion_owner", "") == owner, preferences.getLong("companion_valid_until", 0), System.currentTimeMillis())
         private val leaseCheck = object : Runnable {
@@ -101,20 +105,34 @@ class LiveLayerWallpaperService : WallpaperService() {
                 val elapsed = if (lastFrameNanos == 0L) 1.0 / 60 else
                     ((frameTimeNanos - lastFrameNanos) / 1_000_000_000.0).coerceIn(0.0, .1)
                 lastFrameNanos = frameTimeNanos
-                val amount = (1 - kotlin.math.exp(-elapsed / .065)).toFloat()
-                if (motionEnabled && authorized()) {
+                // Final frame interpolation runs independently of irregular sensor events.
+                val amount = (1 - kotlin.math.exp(-elapsed / .055)).toFloat()
+                val canAnimate = motionEnabled && authorized()
+                if (canAnimate) {
                     tiltX += (targetTiltX - tiltX) * amount
                     tiltY += (targetTiltY - tiltY) * amount
                 } else { tiltX = 0f; tiltY = 0f }
-                draw()
-                if (motionEnabled && authorized() && layers.isNotEmpty()) scheduleDraw()
+                draw(canAnimate)
+                // A still wallpaper needs no continuous GPU redraw. The sensor
+                // callback below wakes rendering when the device moves again.
+                if (WallpaperFrameGate.needsAnotherFrame(canAnimate, layers.isNotEmpty(),
+                        tiltX, tiltY, targetTiltX, targetTiltY)) {
+                    scheduleDraw()
+                } else {
+                    // A new gesture should start with a fresh frame delta, not
+                    // the elapsed seconds since the last stationary frame.
+                    lastFrameNanos = 0L
+                }
             }
         }
         private val sensor = TiltSensor(this@LiveLayerWallpaperService, {
             if (Build.VERSION.SDK_INT >= 30) displayContext?.display?.rotation ?: 0
             else (getSystemService(WINDOW_SERVICE) as WindowManager).defaultDisplay.rotation
         }) { x, y ->
-            targetTiltX = x; targetTiltY = y
+            if (WallpaperFrameGate.targetChanged(targetTiltX, targetTiltY, x, y)) {
+                targetTiltX = x; targetTiltY = y
+                scheduleDraw()
+            }
         }
         private val lifecycle: WallpaperEngineLifecycle = WallpaperEngineLifecycle(
             refresh = { loadActiveProject(surfaceHolder.surfaceFrame.width(), surfaceHolder.surfaceFrame.height()) },
@@ -211,7 +229,7 @@ class LiveLayerWallpaperService : WallpaperService() {
             refreshDestinations()
             lifecycle.surfaceCreated()
             watchSharedKeyguard()
-            draw()
+            scheduleDraw()
         }
 
         override fun onSurfaceDestroyed(holder: SurfaceHolder) {
@@ -280,6 +298,7 @@ class LiveLayerWallpaperService : WallpaperService() {
                 owner = manifest.optString("ownerId")
                 canvasWidth = manifest.optInt("width", 1).toFloat().coerceAtLeast(1f)
                 canvasHeight = manifest.optInt("height", 1).toFloat().coerceAtLeast(1f)
+                layerRect.set(-canvasWidth / 2f, -canvasHeight / 2f, canvasWidth / 2f, canvasHeight / 2f)
                 live2D = manifest.optString("renderer") == "live2d"
                 rig = manifest.optJSONObject("rig") ?: JSONObject()
                 motionEnabled = live2D && WallpaperMotion.usesGyro(manifest)
@@ -325,10 +344,12 @@ class LiveLayerWallpaperService : WallpaperService() {
         // The server and web editor use identical rig group names. Separate PNG files are
         // required: a combined body PNG cannot independently bend an arm or hand.
         private fun rigPart(layer: Layer): String {
+            if (layer.background) return "fixed"
+            layer.cachedRigPart?.let { return it }
             val manual = rig.optJSONObject("partAssignments")?.optString(layer.layerId, "") ?: ""
-            if (manual in setOf("fixed", "head", "eye", "frontHair", "backHair", "torso",
-                    "leftArm", "rightArm", "leftHand", "rightHand", "lowerBody", "leftLeg", "rightLeg")) return manual
-            return when (layer.role) {
+            val part = if (manual in setOf("fixed", "head", "eye", "frontHair", "backHair", "torso",
+                    "leftArm", "rightArm", "leftHand", "rightHand", "lowerBody", "leftLeg", "rightLeg")) manual
+            else when (layer.role) {
                 "Face", "Eyebrow", "Mouth", "Nose" -> "head"
                 "Eye" -> "eye"
                 "BackHair" -> "backHair"
@@ -336,19 +357,23 @@ class LiveLayerWallpaperService : WallpaperService() {
                 "Body", "Clothes" -> "torso"
                 else -> "fixed"
             }
+            layer.cachedRigPart = part
+            return part
         }
 
         private fun rigAngle(layer: Layer): Float {
             if (!live2D || !motionEnabled || !rig.optBoolean("enabled", false)) return 0f
             val part = rigPart(layer)
+            if (!rig.optBoolean("faceEnabled", true) && (part == "head" || part == "eye" || part == "frontHair" || part == "backHair")) return 0f
             val head = tiltX.coerceIn(-1f, 1f) * rig.optInt("headTilt", 60) / 100f * .115f
             val follow = rig.optString("bodyMode", "fixed") == "follow"
             val upper = if (follow) head * rig.optInt("upperBody", 40) / 100f else 0f
             val lower = if (follow) head * rig.optInt("lowerBody", 20) / 100f else 0f
-            val torso = upper * rig.optInt("torso", 50) / 100f * .60f
+            // Previous .60 gain made the default torso rotation less than half a degree.
+            val torso = upper * rig.optInt("torso", 50) / 100f * 2.0f
             val leftArm = torso + upper * rig.optInt("leftArm", 35) / 100f * .42f
             val rightArm = torso + upper * rig.optInt("rightArm", 35) / 100f * .42f
-            val lowerBody = lower * .32f
+            val lowerBody = lower * .55f
             val angle = when (part) {
                 "head", "eye" -> head
                 "frontHair" -> head * (1f - .55f * rig.optInt("hairSway", 55) / 100f)
@@ -366,18 +391,29 @@ class LiveLayerWallpaperService : WallpaperService() {
             return Math.toDegrees(angle.toDouble()).toFloat()
         }
 
-        private fun rigPivot(layer: Layer, width: Float, height: Float): Pair<Float, Float> {
-            val part = rigPart(layer)
-            val pivotY = when (part) {
+        private fun rigShiftX(part: String, angle: Float): Float =
+            if (!live2D || !rig.optBoolean("enabled", false)) 0f else RigTranslation.x(part,
+                tiltX, angle, canvasWidth, rig.optInt("headTilt", 60), rig.optInt("eyeMove", 35),
+                rig.optBoolean("faceEnabled", true), rig.optString("bodyMode", "fixed") == "follow")
+
+        private fun rigShiftY(part: String): Float =
+            if (!live2D || !rig.optBoolean("enabled", false)) 0f else RigTranslation.y(part,
+                tiltY, canvasHeight, rig.optInt("headTilt", 60), rig.optInt("eyeMove", 35),
+                rig.optBoolean("faceEnabled", true), rig.optString("bodyMode", "fixed") == "follow")
+
+        private fun rigPivotX(width: Float): Float =
+            (rig.optInt("pivotX", 50).coerceIn(0, 100) / 100f - .5f) * width
+
+        private fun rigPivotY(layer: Layer, height: Float): Float {
+            val pivotY = when (rigPart(layer)) {
                 "torso", "leftArm", "rightArm", "leftHand", "rightHand" -> rig.optInt("torsoPivotY", 40)
                 "lowerBody", "leftLeg", "rightLeg" -> rig.optInt("lowerPivotY", 68)
                 else -> rig.optInt("pivotY", 16)
             }
-            return Pair((rig.optInt("pivotX", 50).coerceIn(0, 100) / 100f - .5f) * width,
-                (pivotY.coerceIn(0, 100) / 100f - .5f) * height)
+            return (pivotY.coerceIn(0, 100) / 100f - .5f) * height
         }
 
-        private fun draw() {
+        private fun draw(canAnimate: Boolean = motionEnabled && authorized()) {
             if (!lifecycle.surfaceReady || !surfaceHolder.surface.isValid) return
             val drawingSurface = surfaceHolder.surface
             val rendered = WallpaperFrameRenderer.render(
@@ -386,33 +422,49 @@ class LiveLayerWallpaperService : WallpaperService() {
                 draw = { canvas ->
                     canvas.drawColor(Color.BLACK)
                     if (layers.isEmpty()) fallback?.let { drawBitmap(canvas, it, 0f, 0f, 0f, 1f) }
-                    else for ((index, layer) in layers.withIndex()) {
-                        if (agent) {
-                            val cover = max(canvas.width / canvasWidth, canvas.height / canvasHeight)
-                            val moving = motionEnabled && authorized() && !layer.background
-                            val x = if (moving) -tiltX.coerceIn(-1f, 1f) * layer.movementX else 0f
-                            val y = if (moving) tiltY.coerceIn(-1f, 1f) * layer.movementY else 0f
-                            canvas.save()
-                            canvas.translate(canvas.width / 2f + (layer.positionX + x) * cover, canvas.height / 2f + (layer.positionY + y) * cover)
-                            canvas.rotate(layer.rotation)
-                            canvas.scale(cover * layer.scale, cover * layer.scale)
-                            val (px, py) = rigPivot(layer, canvasWidth, canvasHeight)
-                            canvas.translate(px, py)
-                            canvas.rotate(rigAngle(layer))
-                            canvas.translate(-px, -py)
-                            canvas.drawBitmap(layer.bitmap, null, android.graphics.RectF(-canvasWidth / 2, -canvasHeight / 2, canvasWidth / 2, canvasHeight / 2), paint)
-                            canvas.restore()
-                            continue
+                    else {
+                        val cover = if (agent) max(canvas.width / canvasWidth, canvas.height / canvasHeight) else 1f
+                        for (layer in layers) {
+                            if (agent) {
+                                val moving = canAnimate && !layer.background
+                                val angle = if (moving) rigAngle(layer) else 0f
+                                val part = rigPart(layer)
+                                val shiftX = if (moving) rigShiftX(part, angle) else 0f
+                                val shiftY = if (moving) rigShiftY(part) else 0f
+                                val x = if (moving) -tiltX.coerceIn(-1f, 1f) * layer.movementX + shiftX else 0f
+                                val y = if (moving) tiltY.coerceIn(-1f, 1f) * layer.movementY + shiftY else 0f
+                                canvas.save()
+                                canvas.translate(canvas.width / 2f + (layer.positionX + x) * cover, canvas.height / 2f + (layer.positionY + y) * cover)
+                                canvas.rotate(layer.rotation)
+                                canvas.scale(cover * layer.scale, cover * layer.scale)
+                                if (angle != 0f) {
+                                    val px = rigPivotX(canvasWidth)
+                                    val py = rigPivotY(layer, canvasHeight)
+                                    canvas.translate(px, py)
+                                    canvas.rotate(angle)
+                                    canvas.translate(-px, -py)
+                                }
+                                canvas.drawBitmap(layer.bitmap, null, layerRect, paint)
+                                canvas.restore()
+                                continue
+                            }
+                            // A character-only stack may start with its torso rather than a background.
+                            val moving = canAnimate && (!live2D || !layer.background)
+                            val amplitudeX = if (live2D) canvas.width * .035f else layer.movementX * 4f
+                            val amplitudeY = if (live2D) canvas.height * .035f else layer.movementY * 4f
+                            val angle = if (moving) rigAngle(layer) else 0f
+                            val part = rigPart(layer)
+                            val shiftX = if (moving) rigShiftX(part, angle) else 0f
+                            val shiftY = if (moving) rigShiftY(part) else 0f
+                            val imageCover = max(canvas.width / canvasWidth, canvas.height / canvasHeight)
+                            drawBitmap(canvas, layer.bitmap,
+                                layer.positionX + (if (moving) -tiltX * amplitudeX * sensitivity else 0f) + shiftX * imageCover,
+                                layer.positionY + (if (moving) tiltY * amplitudeY * sensitivity else 0f) + shiftY * imageCover,
+                                layer.rotation, layer.scale * if (live2D) 1.08f else 1f,
+                                angle,
+                                if (angle != 0f) rigPivotX(layer.bitmap.width.toFloat()) else 0f,
+                                if (angle != 0f) rigPivotY(layer, layer.bitmap.height.toFloat()) else 0f)
                         }
-                        // Live 2D anchors the background. Only the second layer moves.
-                        val moving = motionEnabled && authorized() && (!live2D || index > 0)
-                        val amplitudeX = if (live2D) canvas.width * .035f else layer.movementX * 4f
-                        val amplitudeY = if (live2D) canvas.height * .035f else layer.movementY * 4f
-                        drawBitmap(canvas, layer.bitmap,
-                            layer.positionX + if (moving) -tiltX * amplitudeX * sensitivity else 0f,
-                            layer.positionY + if (moving) tiltY * amplitudeY * sensitivity else 0f,
-                            layer.rotation, layer.scale * if (live2D) 1.08f else 1f,
-                            rigAngle(layer), rigPivot(layer, layer.bitmap.width.toFloat(), layer.bitmap.height.toFloat()))
                     }
                 },
                 post = { if (Build.VERSION.SDK_INT >= 26) surfaceHolder.unlockCanvasAndPost(it)
@@ -424,14 +476,16 @@ class LiveLayerWallpaperService : WallpaperService() {
         }
 
         private fun drawBitmap(canvas: Canvas, bitmap: Bitmap, x: Float, y: Float, rotation: Float, layerScale: Float,
-                               rigRotation: Float = 0f, rigPivot: Pair<Float, Float> = Pair(0f, 0f)) {
+                               rigRotation: Float = 0f, pivotX: Float = 0f, pivotY: Float = 0f) {
             val scale = max(canvas.width.toFloat() / bitmap.width, canvas.height.toFloat() / bitmap.height) * layerScale
             canvas.save()
             canvas.translate(canvas.width / 2f + x, canvas.height / 2f + y)
             canvas.rotate(rotation); canvas.scale(scale, scale)
-            canvas.translate(rigPivot.first, rigPivot.second)
-            canvas.rotate(rigRotation)
-            canvas.translate(-rigPivot.first, -rigPivot.second)
+            if (rigRotation != 0f) {
+                canvas.translate(pivotX, pivotY)
+                canvas.rotate(rigRotation)
+                canvas.translate(-pivotX, -pivotY)
+            }
             canvas.drawBitmap(bitmap, -bitmap.width / 2f, -bitmap.height / 2f, paint)
             canvas.restore()
         }
