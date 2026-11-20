@@ -119,8 +119,11 @@ public sealed class S3StorageService(
             throw new ArgumentException(
                 "Only PNG uploads are supported.");
 
+        // GPU jobs can run for up to one hour and their signed URLs include
+        // ten minutes for transfer/queue overhead. Keep these PNG-only,
+        // object-scoped result URLs bounded without rejecting valid GPU deadlines.
         if (lifetime <= TimeSpan.Zero ||
-            lifetime > TimeSpan.FromMinutes(30))
+            lifetime > TimeSpan.FromHours(2))
             throw new ArgumentOutOfRangeException(
                 nameof(lifetime));
 

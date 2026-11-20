@@ -60,6 +60,8 @@ var s3Options = builder.Configuration.GetSection("AWS").Get<S3StorageOptions>() 
 var runPodOptions = builder.Configuration
     .GetSection("RunPod")
     .Get<RunPodOptions>() ?? new RunPodOptions();
+runPodOptions = LocalGpuOptions.Select(builder.Configuration["Processing:Provider"], runPodOptions,
+    builder.Configuration.GetSection("LocalGpu").Get<LocalGpuOptions>() ?? new LocalGpuOptions());
 var seeThroughOptions = builder.Configuration.GetSection("SeeThrough").Get<SeeThroughOptions>() ?? new SeeThroughOptions();
 var cognitoOptions = builder.Configuration
     .GetSection(CognitoOptions.SectionName)

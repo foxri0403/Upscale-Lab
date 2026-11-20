@@ -9,5 +9,6 @@ public sealed class RunPodOptions
     public int LayersTimeoutSeconds { get; set; } = 900;
     public string ApiBaseUrl { get; set; } = "https://api.runpod.ai/v2/";
     public bool UseS3Transfer { get; set; } = false;
+    public bool UseJobDeadlinePolicy { get; set; } = false;
     public int TimeoutSeconds { get; set; } = 600;
 }

@@ -50,17 +50,18 @@ public sealed class RunPodS3UpscaleService(
             new AuthenticationHeaderValue(
                 "Bearer", options.ApiKey);
 
-        request.Content = JsonContent.Create(new
+        var input = new
         {
-            input = new
-            {
-                operation = "upscale_s3",
-                scale,
-                target_long_edge = targetLongEdge,
-                input_url = inputUrl,
-                output_url = outputUrl
-            }
-        });
+            operation = "upscale_s3",
+            scale,
+            target_long_edge = targetLongEdge,
+            input_url = inputUrl,
+            output_url = outputUrl
+        };
+        object submission = options.UseJobDeadlinePolicy
+            ? new { input, policy = new { executionTimeout = options.TimeoutSeconds * 1000, ttl = options.TimeoutSeconds * 1000 } }
+            : new { input };
+        request.Content = JsonContent.Create(submission);
 
         using var response =
             await httpClient.SendAsync(request, token);

@@ -18,6 +18,40 @@ namespace UpscaleLab.Tests;
 public sealed class RunPodCharacterTests
 {
     [Fact]
+    public async Task LocalGpuUsesPrivateCharacterEndpointAndKeepsTheExistingZipContract()
+    {
+        using var files = new Workspace(); using var store = new Store();
+        using var cloud = new Cloud(store); using var http = new HttpClient(cloud);
+        var key = new string('k', 48);
+        var options = new SeeThroughOptions { Enabled = true, Provider = "LocalGpu",
+            LocalGpuApiBaseUrl = "http://127.0.0.1:18188/v2", LocalGpuApiKey = key,
+            LocalGpuTimeoutSeconds = 1800, RunPodApiKey = "unused-cloud-key", RunPodEndpointId = "unused-cloud" };
+        var processor = new RunPodPretrainedSeeThroughProcessor(http, options, store, store,
+            new S3StorageOptions { S3BucketName = "test" });
+        Assert.True(processor.IsConfigured);
+        Assert.Single(await processor.ProcessAsync(new(files.Input, files.Output, Guid.NewGuid()), CancellationToken.None));
+        Assert.Equal(key, cloud.Auth);
+        Assert.Equal(1800000, cloud.ExecutionTimeout);
+        Assert.All(cloud.Paths, path => Assert.StartsWith("/v2/local-character/", path));
+    }
+
+    [Theory]
+    [InlineData("http://public-gpu.example/v2", 48, 2400)]
+    [InlineData("http://127.0.0.1:18188/v2?key=bad", 48, 2400)]
+    [InlineData("http://127.0.0.1:18188/v2", 8, 2400)]
+    [InlineData("http://127.0.0.1:18188/v2", 48, 10)]
+    public void InvalidLocalGpuConfigurationCannotUseTheConfiguredCloudProvider(string url, int keyLength, int timeout)
+    {
+        using var store = new Store(); using var http = new HttpClient();
+        var options = new SeeThroughOptions { Enabled = true, Provider = "LocalGpu",
+            LocalGpuApiBaseUrl = url, LocalGpuApiKey = new string('k', keyLength), LocalGpuTimeoutSeconds = timeout,
+            RunPodApiKey = "valid-cloud-key", RunPodEndpointId = "cloud-characters" };
+        var processor = new RunPodPretrainedSeeThroughProcessor(http, options, store, store,
+            new S3StorageOptions { S3BucketName = "test" });
+        Assert.False(processor.IsConfigured);
+    }
+
+    [Fact]
     public async Task UsesConfiguredExecutionLimitAndReportsRemoteStagesThenReusesDurableResult()
     {
         using var files = new Workspace(); using var store = new Store();
@@ -98,10 +132,12 @@ public sealed class RunPodCharacterTests
 
     private sealed class Cloud(Store store) : HttpMessageHandler
     {
+        public List<string> Paths { get; } = [];
         public int Submissions, Statuses, Cancels, ExecutionTimeout, Ttl;
         public string? Auth; public bool Fail;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
+            Paths.Add(request.RequestUri!.AbsolutePath);
             ct.ThrowIfCancellationRequested(); Auth = request.Headers.Authorization?.Parameter;
             if (Fail) return new(HttpStatusCode.BadGateway) { Content = new StringContent("sensitive response") };
             if (request.RequestUri!.AbsolutePath.Contains("/cancel/")) { Cancels++; return Response(new { status = "CANCELLED" }); }

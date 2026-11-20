@@ -14,7 +14,7 @@ using UpscaleLab.Infrastructure.Storage;
 namespace UpscaleLab.Infrastructure.Processing;
 
 /// <summary>
-/// Runs pretrained character-part inference on a separate RunPod endpoint.
+/// Runs pretrained character-part inference on a separate explicitly selected GPU endpoint.
 /// Existing RunPod upscaling requests and settings are never used here.
 /// </summary>
 public sealed class RunPodPretrainedSeeThroughProcessor(
@@ -25,9 +25,7 @@ public sealed class RunPodPretrainedSeeThroughProcessor(
     S3StorageOptions s3Options) : IImageLayerProcessor
 {
     public bool IsConfigured => options.Enabled &&
-        string.Equals(options.Provider, "RunPod", StringComparison.OrdinalIgnoreCase) &&
-        !string.IsNullOrWhiteSpace(options.RunPodEndpointId) &&
-        !string.IsNullOrWhiteSpace(options.RunPodApiKey) &&
+        options.IsTransportConfigured &&
         !string.IsNullOrWhiteSpace(s3Options.S3BucketName);
 
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(3);
@@ -43,8 +41,8 @@ public sealed class RunPodPretrainedSeeThroughProcessor(
     {
         if (!IsConfigured)
             throw new ConfigurationException("SeeThrough:Enabled=true 및 Provider=RunPod 설정이 필요합니다.");
-        if (string.IsNullOrWhiteSpace(options.RunPodEndpointId) ||
-            string.IsNullOrWhiteSpace(options.RunPodApiKey) ||
+        if (string.IsNullOrWhiteSpace(options.EndpointId) ||
+            string.IsNullOrWhiteSpace(options.ApiKey) ||
             string.IsNullOrWhiteSpace(s3Options.S3BucketName))
             throw new ConfigurationException("See-through 전용 RunPod 엔드포인트, API 키와 AWS S3 버킷 설정이 필요합니다.");
         if (!File.Exists(request.InputPath))
@@ -61,14 +59,14 @@ public sealed class RunPodPretrainedSeeThroughProcessor(
         string hash;
         await using (var input = File.OpenRead(request.InputPath))
             hash = Convert.ToHexString(await SHA256.HashDataAsync(input, cancellationToken));
-        var timeout = TimeSpan.FromSeconds(Math.Clamp(options.RunPodTimeoutSeconds, 60, 3600));
+        var timeout = TimeSpan.FromSeconds(Math.Clamp(options.TimeoutSeconds, 60, 3600));
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
         var token = deadline.Token;
         Directory.CreateDirectory(request.OutputDirectory);
         RemoteJob? remote = null;
-        var apiBase = options.RunPodApiBaseUrl.TrimEnd('/');
-        var endpoint = Uri.EscapeDataString(options.RunPodEndpointId);
+        var apiBase = options.ApiBaseUrl.TrimEnd('/');
+        var endpoint = Uri.EscapeDataString(options.EndpointId);
 
         try
         {
@@ -80,7 +78,7 @@ public sealed class RunPodPretrainedSeeThroughProcessor(
                     ?? throw new InvalidDataException("캐릭터 작업 정보가 올바르지 않습니다.");
             }
             catch (AmazonS3Exception error) when (error.StatusCode == HttpStatusCode.NotFound) { }
-            if (remote != null && (remote.InputSha256 != hash || remote.EndpointId != options.RunPodEndpointId))
+            if (remote != null && (remote.InputSha256 != hash || remote.EndpointId != options.EndpointId))
                 throw new InvalidDataException("원격 캐릭터 작업의 입력 정보가 일치하지 않습니다.");
             if (remote is { Completed: false })
             {
@@ -118,7 +116,7 @@ public sealed class RunPodPretrainedSeeThroughProcessor(
                             ttl = (int)timeout.TotalMilliseconds }
                     })
                 };
-                submit.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.RunPodApiKey);
+                submit.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
                 using var accepted = await client.SendAsync(submit, token);
                 EnsureSuccess(accepted);
                 using var acceptedJson = JsonDocument.Parse(await accepted.Content.ReadAsStringAsync(token));
@@ -126,7 +124,7 @@ public sealed class RunPodPretrainedSeeThroughProcessor(
                     jobIdProperty.ValueKind != JsonValueKind.String ||
                     string.IsNullOrWhiteSpace(jobIdProperty.GetString()))
                     throw new InvalidDataException("RunPod가 유효한 작업 ID를 반환하지 않았습니다.");
-                remote = new(jobIdProperty.GetString()!, hash, options.RunPodEndpointId, DateTime.UtcNow);
+                remote = new(jobIdProperty.GetString()!, hash, options.EndpointId, DateTime.UtcNow);
                 await SaveRemote();
             }
             var jobId = Uri.EscapeDataString(remote.Id);
@@ -135,7 +133,7 @@ public sealed class RunPodPretrainedSeeThroughProcessor(
             {
                 token.ThrowIfCancellationRequested();
                 using var statusRequest = new HttpRequestMessage(HttpMethod.Get, $"{apiBase}/{endpoint}/status/{jobId}");
-                statusRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.RunPodApiKey);
+                statusRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
                 using var response = await client.SendAsync(statusRequest, token);
                 EnsureSuccess(response);
                 using var statusJson = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
@@ -189,7 +187,7 @@ public sealed class RunPodPretrainedSeeThroughProcessor(
                 {
                     using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                     using var message = new HttpRequestMessage(HttpMethod.Post, $"{apiBase}/{endpoint}/cancel/{Uri.EscapeDataString(remote.Id)}");
-                    message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.RunPodApiKey);
+                    message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
                     using var response = await client.SendAsync(message, cancel.Token);
                 }
                 catch { /* Provider TTL also bounds execution. */ }

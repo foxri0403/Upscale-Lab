@@ -137,7 +137,9 @@ public sealed class RunPodProjectImageProcessor(
         string inputKey = $"{prefix}/input";
         string outputKey = $"{prefix}/output.png";
 
-        var lifetime = TimeSpan.FromMinutes(30);
+        var lifetime = options.UseJobDeadlinePolicy
+            ? TimeSpan.FromSeconds(options.TimeoutSeconds + 600)
+            : TimeSpan.FromMinutes(30);
 
         try
         {
