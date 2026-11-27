@@ -45,9 +45,10 @@ public sealed class WallpapersController(IWallpaperService wallpapers) : Control
     [HttpGet("shared")]
     public async Task<ActionResult<IReadOnlyList<WallpaperSummary>>> Shared(
         [FromQuery] string? search, [FromQuery] string? sort, [FromQuery] string[]? tags,
-        [FromQuery] string[]? platformTags, [FromQuery] bool untagged, CancellationToken ct, [FromQuery] int limit = 100) =>
+        [FromQuery] string[]? platformTags, [FromQuery] bool untagged, CancellationToken ct,
+        [FromQuery] int limit = 100, [FromQuery] int offset = 0) =>
         Ok(await wallpapers.ListAsync(User.GetOptionalUserId(), true, ct,
-            new ExploreQuery(search, sort, tags, platformTags, untagged, limit)));
+            new ExploreQuery(search, sort, tags, platformTags, untagged, limit, offset)));
 
     [HttpPost("{id:guid}/likes")]
     public async Task<ActionResult<GalleryEngagement>> Like(Guid id, CancellationToken ct) =>

@@ -227,7 +227,7 @@ public sealed class GalleryServiceTests
         var service = new GalleryService(db, new FakeStorageService());
         var ranked = await service.CreateAsync(author.Id,
             new(image.Id, "푸른 하늘", null, Tags: ["풍경"], PlatformTags: ["tablet", "pc", "pc"]), CancellationToken.None);
-        await service.CreateAsync(author.Id,
+        var following = await service.CreateAsync(author.Id,
             new(image.Id, "밝은 하늘", null, Tags: ["풍경"], PlatformTags: ["pc"]), CancellationToken.None);
         var mobile = await service.CreateAsync(author.Id,
             new(image.Id, "별이 뜬 하늘", null, Tags: ["SF"], PlatformTags: ["mobile"]), CancellationToken.None);
@@ -241,6 +241,11 @@ public sealed class GalleryServiceTests
             explore: new ExploreQuery("하늘", "likes", ["풍경"], ["pc"], Limit: 1)));
         Assert.Equal(ranked.Id, match.Id);
         Assert.True(match.IsLikedByCurrentUser);
+        var second = Assert.Single(await service.GetAllAsync(viewer.Id, null, null, CancellationToken.None,
+            explore: new ExploreQuery("하늘", "likes", ["풍경"], ["pc"], Limit: 1, Offset: 1)));
+        Assert.Equal(following.Id, second.Id);
+        Assert.Empty(await service.GetAllAsync(viewer.Id, null, null, CancellationToken.None,
+            explore: new ExploreQuery("하늘", "likes", ["풍경"], ["pc"], Limit: 1, Offset: 2)));
         Assert.Equal(new GalleryEngagement(0, false), await service.SetLikeAsync(viewer.Id, ranked.Id, false, CancellationToken.None));
     }
 

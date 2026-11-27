@@ -24,6 +24,7 @@ export function ImageCard({
   editMetadata,
   unpublish,
   remove,
+  layoutOnly = false,
 }: {
   picture: Picture;
   explore: boolean;
@@ -34,9 +35,11 @@ export function ImageCard({
   editMetadata: () => void;
   unpublish?: () => void;
   remove: () => void;
+  layoutOnly?: boolean;
 }) {
   const menu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
+    if (layoutOnly) return;
     const closeOutside = (event: Event) => {
       if (menu.current && !menu.current.contains(event.target as Node))
         menu.current.open = false;
@@ -47,7 +50,7 @@ export function ImageCard({
       document.removeEventListener("pointerdown", closeOutside);
       document.removeEventListener("focusin", closeOutside);
     };
-  }, []);
+  }, [layoutOnly]);
   const [decoded, setDecoded] = useState<{
     src: string;
     width: number;
@@ -79,24 +82,28 @@ export function ImageCard({
         aria-controls={explore && selected ? "explore-details" : undefined}
         onClick={open}
       >
-        <PictureView
-          picture={picture}
-          failed={() => setFailedSource(source)}
-          loaded={(image) => {
-            if (
-              image.naturalWidth > 0 &&
-              image.naturalHeight > 0 &&
-              image.currentSrc === new URL(source, location.href).href
-            )
-              setDecoded({
-                src: source,
-                width: image.naturalWidth,
-                height: image.naturalHeight,
-              });
-          }}
-        />
-        <PlatformBadges picture={picture} />
-        {explore && <EngagementBadges picture={picture} />}
+        {layoutOnly ? <span className="picture-view" /> : (
+          <>
+            <PictureView
+              picture={picture}
+              failed={() => setFailedSource(source)}
+              loaded={(image) => {
+                if (
+                  image.naturalWidth > 0 &&
+                  image.naturalHeight > 0 &&
+                  image.currentSrc === new URL(source, location.href).href
+                )
+                  setDecoded({
+                    src: source,
+                    width: image.naturalWidth,
+                    height: image.naturalHeight,
+                  });
+              }}
+            />
+            <PlatformBadges picture={picture} />
+            {explore && <EngagementBadges picture={picture} />}
+          </>
+        )}
       </button>
       <div className="image-card-body">
         <div className="image-card-heading">
@@ -141,10 +148,10 @@ export function ImageCard({
             </div>
           </details> : toggleLike && <GalleryLikeButton liked={!!picture.liked} disabled={liking} toggle={toggleLike} />}
         </div>
-        {explore && <span className="creator"><CreatorAvatar name={picture.creator} source={picture.creatorAvatar} /><span>{picture.creator}</span></span>}
+        {explore && <span className="creator"><CreatorAvatar name={picture.creator} source={layoutOnly ? undefined : picture.creatorAvatar} /><span>{picture.creator}</span></span>}
         <ImageFeatureBadges picture={picture} />
         <div className="image-card-footer">
-          <CardTagPreview picture={picture} />
+          {layoutOnly ? <span className="image-tag-trigger image-tag-empty" /> : <CardTagPreview picture={picture} />}
           {!explore && (picture.isReadOnly ? <span className="mobile-shared-badge image-source-badge" title={sourceLabel}>{sourceLabel}</span> : shared && <span className="mobile-shared-badge" aria-label="업로드된 이미지">
             업로드 <span><Check size={11} strokeWidth={3} /></span>
           </span>)}

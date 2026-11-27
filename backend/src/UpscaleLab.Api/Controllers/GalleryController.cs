@@ -41,10 +41,10 @@ public sealed class GalleryController(IGalleryService galleryService) : Controll
         [FromQuery] string? sort,
         [FromQuery] bool untagged,
         CancellationToken cancellationToken,
-        [FromQuery] int limit = 100)
+        [FromQuery] int limit = 100, [FromQuery] int offset = 0)
     {
         return Ok(await galleryService.GetAllAsync(User.GetOptionalUserId(), search, tag, cancellationToken, tags,
-            new ExploreQuery(search, sort, tags, platformTags, untagged, limit)));
+            new ExploreQuery(search, sort, tags, platformTags, untagged, limit, offset)));
     }
 
     [AllowAnonymous]

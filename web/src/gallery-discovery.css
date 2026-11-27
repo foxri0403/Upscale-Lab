@@ -60,6 +60,29 @@
 }
 .platform-tag-label > svg, .image-tag-list > li > svg { flex: none; }
 .explore-page .image-grid { grid-auto-rows: 1fr; align-items: stretch; }
+.explore-result-grid { scroll-margin-block-start: calc(var(--compact-header-height, 70px) + 12px); }
+/* Share the first cell so the responsive reference sizes rows without adding a row or column. */
+.explore-result-grid > .image-card:first-child,
+.explore-card-sizing,
+.explore-card-sizing > .image-card { grid-area: 1 / 1; }
+.explore-card-sizing {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  visibility: hidden;
+}
+.explore-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  margin-block-start: 20px;
+}
+.explore-pagination .button {
+  min-width: 36px;
+  padding-inline: 8px;
+  font-variant-numeric: tabular-nums;
+}
 .explore-page .image-card .image-title {
   display: -webkit-box;
   -webkit-box-orient: vertical;

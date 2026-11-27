@@ -17,6 +17,6 @@ public static class GalleryPlatformTags
 }
 
 public sealed record ExploreQuery(string? Search = null, string? Sort = null,
-    string[]? Tags = null, string[]? PlatformTags = null, bool Untagged = false, int Limit = 100);
+    string[]? Tags = null, string[]? PlatformTags = null, bool Untagged = false, int Limit = 100, int Offset = 0);
 
 public sealed record GalleryEngagement(int LikeCount, bool IsLikedByCurrentUser);

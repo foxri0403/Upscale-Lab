@@ -130,6 +130,28 @@ public sealed class WallpaperServiceTests
     }
 
     [Fact]
+    public async Task SharedWallpaperOffsetUsesFilteredPublicOrder()
+    {
+        await using var db = WorkflowData.Db();
+        var store = new WorkflowStore();
+        store.Files["source.png"] = [1];
+        var project = WorkflowData.Project(Guid.NewGuid());
+        db.Add(project);
+        await db.SaveChangesAsync();
+        var service = new WallpaperService(db, store, store);
+        var first = await service.CreateAsync(project.UserId, new(project.Id, "Alpha", WallpaperMode.Static), Ct);
+        var second = await service.CreateAsync(project.UserId, new(project.Id, "Charlie", WallpaperMode.Static), Ct);
+        await service.CreateAsync(project.UserId, new(project.Id, "Bravo", WallpaperMode.Static), Ct);
+        await service.SetSharingAsync(project.UserId, first.Id, true, Ct);
+        await service.SetSharingAsync(project.UserId, second.Id, true, Ct);
+
+        var options = new ExploreQuery(Sort: "name", Limit: 1);
+        Assert.Equal(first.Id, Assert.Single(await service.ListAsync(null, true, Ct, options)).Id);
+        Assert.Equal(second.Id, Assert.Single(await service.ListAsync(null, true, Ct, options with { Offset = 1 })).Id);
+        Assert.Empty(await service.ListAsync(null, true, Ct, options with { Offset = 2 }));
+    }
+
+    [Fact]
     public async Task ScreenFramingSavesTargetRatioAndPositionWithoutChangingThePublishedAsset()
     {
         await using var db = WorkflowData.Db();

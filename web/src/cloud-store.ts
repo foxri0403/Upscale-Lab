@@ -24,6 +24,7 @@ import {
   mergeExploreFeed,
   type GalleryPost,
 } from "./explore-feed";
+import { collectExplorePages, exploreBatchSize } from "./explore-pagination";
 import { unspecifiedTag } from "./image-tags";
 import { subjectPreview } from "./subject-preview";
 import { wallpaperExportPolicy } from "./wallpaper-export-policy";
@@ -245,11 +246,19 @@ export async function importGalleryPicture(picture: Picture): Promise<Picture> {
     { method: "POST", signal: AbortSignal.timeout(180000) },
   ));
 }
-export async function fetchExplore(query: URLSearchParams, signal: AbortSignal): Promise<Picture[]> {
-  const suffix = `?${query}`;
+export async function fetchExplore(query: URLSearchParams, signal: AbortSignal, allPages = false): Promise<Picture[]> {
+  function load<T extends { id: string }>(path: string) {
+    if (!allPages) return request<T[]>(`${path}?${query}`, { signal });
+    return collectExplorePages<T>(offset => {
+      const batch = new URLSearchParams(query);
+      batch.set("limit", String(exploreBatchSize));
+      batch.set("offset", String(offset));
+      return request<T[]>(`${path}?${batch}`, { signal });
+    });
+  }
   const [assets, gallery] = await Promise.all([
-    request<Asset[]>(`/api/wallpapers/shared${suffix}`, { signal }),
-    request<GalleryPost[]>(`/api/gallery${suffix}`, { signal }),
+    load<Asset>("/api/wallpapers/shared"),
+    load<GalleryPost>("/api/gallery"),
   ]);
   const pictures = await Promise.all(assets.map(asset => assetPicture(asset, false, signal)));
   return mergeExploreFeed(pictures, gallery);

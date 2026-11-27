@@ -3,6 +3,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -81,6 +82,9 @@ import { AccountBilling } from "./AccountBilling";
 import type { PlatformTag } from "./platform-tags";
 import { randomRecommendations, sortExplore } from "./explore-feed";
 import { ExploreRecommendations } from "./ExploreRecommendations";
+import { ExploreCardSizing } from "./ExploreCardSizing";
+import { ExplorePagination, useExploreColumns } from "./ExplorePagination";
+import { explorePage } from "./explore-pagination";
 import { useExploreResults } from "./use-explore-results";
 import "./gallery-discovery.css";
 import { displaySize, type WallpaperFrame } from "./wallpaper-frame";
@@ -746,6 +750,9 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   ]);
   const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformTag[]>([]);
   const [sort, setSort] = useState("recent");
+  const [pageAnchor, setPageAnchor] = useState(0);
+  const [resultsGrid, setResultsGrid] = useState<HTMLDivElement | null>(null);
+  const scrollToResults = useRef(false);
   const [recommendationSeed] = useState(() => Math.floor(Math.random() * 2 ** 32));
   const [localEngagement, setLocalEngagement] = useState(() => read<Record<string, { users: string[]; downloads: number }>>("upscale.demo.engagement.v1", {}));
   const [engagement, setEngagement] = useState<Record<string, Pick<Picture, "likes" | "liked">>>({});
@@ -779,15 +786,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const importedPictures = useRef(new Map<string, Promise<Picture>>());
   const editableCopies = useRef(new Map<string, Promise<Picture>>());
   const filtersActive = !!query.trim() || !allTagsSelected(selectedTags) || selectedPlatforms.length > 0;
-  const queryParams = new URLSearchParams();
-  if (query.trim()) queryParams.set("search", query.trim());
-  if (sort !== "recent") queryParams.set("sort", sort);
-  if (!allTagsSelected(selectedTags)) {
-    if (!selectedTags.length) queryParams.set("untagged", "true");
-    else selectedTags.forEach(tag => queryParams.append("tags", tag));
-  }
-  selectedPlatforms.forEach(tag => queryParams.append("platformTags", tag));
-  const remote = useExploreResults(queryParams.toString(), shared, explore && cloud);
+  const remote = useExploreResults("", shared, explore && cloud && !loading, true);
   const ranked = useExploreResults(`sort=likes&limit=${likedRecommendationLimit}`, shared, explore && cloud);
   function withEngagement(picture: Picture): Picture {
     if (cloud) return { ...picture, ...engagement[picture.id] };
@@ -827,6 +826,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     return () => cancelAnimationFrame(frame);
   }, [selectedPicture?.id]);
   const detailsOpen = !!selectedPicture;
+  const columns = useExploreColumns(resultsGrid, detailsOpen);
   const ownedPictures = [...library.images, ...(library.assets || [])];
   async function toggleLike(picture: Picture) {
     if (likeRequest.current || isOwnExplorePicture(picture, session.id, ownedPictures)) return;
@@ -900,12 +900,33 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     } catch (error) { toast((error as Error).message); }
     finally { setImporting(false); }
   }
-  const remotePending = explore && cloud && !!queryParams.toString() && !remote;
+  const remotePending = explore && cloud && !remote;
   const images = sortExplore((remote?.pictures ?? all).filter(picture =>
     picture.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) &&
     matchesSelectedTags(picture, selectedTags) &&
     (!selectedPlatforms.length || selectedPlatforms.some(tag => picture.platformTags?.includes(tag))),
   ).map(withEngagement), sort);
+  const { page, pageCount, pageSize, start, numbers } = explorePage(images.length, columns, pageAnchor);
+  const visibleImages = explore ? images.slice(start, start + pageSize) : images;
+  const resultError = remote?.error;
+  useLayoutEffect(() => {
+    if (!explore || remotePending || resultError) return;
+    setPageAnchor(anchor => Math.min(anchor, Math.max(0, images.length - 1)));
+  }, [explore, remotePending, resultError, images.length]);
+  useLayoutEffect(() => {
+    if (!scrollToResults.current || !resultsGrid) return;
+    scrollToResults.current = false;
+    resultsGrid.scrollIntoView({ block: "start" });
+  }, [pageAnchor, resultsGrid]);
+  function changePage(nextPage: number) {
+    if (nextPage === page) return;
+    scrollToResults.current = true;
+    setPageAnchor((nextPage - 1) * pageSize);
+  }
+  function resetPage<T>(change: (value: T) => void, value: T) {
+    setPageAnchor(0);
+    change(value);
+  }
   const rankedRecommendations = sortExplore([...new Map(
     [...all, ...(ranked?.pictures || [])].map(picture => [picture.id, picture]),
   ).values()].map(withEngagement), "likes");
@@ -1004,23 +1025,23 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           <Search size={21} />
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => resetPage(setQuery, e.target.value)}
             placeholder={explore ? "공유 배경화면 검색" : "이미지 이름 검색"}
             aria-label="이미지 이름 검색"
           />
           {query && (
             <button
               className="icon-button"
-              onClick={() => setQuery("")}
+              onClick={() => resetPage(setQuery, "")}
               aria-label="검색어 지우기"
             >
               <X size={15} />
             </button>
           )}
         </label>
-        <TagSelector selected={selectedTags} change={setSelectedTags}
-          platforms={selectedPlatforms} changePlatforms={setSelectedPlatforms} />
-        <OptionPicker className="select-field" label="정렬" value={sort} change={setSort}
+        <TagSelector selected={selectedTags} change={tags => resetPage(setSelectedTags, tags)}
+          platforms={selectedPlatforms} changePlatforms={tags => resetPage(setSelectedPlatforms, tags)} />
+        <OptionPicker className="select-field" label="정렬" value={sort} change={value => resetPage(setSort, value)}
           icon={<ArrowDownUp size={18} aria-hidden="true" />}
           options={[
             { value: "recent", label: explore ? "최신순" : "최근 등록순" },
@@ -1047,6 +1068,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
             className="button secondary"
             onClick={() => {
               if (filtersActive) {
+                setPageAnchor(0);
                 setQuery("");
                 setSelectedTags([...selectableTags]);
                 setSelectedPlatforms([]);
@@ -1060,25 +1082,33 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           </button>}
         </Empty>
       ) : (
-        <div className="image-grid">
-          {images.map((p) => (
-            <ImageCard
-              key={p.id}
-              picture={p}
-              explore={explore}
-              toggleLike={explore && !isOwnExplorePicture(p, session.id, ownedPictures) ? () => void toggleLike(p) : undefined}
-              liking={liking}
-              selected={explore && detailsOpen && preview?.id === p.id}
-              open={() => {
-                if (explore) toggleDetails(p);
-                else void openOwnPicture(p);
-              }}
-              editMetadata={() => setEditing(p)}
-              unpublish={explore && isOwnExplorePicture(p, session.id, ownedPictures) ? () => setUnpublishing(p) : undefined}
-              remove={() => setDeleting(p)}
-            />
-          ))}
-        </div>
+        <>
+          <div className={explore ? "image-grid explore-result-grid" : "image-grid"} ref={explore ? setResultsGrid : undefined}>
+            {visibleImages.map((p, index) => (
+              <ImageCard
+                key={p.id}
+                picture={p}
+                explore={explore}
+                toggleLike={explore && !isOwnExplorePicture(p, session.id, ownedPictures) ? () => void toggleLike(p) : undefined}
+                liking={liking}
+                selected={explore && detailsOpen && preview?.id === p.id}
+                open={() => {
+                  if (explore) {
+                    setPageAnchor(start + index);
+                    toggleDetails(p);
+                  } else {
+                    void openOwnPicture(p);
+                  }
+                }}
+                editMetadata={() => setEditing(p)}
+                unpublish={explore && isOwnExplorePicture(p, session.id, ownedPictures) ? () => setUnpublishing(p) : undefined}
+                remove={() => setDeleting(p)}
+              />
+            ))}
+            {explore && pageCount > 1 && <ExploreCardSizing pictures={images} />}
+          </div>
+          {explore && <ExplorePagination page={page} pageCount={pageCount} numbers={numbers} change={changePage} />}
+        </>
       )}
       </div>
       {explore && selectedPicture && <ExploreDetails
