@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Check,
+  Download,
   MoreVertical,
   Pencil,
   Trash2,
@@ -26,6 +27,8 @@ export function ImageCard({
   unpublish,
   remove,
   apply,
+  downloadWebp,
+  downloading,
 }: {
   picture: Picture;
   explore: boolean;
@@ -37,6 +40,8 @@ export function ImageCard({
   unpublish?: () => void;
   remove: () => void;
   apply?: () => void;
+  downloadWebp?: () => void;
+  downloading?: boolean;
 }) {
   const menu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
@@ -128,6 +133,9 @@ export function ImageCard({
                 </>
               ) : (
                 <>
+                  {downloadWebp && <button type="button" disabled={downloading} onClick={() => runMenuAction(downloadWebp)}>
+                    <Download size={15} /> WebP 다운로드
+                  </button>}
                   {apply && <button type="button" onClick={() => runMenuAction(apply)}><Monitor size={15} /> 연결된 기기에 적용</button>}
                   {!picture.isReadOnly && <>
                     <div className="image-sharing-row">

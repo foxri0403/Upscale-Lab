@@ -1,4 +1,5 @@
 import {
+  cloud,
   request,
   requestBlob,
   post,
@@ -13,6 +14,7 @@ import {
 } from "./api";
 import {
   defaultEdit,
+  downloadImage,
   read,
   renderImage,
   type Edit,
@@ -322,6 +324,8 @@ export async function detailPicture(p: Picture, signal?: AbortSignal): Promise<P
     );
     result.src = download.url;
     result.jobId = detail.latestJob.jobId;
+    if (result.exportSources)
+      result.exportSources.image = `/api/projects/${p.projectId}/content?jobId=${encodeURIComponent(result.jobId)}`;
     if (result.edit) result.edit = { ...result.edit, scale: 1 };
     result.kind = "업스케일";
     result.width = detail.latestJob.resultWidth;
@@ -342,6 +346,23 @@ export async function refreshWallpaperPreview(picture: Picture, signal: AbortSig
     wallpaperParts: files.wallpaperParts, exportSources: files.exportSources, width: files.width, height: files.height,
     contentType: files.contentType, edit: picture.edit ?? files.edit, legacyMotion: files.legacyMotion };
 }
+
+export async function downloadGalleryWebp(picture: Picture): Promise<void> {
+  const signal = AbortSignal.timeout(30000);
+  let source = cloud ? await refreshWallpaperPreview(picture, signal) : picture;
+  if (cloud && source.galleryPostId && !source.projectId && !source.assetId) {
+    const preview = await request<{ url: string }>(
+      `/api/gallery/${encodeURIComponent(source.galleryPostId)}/preview-url`, { signal, cache: "no-store" },
+    );
+    source = { ...source, src: preview.url };
+  }
+  // Published wallpaper files already contain their saved crop and filter.
+  const edit = source.assetId
+    ? { ...defaultEdit, foreground: source.edit?.foreground ?? defaultEdit.foreground }
+    : { ...defaultEdit, ...source.edit };
+  await downloadImage(source, edit, "webp");
+}
+
 export async function createAsset(picture: Picture, frame?: WallpaperFrame): Promise<Asset> {
   if (picture.isReadOnly && !frame) throw new Error("다른 사용자의 저장 이미지는 기기 배경화면에만 적용할 수 있습니다.");
   const edit = picture.edit || defaultEdit;

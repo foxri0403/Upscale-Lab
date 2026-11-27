@@ -59,6 +59,7 @@ import {
   createAsset,
   preferencesKey,
   importGalleryPicture,
+  downloadGalleryWebp,
 } from "./cloud-store";
 import {
   allTagsSelected,
@@ -750,10 +751,10 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const [engagement, setEngagement] = useState<Record<string, Pick<Picture, "likes" | "liked">>>({});
   const [liking, setLiking] = useState(false);
   const likeRequest = useRef(false);
-  const [preview, setPreview] = useState<Picture | null>(null);
+  const [preview, setPreview] = useState<{ picture: Picture; fromRecommendation: boolean } | null>(null);
   const previewTrigger = useRef<HTMLElement | null>(null);
-  function toggleDetails(picture: Picture) {
-    if (preview?.id === picture.id) {
+  function toggleDetails(picture: Picture, fromRecommendation = false) {
+    if (preview?.picture.id === picture.id && preview.fromRecommendation === fromRecommendation) {
       setPreview(null);
       return;
     }
@@ -761,7 +762,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     previewTrigger.current = active instanceof HTMLElement
       ? active.closest(".image-card")?.querySelector<HTMLButtonElement>(".image-card-cover") || active
       : null;
-    setPreview(picture);
+    setPreview({ picture, fromRecommendation });
   }
   function closeDetails() {
     setPreview(null);
@@ -772,6 +773,8 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const [unpublishBusy, setUnpublishBusy] = useState(false);
   const [deleting, setDeleting] = useState<Picture | null>(null);
   const [importing, setImporting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const downloadRequest = useRef(false);
   const [applyingPicture, setApplyingPicture] = useState<Picture | null>(null);
   const applying = useRef(false);
   const importedPictures = useRef(new Map<string, Promise<Picture>>());
@@ -814,7 +817,9 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       : [...shared, ...community]
     : library.images.filter(p => !p.isDraft);
   const candidates = [...all, ...(remote?.pictures || []), ...(ranked?.pictures || [])];
-  const selectedPicture = preview ? withEngagement(candidates.find(p => p.id === preview.id) || preview) : null;
+  const selectedPicture = preview
+    ? withEngagement(candidates.find(p => p.id === preview.picture.id) || preview.picture)
+    : null;
   useEffect(() => {
     if (!selectedPicture) return;
     const frame = requestAnimationFrame(() => {
@@ -826,6 +831,16 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   }, [selectedPicture?.id]);
   const detailsOpen = !!selectedPicture;
   const ownedPictures = [...library.images, ...(library.assets || [])];
+  async function downloadPicture(picture: Picture) {
+    if (downloadRequest.current) return;
+    downloadRequest.current = true;
+    setDownloading(true);
+    try {
+      await downloadGalleryWebp(picture);
+      toast("WebP 파일을 다운로드했습니다.");
+    } catch (error) { toast((error as Error).message); }
+    finally { downloadRequest.current = false; setDownloading(false); }
+  }
   async function toggleLike(picture: Picture) {
     if (likeRequest.current || isOwnExplorePicture(picture, session.id, ownedPictures)) return;
     likeRequest.current = true;
@@ -918,7 +933,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       // resolve that project's ID as soon as navigation occurs.
       if (open && editable.id !== saved.id) await refresh();
       if (open) {
-        setPreview(current => current?.id === p.id ? null : current);
+        setPreview(current => current?.picture.id === p.id ? null : current);
         navigate(`/app/studio?id=${encodeURIComponent(editable.id)}`);
       }
       else toast("내 이미지에 저장했습니다.");
@@ -992,8 +1007,9 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           </button>
         )}
       </div>
-      {explore && <ExploreRecommendations pictures={recommendations} selectedId={preview?.id}
-        toggleDetails={toggleDetails} />}
+      {explore && <ExploreRecommendations pictures={recommendations}
+        selectedId={preview?.fromRecommendation ? preview.picture.id : undefined}
+        toggleDetails={picture => toggleDetails(picture, true)} />}
       {explore && <h2 className="explore-list-title">공유 이미지</h2>}
       <div className="gallery-toolbar">
         <label className="search-field">
@@ -1064,7 +1080,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
               explore={explore}
               toggleLike={explore && !isOwnExplorePicture(p, session.id, ownedPictures) ? () => void toggleLike(p) : undefined}
               liking={liking}
-              selected={explore && detailsOpen && preview?.id === p.id}
+              selected={explore && preview?.fromRecommendation === false && preview.picture.id === p.id}
               open={() => {
                 if (explore) toggleDetails(p);
                 else void openOwnPicture(p);
@@ -1073,6 +1089,8 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
               unpublish={explore && isOwnExplorePicture(p, session.id, ownedPictures) ? () => setUnpublishing(p) : undefined}
               remove={() => setDeleting(p)}
               apply={p.isReadOnly && !explore ? () => setApplyingPicture(p) : undefined}
+              downloadWebp={explore ? undefined : () => void downloadPicture(p)}
+              downloading={downloading}
             />
           ))}
         </div>
@@ -1086,6 +1104,8 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
         save={() => { void importPicture(selectedPicture, false); }}
         openStudio={() => { void importPicture(selectedPicture, true); }}
         apply={() => setApplyingPicture(selectedPicture)}
+        downloadWebp={preview?.fromRecommendation === false ? () => void downloadPicture(selectedPicture) : undefined}
+        downloading={downloading}
         toggleLike={isOwnExplorePicture(selectedPicture, session.id, ownedPictures) ? undefined : () => void toggleLike(selectedPicture)}
         liking={liking}
       />}
@@ -1106,7 +1126,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
             setUnpublishBusy(true);
             try {
               if (await publish(unpublishing, false)) {
-                if (preview?.id === unpublishing.id) closeDetails();
+                if (preview?.picture.id === unpublishing.id) closeDetails();
                 setUnpublishing(null);
               }
             } finally { setUnpublishBusy(false); }
