@@ -11,6 +11,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from uuid import uuid4
 
+from http_body import BodyTooLarge, read_http_body
+
 
 PORT = 18189
 KEY_FILE = Path(__file__).with_name("home-gpu.key")
@@ -170,11 +172,11 @@ def create_server(port, key, gpu, jobs):
 
         def submit(self, endpoint):
             try:
-                size = int(self.headers.get("Content-Length", "0"))
-                if not 0 < size <= 65536:
+                body = read_http_body(self.headers, self.rfile)
+                if not body:
                     self.reply(413, {"error": "Request is too large or empty"})
                     return
-                payload = json.loads(self.rfile.read(size))
+                payload = json.loads(body)
                 if not isinstance(payload, dict):
                     raise ValueError()
                 data, policy = payload.get("input"), payload.get("policy", {})
@@ -182,6 +184,9 @@ def create_server(port, key, gpu, jobs):
                 if not isinstance(data, dict) or data.get("operation") != operation or not isinstance(policy, dict):
                     raise ValueError()
                 result = jobs.submit(endpoint, data, policy)
+            except BodyTooLarge:
+                self.reply(413, {"error": "Request is too large or empty"})
+                return
             except (ValueError, TimeoutError):
                 self.reply(400, {"error": "Invalid job request"})
                 return

@@ -2,6 +2,7 @@ import json
 import threading
 import time
 import unittest
+from http.client import HTTPConnection
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -77,3 +78,16 @@ class HomeGpuContractTests(unittest.TestCase):
         self.jobs.executor.shutdown()
         self.assertEqual([1920], self.processed)
         self.assertEqual(cancelled, self.request(f"/v2/local-upscale/status/{job['id']}"))
+
+    def test_accepts_chunked_json_from_dotnet_http_client(self):
+        self.release.set()
+        client = HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+        try:
+            body = json.dumps({"input": {"operation": "upscale_s3", "target_long_edge": 1920}}).encode()
+            client.request("POST", "/v2/local-upscale/run", body=iter([body[:20], body[20:]]), headers={
+                "Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}, encode_chunked=True)
+            response = client.getresponse()
+            self.assertEqual(200, response.status)
+            self.assertEqual("IN_QUEUE", json.load(response)["status"])
+        finally:
+            client.close()
