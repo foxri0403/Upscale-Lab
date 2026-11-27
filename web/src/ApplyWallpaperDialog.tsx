@@ -115,10 +115,16 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, bu
   const edit = { ...defaultEdit, ...picture.edit, strength: motionStrength(picture.edit), motionDefaultsVersion: 1 };
   const { characterParts, layered } = wallpaperExportPolicy(picture, edit);
   const windows = target.platform === "Windows";
+  const [mouseEnabled, setMouseEnabled] = useState(() => (windows && characterParts) || !!(picture.legacyMotion || edit.mouseEnabled));
+  const mouseControl = windows && layered;
   const rig = characterParts ? { ...normalizeRig(edit.rig), enabled: true } : edit.rig;
-  const appliedPicture = { ...picture, edit: { ...edit, rig } };
+  const appliedPicture = {
+    ...picture,
+    ...(mouseControl ? { legacyMotion: false } : {}),
+    edit: { ...edit, rig, ...(mouseControl ? { mouseEnabled } : {}) },
+  };
   const gyro = testInput === "gyro";
-  const motion = useParallax(layered && testing && !busy, edit.strength, !gyro, gyro);
+  const motion = useParallax(layered && testing && !busy && (!windows || mouseEnabled), edit.strength, !gyro, gyro);
   const MotionIcon = gyro ? Smartphone : Mouse;
 
   useEffect(() => {
@@ -169,13 +175,20 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, bu
     </div>
     <fieldset className="wallpaper-frame-settings" disabled={busy}>
       <legend>이미지 배치</legend>
+      {mouseControl && <label className="wallpaper-mouse-input">
+        <input type="checkbox" checked={mouseEnabled} onChange={event => {
+          setMouseEnabled(event.currentTarget.checked);
+          if (!event.currentTarget.checked) setTesting(false);
+        }} />마우스 움직임 적용
+      </label>}
       <div className="wallpaper-fit-options">
         <button type="button" className={`button ${frame.contain ? "secondary" : "primary"}`} aria-pressed={!frame.contain}
           onClick={() => setFrame({ ...frame, contain: false, zoom: 1 })}>화면 채우기</button>
         <button type="button" className={`button ${frame.contain ? "primary" : "secondary"}`} aria-pressed={frame.contain}
           onClick={() => setFrame({ ...frame, contain: true, zoom: 1 })}>초기화</button>
         <button type="button" className="button secondary wallpaper-motion-test" aria-pressed={testing}
-          aria-busy={motion.gyroPending} disabled={!layered || motion.gyroPending} onClick={() => void toggleMotionTest()}>
+          aria-busy={motion.gyroPending} disabled={!layered || motion.gyroPending || (windows && !mouseEnabled)}
+          onClick={() => void toggleMotionTest()}>
           <MotionIcon size={18} aria-hidden="true" />움직임 테스트
         </button>
       </div>
@@ -194,8 +207,8 @@ function WallpaperFrameControls({ picture, target, size, screen, fromExplore, bu
           onChange={event => setFrame({ ...frame, y: layout.travelY < 0 ? 1 - event.target.valueAsNumber : event.target.valueAsNumber })} />
       </label>
     </fieldset>
-    {windows && layered && !edit.mouseEnabled && !picture.legacyMotion && <Notice>
-      이 이미지에 저장된 마우스 움직임이 꺼져 있어 Windows 배경화면은 정지 상태로 표시됩니다.
+    {mouseControl && !mouseEnabled && <Notice>
+      마우스 움직임 적용이 꺼져 있어 Windows 배경화면은 정지 상태로 표시됩니다.
     </Notice>}
     {!windows && layered && !edit.gyroEnabled && !picture.legacyMotion && <Notice>
       저장된 자이로 움직임이 꺼져 있습니다. 움직이는 배경화면으로 적용하려면 스튜디오에서 자이로 움직임을 켜고 저장해 주세요.
