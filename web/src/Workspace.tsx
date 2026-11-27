@@ -758,10 +758,10 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
   const [engagement, setEngagement] = useState<Record<string, Pick<Picture, "likes" | "liked">>>({});
   const [liking, setLiking] = useState(false);
   const likeRequest = useRef(false);
-  const [preview, setPreview] = useState<{ picture: Picture; fromRecommendation: boolean } | null>(null);
+  const [preview, setPreview] = useState<Picture | null>(null);
   const previewTrigger = useRef<HTMLElement | null>(null);
-  function toggleDetails(picture: Picture, fromRecommendation = false) {
-    if (preview?.picture.id === picture.id && preview.fromRecommendation === fromRecommendation) {
+  function toggleDetails(picture: Picture) {
+    if (preview?.id === picture.id) {
       setPreview(null);
       return;
     }
@@ -769,7 +769,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
     previewTrigger.current = active instanceof HTMLElement
       ? active.closest(".image-card")?.querySelector<HTMLButtonElement>(".image-card-cover") || active
       : null;
-    setPreview({ picture, fromRecommendation });
+    setPreview(picture);
   }
   function closeDetails() {
     setPreview(null);
@@ -814,9 +814,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       : [...shared, ...community]
     : library.images.filter(p => !p.isDraft);
   const candidates = [...all, ...(remote?.pictures || []), ...(ranked?.pictures || [])];
-  const selectedPicture = preview
-    ? withEngagement(candidates.find(p => p.id === preview.picture.id) || preview.picture)
-    : null;
+  const selectedPicture = preview ? withEngagement(candidates.find(p => p.id === preview.id) || preview) : null;
   useEffect(() => {
     if (!selectedPicture) return;
     const frame = requestAnimationFrame(() => {
@@ -944,7 +942,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
       // resolve that project's ID as soon as navigation occurs.
       if (open && editable.id !== saved.id) await refresh();
       if (open) {
-        setPreview(current => current?.picture.id === p.id ? null : current);
+        setPreview(current => current?.id === p.id ? null : current);
         navigate(`/app/studio?id=${encodeURIComponent(editable.id)}`);
       }
       else toast("내 이미지에 저장했습니다.");
@@ -1018,9 +1016,8 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
           </button>
         )}
       </div>
-      {explore && <ExploreRecommendations pictures={recommendations}
-        selectedId={preview?.fromRecommendation ? preview.picture.id : undefined}
-        toggleDetails={picture => toggleDetails(picture, true)} />}
+      {explore && <ExploreRecommendations pictures={recommendations} selectedId={preview?.id}
+        toggleDetails={toggleDetails} />}
       {explore && <h2 className="explore-list-title">공유 이미지</h2>}
       <div className="gallery-toolbar">
         <label className="search-field">
@@ -1093,7 +1090,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
                 explore={explore}
                 toggleLike={explore && !isOwnExplorePicture(p, session.id, ownedPictures) ? () => void toggleLike(p) : undefined}
                 liking={liking}
-                selected={explore && preview?.fromRecommendation === false && preview.picture.id === p.id}
+                selected={explore && detailsOpen && preview?.id === p.id}
                 open={() => {
                   if (explore) {
                     setPageAnchor(start + index);
@@ -1142,7 +1139,7 @@ export function Gallery({ explore = false }: { explore?: boolean }) {
             setUnpublishBusy(true);
             try {
               if (await publish(unpublishing, false)) {
-                if (preview?.picture.id === unpublishing.id) closeDetails();
+                if (preview?.id === unpublishing.id) closeDetails();
                 setUnpublishing(null);
               }
             } finally { setUnpublishBusy(false); }

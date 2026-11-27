@@ -17,7 +17,8 @@ using UpscaleLab.Infrastructure.Images;
 
 namespace UpscaleLab.Infrastructure.Wallpapers;
 
-public sealed class WallpaperService(ApplicationDbContext db, IStorageService storage, IObjectCopyService copier)
+public sealed class WallpaperService(ApplicationDbContext db, IStorageService storage, IObjectCopyService copier,
+    WebpImageQueue? webp = null)
     : IWallpaperService
 {
     private static readonly TimeSpan UrlLifetime = TimeSpan.FromMinutes(15);
@@ -77,6 +78,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             if (request.Render?.Frame is not null) stored["_deviceVariant"] = true;
             else stored["_ownerSnapshot"] = true;
             asset.ManifestJson = stored.ToJsonString(); db.WallpaperAssets.Add(asset); await db.SaveChangesAsync(ct);
+            if (request.Render?.Frame is null) webp?.Schedule(WebpImageKind.Wallpaper, asset.Id);
             return Map(asset);
         }
         catch { foreach (var key in copied) await storage.DeleteAsync(key, CancellationToken.None); throw; }
@@ -183,6 +185,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             await db.SaveChangesAsync(ct);
             var result = Map(asset);
             if (transaction is not null) await transaction.CommitAsync(ct);
+            webp?.Schedule(WebpImageKind.Wallpaper, asset.Id);
             return result;
         }
         catch
@@ -303,6 +306,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             asset.ManifestJson = stored.ToJsonString();
             db.WallpaperAssets.Add(asset);
             await db.SaveChangesAsync(ct);
+            if (request.Render?.Frame is null) webp?.Schedule(WebpImageKind.Wallpaper, asset.Id);
             return Map(asset);
         }
         catch
@@ -457,7 +461,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
         using var input = new MemoryStream(); await storage.DownloadAsync(source, input, ct);
         using var output = new MemoryStream(presentation.Render(input.ToArray(), fillBackground)); await storage.UploadAsync(output, key, "image/png", ct);
     }
-    private static WallpaperManifest ReadManifest(WallpaperAsset asset)
+    internal static WallpaperManifest ReadManifest(WallpaperAsset asset)
     {
         var manifest = JsonSerializer.Deserialize<WallpaperManifest>(asset.ManifestJson)
             ?? throw new InvalidOperationException("저장된 manifest가 올바르지 않습니다.");
@@ -469,10 +473,13 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
     private static WallpaperSummary Map(WallpaperAsset x)
     {
         using var json = JsonDocument.Parse(x.ManifestJson);
-        var deviceVariant = json.RootElement.TryGetProperty("_deviceVariant", out var flag) && flag.ValueKind == JsonValueKind.True;
+        var deviceVariant = IsDeviceVariant(json.RootElement);
         return new(x.Id, x.Title, x.Mode, x.IsPublic, x.CreatedAt, x.SourceProjectId,
             EffectiveEdit(x, json.RootElement), Features(x), IsDeviceVariant: deviceVariant);
     }
+
+    internal static bool IsDeviceVariant(JsonElement manifest) =>
+        manifest.TryGetProperty("_deviceVariant", out var flag) && flag.ValueKind == JsonValueKind.True;
 
     private static ImageEditState? RequireEditable(WallpaperAsset asset)
     {
@@ -494,7 +501,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
 
         // Older imports owned a copy of the files, but had neither an owned source
         // project nor the creation fingerprint of an authored asset.
-        var deviceVariant = manifest.TryGetProperty("_deviceVariant", out var deviceFlag) && deviceFlag.ValueKind == JsonValueKind.True;
+        var deviceVariant = IsDeviceVariant(manifest);
         var authored = asset.SourceProjectId.HasValue ||
             (manifest.TryGetProperty("_sourceFingerprint", out var fingerprint) && fingerprint.ValueKind == JsonValueKind.String) ||
             (manifest.TryGetProperty("_ownerSnapshot", out var ownerFlag) && ownerFlag.ValueKind == JsonValueKind.True);

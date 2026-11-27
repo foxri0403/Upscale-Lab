@@ -101,6 +101,7 @@ builder.Services.AddSingleton<IAmazonS3>(_ =>
     new AmazonS3Client(RegionEndpoint.GetBySystemName(s3Options.Region)));
 builder.Services.AddScoped<IStorageService, S3StorageService>();
 builder.Services.AddScoped<IObjectCopyService, S3StorageService>();
+builder.Services.AddScoped<IStorageObjectLookup, S3StorageService>();
 builder.Services.AddSingleton<IAmazonCognitoIdentityProvider>(_ =>
     new AmazonCognitoIdentityProviderClient(
         new AnonymousAWSCredentials(),
@@ -137,6 +138,11 @@ builder.Services.AddScoped<IGalleryService, GalleryService>();
 builder.Services.AddScoped<IGalleryImportService, GalleryImportService>();
 builder.Services.AddScoped<IGalleryThumbnailService, GalleryThumbnailService>();
 builder.Services.AddSingleton<GalleryThumbnailCache>();
+builder.Services.AddScoped<WebpVariantStore>();
+builder.Services.AddScoped<WebpImageService>();
+builder.Services.AddScoped<IWebpImageService>(services => services.GetRequiredService<WebpImageService>());
+builder.Services.AddSingleton<WebpImageQueue>();
+builder.Services.AddHostedService<WebpImageWorker>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddHttpClient<UpscaleLab.Infrastructure.Payments.TossPaymentsClient>(
     client => client.Timeout = TimeSpan.FromSeconds(30)).RemoveAllLoggers();

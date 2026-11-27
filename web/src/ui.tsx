@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { X, Layers3, LoaderCircle } from "lucide-react";
 import { filterStyle, type Picture } from "./model";
+import { useStoredWebp } from "./use-stored-webp";
 export { navigate } from "./navigation";
 import { navigate } from "./navigation";
 
@@ -141,32 +142,41 @@ export function PictureView({
   loaded,
   failed,
   partForSource,
+  storedWebp = false,
 }: {
   picture: Picture;
-  loaded?: (image: HTMLImageElement) => void;
+  loaded?: (image: HTMLImageElement, source: string) => void;
   failed?: () => void;
   partForSource?: (source: string) => string | undefined;
+  storedWebp?: boolean;
 }) {
-  const character = !picture.background && ((picture.layers?.length ?? 0) >= 2 ||
-    (!!picture.assetId && (picture.foregrounds?.length ?? 0) >= 2));
-  const stack = picture.edit?.foreground === false ? [] : picture.foregrounds ?? [];
-  const source = picture.background || (character && stack.length ? stack[0] : picture.src);
+  const { element, pending, view, fallback } = useStoredWebp(picture, storedWebp);
+  const background = view ? view.background : picture.background;
+  const foregrounds = view ? view.foregrounds : picture.foregrounds;
+  const character = !background && ((picture.layers?.length ?? 0) >= 2 ||
+    (!!picture.assetId && (foregrounds?.length ?? 0) >= 2));
+  const stack = picture.edit?.foreground === false ? [] : foregrounds ?? [];
+  const source = background || (character && stack.length ? stack[0] : view?.source ?? picture.src);
   return (
     <span
+      ref={element}
       className="picture-view"
       style={{ filter: filterStyle(picture.edit?.filter || "original") }}
+      aria-busy={pending || undefined}
     >
-      <img
-        src={source}
-        alt={picture.name}
-        loading="lazy"
-        data-rig-part={partForSource?.(source)}
-        onLoad={(event) => loaded?.(event.currentTarget)}
-        onError={() => failed?.()}
-      />
-      {(picture.background ? stack : character ? stack.slice(1) : []).map((src, i) => (
-          <img key={i} src={src} alt="" loading="lazy" data-rig-part={partForSource?.(src)} />
+      {!pending && <>
+        <img
+          src={source}
+          alt={picture.name}
+          loading="lazy"
+          data-rig-part={partForSource?.(source)}
+          onLoad={(event) => loaded?.(event.currentTarget, source)}
+          onError={() => view ? fallback() : failed?.()}
+        />
+        {(background ? stack : character ? stack.slice(1) : []).map((src, i) => (
+          <img key={i} src={src} alt="" loading="lazy" data-rig-part={partForSource?.(src)} onError={view ? fallback : undefined} />
         ))}
+      </>}
     </span>
   );
 }

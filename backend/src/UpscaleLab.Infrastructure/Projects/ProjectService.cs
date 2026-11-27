@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace UpscaleLab.Infrastructure.Projects;
 
 public sealed class ProjectService(ApplicationDbContext dbContext, IStorageService storageService,
-    ILogger<ProjectService>? logger = null) : IProjectService
+    ILogger<ProjectService>? logger = null, WebpImageQueue? webp = null) : IProjectService
 {
     private static readonly TimeSpan DownloadLifetime = TimeSpan.FromMinutes(15);
 
@@ -54,6 +54,7 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
         if (request.Title is not null) project.Title = request.Title.Trim();
         project.SavedEditJson = edit.ToJson();
         await dbContext.SaveChangesAsync(ct);
+        webp?.Schedule(WebpImageKind.Project, project.Id);
         return edit;
     }
 
@@ -180,6 +181,7 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
             await dbContext.SaveChangesAsync(cancellationToken);
             var result = MapDetail(project);
             if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+            if (!result.IsDraft) webp?.Schedule(WebpImageKind.Project, project.Id);
             return result;
         }
         catch
@@ -326,6 +328,9 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
             .Concat(project.OriginalImage.OptimizedImages.Select(x => x.ObjectKey))
             .Append(project.OriginalImage.OriginalObjectKey)
             .Append(project.OriginalImage.OriginalObjectKey + ".gallery-480.jpg")
+            .Append(WebpVariantStore.VariantKey(project.OriginalImage.OriginalObjectKey))
+            .Concat(project.ProcessingJobs.Where(x => x.ResultObjectKey != null)
+                .Select(x => WebpVariantStore.VariantKey(x.ResultObjectKey!)))
             .Distinct()
             .ToArray();
 
@@ -366,6 +371,7 @@ public sealed class ProjectService(ApplicationDbContext dbContext, IStorageServi
         var project = await FindOwnedAsync(userId, projectId, false, ct);
         await ProjectEffectResetter.ApplyAsync(dbContext, storageService, project, request.Feature,
             logger ?? NullLogger<ProjectService>.Instance, ct);
+        webp?.Schedule(WebpImageKind.Project, project.Id);
         return MapDetail(project);
     }
 

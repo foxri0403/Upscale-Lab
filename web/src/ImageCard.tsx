@@ -90,12 +90,13 @@ export function ImageCard({
           <>
             <PictureView
               picture={picture}
+              storedWebp={!explore}
               failed={() => setFailedSource(source)}
-              loaded={(image) => {
+              loaded={(image, loadedSource) => {
                 if (
                   image.naturalWidth > 0 &&
                   image.naturalHeight > 0 &&
-                  image.currentSrc === new URL(source, location.href).href
+                  image.currentSrc === new URL(loadedSource, location.href).href
                 )
                   setDecoded({
                     src: source,

@@ -82,7 +82,8 @@ public sealed class ImageService(ApplicationDbContext dbContext, IStorageService
     {
         var image = await FindOwnedAsync(userId, imageId, true, cancellationToken);
         var objectKeys = image.OptimizedImages.Select(x => x.ObjectKey)
-            .Append(image.OriginalObjectKey).Append(image.OriginalObjectKey + ".gallery-480.jpg").ToArray();
+            .Append(image.OriginalObjectKey).Append(image.OriginalObjectKey + ".gallery-480.jpg")
+            .Append(WebpVariantStore.VariantKey(image.OriginalObjectKey)).ToArray();
 
         dbContext.Images.Remove(image);
         await dbContext.SaveChangesAsync(cancellationToken);

@@ -10,6 +10,7 @@ using UpscaleLab.Application.Upscaling;
 using UpscaleLab.Domain.Entities;
 using UpscaleLab.Domain.Enums;
 using UpscaleLab.Infrastructure.Database;
+using UpscaleLab.Infrastructure.Images;
 using UpscaleLab.Infrastructure.Projects;
 using UpscaleLab.Infrastructure.Tokens;
 using UpscaleLab.Domain.Tokens;
@@ -22,7 +23,8 @@ public sealed class ProjectProcessingService(
     IProjectImageProcessor processor,
     IProcessingJobQueue queue,
     ILogger<ProjectProcessingService> logger,
-    ITokenService tokenService) : IProjectProcessingService
+    ITokenService tokenService,
+    WebpImageQueue? webp = null) : IProjectProcessingService
 {
     public Task<ProcessingStatusResponse> StartAsync(Guid userId, Guid projectId, CancellationToken cancellationToken) =>
         StartAsync(userId, projectId, new ProcessProjectRequest(), cancellationToken);
@@ -563,6 +565,8 @@ public sealed class ProjectProcessingService(
                     await transaction.CommitAsync(cancellationToken);
             }
 
+            if (imageResultKey is not null && !ProjectDraftState.IsDraft(job.Project.SavedEditJson))
+                webp?.Schedule(WebpImageKind.Project, job.ProjectId);
             foreach (var oldKey in oldKeys)
             {
                 await TryDeleteAsync(oldKey);

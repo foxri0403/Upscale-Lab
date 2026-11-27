@@ -8,6 +8,7 @@ using UpscaleLab.Application.Storage;
 using UpscaleLab.Domain.Entities;
 using UpscaleLab.Domain.Enums;
 using UpscaleLab.Infrastructure.Database;
+using UpscaleLab.Infrastructure.Images;
 
 namespace UpscaleLab.Infrastructure.Projects;
 
@@ -66,7 +67,12 @@ internal static class ProjectEffectResetter
             }
             foreach (var job in project.ProcessingJobs.ToArray())
             {
-                if (upscale && job.ResultObjectKey is { } key) { obsolete.Add(key); job.ResultObjectKey = null; }
+                if (upscale && job.ResultObjectKey is { } key)
+                {
+                    obsolete.Add(key);
+                    obsolete.Add(WebpVariantStore.VariantKey(key));
+                    job.ResultObjectKey = null;
+                }
                 var remove = feature == "All" ||
                     (feature == "Upscale" && job.Operation == ProcessingOperation.Upscale) ||
                     (feature == "Layers" && (job.Operation is ProcessingOperation.Layers or ProcessingOperation.CharacterLayers));

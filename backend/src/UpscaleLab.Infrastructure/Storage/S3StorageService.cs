@@ -1,4 +1,5 @@
 
+using System.Net;
 using Amazon.S3;
 using Amazon.S3.Model;
 using UpscaleLab.Application.Common;
@@ -9,8 +10,23 @@ namespace UpscaleLab.Infrastructure.Storage;
 public sealed class S3StorageService(
     IAmazonS3 s3Client,
     S3StorageOptions options
-) : IStorageService, IObjectCopyService
+) : IStorageService, IObjectCopyService, IStorageObjectLookup
 {
+    public async Task<bool> ExistsAsync(string objectKey, CancellationToken ct)
+    {
+        EnsureConfigured();
+        try
+        {
+            await s3Client.GetObjectMetadataAsync(options.S3BucketName, objectKey, ct);
+            return true;
+        }
+        // S3 also returns 403 for absent objects when the role cannot list the bucket.
+        catch (AmazonS3Exception error) when (error.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Forbidden)
+        {
+            return false;
+        }
+    }
+
     // S3 내부 파일 복사
     public async Task CopyAsync(
         string sourceKey,

@@ -6,6 +6,7 @@ using UpscaleLab.Application.Storage;
 using UpscaleLab.Domain.Entities;
 using UpscaleLab.Domain.Enums;
 using UpscaleLab.Infrastructure.Database;
+using UpscaleLab.Infrastructure.Images;
 
 namespace UpscaleLab.Infrastructure.Auth;
 
@@ -77,12 +78,18 @@ public sealed class AccountCleanupService(ApplicationDbContext db, IStorageServi
             var userId = user.Id;
             var keys = new HashSet<string>(StringComparer.Ordinal);
             void Add(string? key) { if (key != null && OwnsKey(userId, key)) keys.Add(key); }
+            void AddImage(string? key)
+            {
+                if (key is null) return;
+                Add(key);
+                Add(WebpVariantStore.VariantKey(key));
+            }
             Add(user.ProfileImageObjectKey);
             var images = await db.Images.Where(x => x.UserId == userId).ToListAsync(ct);
-            foreach (var image in images) { Add(image.OriginalObjectKey); Add(image.OriginalObjectKey + ".gallery-480.jpg"); }
+            foreach (var image in images) { AddImage(image.OriginalObjectKey); Add(image.OriginalObjectKey + ".gallery-480.jpg"); }
             foreach (var key in await db.OptimizedImages.Where(x => x.Image.UserId == userId).Select(x => x.ObjectKey).ToListAsync(ct)) Add(key);
             foreach (var key in await db.ImageLayers.Where(x => x.Project.UserId == userId).Select(x => x.ObjectKey).ToListAsync(ct)) Add(key);
-            foreach (var key in await db.ProcessingJobs.Where(x => x.Project.UserId == userId).Select(x => x.ResultObjectKey).ToListAsync(ct)) Add(key);
+            foreach (var key in await db.ProcessingJobs.Where(x => x.Project.UserId == userId).Select(x => x.ResultObjectKey).ToListAsync(ct)) AddImage(key);
             foreach (var key in await db.ProcessingJobs.Where(x => x.Project.UserId == userId).Select(x => x.SubjectMaskObjectKey).ToListAsync(ct)) Add(key);
             foreach (var key in await db.AccountCleanupTasks.Where(x => x.UserId == userId && x.ObjectKey != null).Select(x => x.ObjectKey).ToListAsync(ct)) Add(key);
             var assets = await db.WallpaperAssets.Where(x => x.UserId == userId).ToListAsync(ct);
@@ -91,7 +98,7 @@ public sealed class AccountCleanupService(ApplicationDbContext db, IStorageServi
                 using var json = JsonDocument.Parse(asset.ManifestJson);
                 if (json.RootElement.TryGetProperty("Files", out var files) || json.RootElement.TryGetProperty("files", out files))
                     foreach (var file in files.EnumerateArray())
-                        if (file.TryGetProperty("Source", out var source) || file.TryGetProperty("source", out source)) Add(source.GetString());
+                        if (file.TryGetProperty("Source", out var source) || file.TryGetProperty("source", out source)) AddImage(source.GetString());
             }
             if (db.Database.IsNpgsql() && await db.Database.SqlQueryRaw<bool>("SELECT to_regclass('public.inpainting_jobs') IS NOT NULL AS \"Value\"").SingleAsync(ct))
                 foreach (var row in await db.Database.SqlQuery<InpaintingKeys>($"SELECT \"InputObjectKey\", \"MaskObjectKey\", \"ResultObjectKey\" FROM inpainting_jobs WHERE \"UserId\" = {userId}").ToListAsync(ct))
