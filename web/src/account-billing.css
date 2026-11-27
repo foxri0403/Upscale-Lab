@@ -6,6 +6,7 @@
 .account-billing-summary dt { grid-column: 1; color: var(--muted); font-size: .875rem; }
 .account-billing-summary dd { grid-column: 1; margin: 0; font-weight: 700; overflow-wrap: anywhere; }
 .account-billing-summary .account-billing-action { grid-area: 1 / 2 / span 2; justify-self: end; align-self: start; }
+.account-billing-summary .account-billing-note { grid-column: 1 / -1; color: var(--muted); font-size: .875rem; font-weight: 400; }
 .account-payment-list small { color: var(--muted); }
 .account-billing-heading { margin: 0 0 8px; }
 .account-payment-list { list-style: none; margin: 0; padding: 0 8px 0 0; max-height: min(32dvh, 18rem); overflow-y: auto; }

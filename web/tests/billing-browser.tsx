@@ -1,8 +1,9 @@
 // Runs the real billing UI with local, simulated files and payment responses.
 const base = "/__billing-fixture";
-const stateKey = "upscale:billing-fixture-state";
 const customerKey = "billing-fixture-customer";
 const query = new URLSearchParams(location.search);
+const freePlan = query.get("subscription") === "free";
+const stateKey = freePlan ? "upscale:billing-fixture-state:free" : "upscale:billing-fixture-state";
 if (query.has("reset")) sessionStorage.removeItem(stateKey);
 query.delete("reset");
 window.__UPSCALE_CONFIG__ = { mode: "cloud", apiBaseUrl: base };
@@ -29,9 +30,9 @@ const refundOrders = Array.from({ length: 15 }, (_, index) => ({
 const periodEnd = new Date();
 periodEnd.setMonth(periodEnd.getMonth() + 1);
 const initial = {
-  hasRegisteredCard: true, card: { issuerCode: "11", numberSuffix: "1234" },
-  subscription: { plan: "Plus", status: "Active", cancelAtPeriodEnd: false, currentPeriodEndUtc: periodEnd.toISOString(),
-    nextBillingAtUtc: periodEnd.toISOString() as string | null },
+  hasRegisteredCard: !freePlan, card: { issuerCode: "11", numberSuffix: "1234" },
+  subscription: { plan: "Plus", status: freePlan ? "Canceled" : "Active", cancelAtPeriodEnd: false,
+    currentPeriodEndUtc: periodEnd.toISOString(), nextBillingAtUtc: freePlan ? null : periodEnd.toISOString() },
   purchasedBalance: 120, purchasedTokensReserved: false, refundOrders,
 };
 const state: typeof initial = JSON.parse(sessionStorage.getItem(stateKey) || "null") ?? initial;
@@ -80,11 +81,11 @@ window.fetch = async (input, init) => {
   }
   if (init?.method && init.method !== "GET") return json({ message: "지원하지 않는 모의 요청입니다." }, 405);
   if (path === "/api/auth/me" || path === "/api/account") return json(account);
-  if (path === "/api/tokens/me") return json({ plan: "Plus", monthlyBalance: 8,
-    purchasedBalance: state.purchasedBalance, totalBalance: state.purchasedBalance + 8, monthlyAllowance: 20 });
+  if (path === "/api/tokens/me") return json({ plan: freePlan ? "Free" : "Plus", monthlyBalance: 8,
+    purchasedBalance: state.purchasedBalance, totalBalance: state.purchasedBalance + 8, monthlyAllowance: freePlan ? 10 : 20 });
   if (path === "/api/payments/account") return json({ ...state, payments: [planOrder, ...state.refundOrders] });
   if (path === "/api/payments/products") return json(products);
-  if (path === "/api/subscriptions/me") return json({ ...state.subscription, billingKeyRegistered: true });
+  if (path === "/api/subscriptions/me") return json({ ...state.subscription, billingKeyRegistered: state.hasRegisteredCard });
   if (path === "/api/devices/updates") return new Promise<Response>((_, reject) => {
     init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
   });

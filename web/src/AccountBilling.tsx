@@ -163,6 +163,9 @@ export function AccountBilling({ close }: { close: () => void }) {
   const subscription = details?.subscription;
   const card = details?.card;
   const subscribed = subscription?.status === "Active" || subscription?.status === "PastDue";
+  const cardChangeUnavailable = !details?.hasRegisteredCard || !subscribed
+    ? "자동결제 카드가 등록된 구독에서 변경할 수 있습니다."
+    : !eligibleCardEnvironment ? "현재 환경에서는 카드 변경을 사용할 수 없습니다." : undefined;
   const currentPlan = subscribed ? subscription.plan : "Free";
   const entries = details?.payments.flatMap(payment => payment.refundedAt && payment.refundAmount != null
     ? [{ payment, at: payment.paidAt, refund: false }, { payment, at: payment.refundedAt, refund: true }]
@@ -206,8 +209,12 @@ export function AccountBilling({ close }: { close: () => void }) {
             <dt>{details.hasRegisteredCard ? "등록된 카드" : "최근 결제 카드"}</dt>
             <dd>{card ? <>{cardIssuers[card.issuerCode ?? ""] ?? "카드"}{card.numberSuffix && ` · **** **** **** ${card.numberSuffix}`}</>
               : details.hasRegisteredCard ? "등록됨 · 카드 상세 정보 없음" : "표시할 카드 정보 없음"}</dd>
-            {details.hasRegisteredCard && subscribed && eligibleCardEnvironment && <dd className="account-billing-action">
-              <button className="button secondary" type="button" disabled={busy} onClick={() => void changeCard()}>카드 변경</button></dd>}
+            <dd className="account-billing-action">
+              <button className="button secondary" type="button" disabled={busy || !!cardChangeUnavailable}
+                aria-describedby={cardChangeUnavailable ? "account-card-change-note" : undefined}
+                onClick={() => void changeCard()}>카드 변경</button>
+            </dd>
+            {cardChangeUnavailable && <dd id="account-card-change-note" className="account-billing-note">{cardChangeUnavailable}</dd>}
           </div>
           <div>
             <dt>구독 플랜</dt>
