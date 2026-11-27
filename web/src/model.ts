@@ -311,9 +311,7 @@ export async function uploadImage(file: File): Promise<Picture> {
     URL.revokeObjectURL(url);
   }
 }
-type ImageExportFormat = "png" | "webp";
-
-export async function renderImage(picture: Picture, edit: Edit, format: ImageExportFormat = "png"): Promise<Blob> {
+export async function renderImage(picture: Picture, edit: Edit): Promise<Blob> {
   const temporary: string[] = [];
   const load = async (source: string, endpoint?: string) => {
     if (!endpoint) return loadImage(source);
@@ -385,17 +383,17 @@ export async function renderImage(picture: Picture, edit: Edit, format: ImageExp
     canvas.width,
     canvas.height,
   );
-  const contentType = format === "webp" ? "image/webp" : "image/png";
   return await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(
-      (blob) => {
-        if (!blob) reject(new Error("파일 생성에 실패했습니다. S3 CORS 설정을 확인해 주세요."));
-        else if (format === "webp" && blob.type !== contentType)
-          reject(new Error("이 브라우저에서는 WebP 파일을 만들 수 없습니다."));
-        else resolve(blob);
-      },
-      contentType,
-      format === "webp" ? 0.92 : undefined,
+      (b) =>
+        b
+          ? resolve(b)
+          : reject(
+              new Error(
+                "파일 생성에 실패했습니다. S3 CORS 설정을 확인해 주세요.",
+              ),
+            ),
+      "image/png",
     ),
   );
   } finally { temporary.forEach(url => URL.revokeObjectURL(url)); }
@@ -403,13 +401,12 @@ export async function renderImage(picture: Picture, edit: Edit, format: ImageExp
 export async function downloadImage(
   picture: Picture,
   edit: Edit,
-  format: ImageExportFormat = "png",
 ): Promise<void> {
-  const blob = await renderImage(picture, edit, format);
+  const blob = await renderImage(picture, edit);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${picture.name.replace(/[<>:"/\\|?*]/g, "_")}.${format}`;
+  a.download = `${picture.name.replace(/[<>:"/\\|?*]/g, "_")}.png`;
   a.style.display = "none";
   document.body.appendChild(a);
   try { a.click(); } finally { a.remove(); }

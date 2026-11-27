@@ -82,6 +82,7 @@ public sealed class GalleryService(ApplicationDbContext dbContext, IStorageServi
             _ => query.OrderByDescending(x => x.CreatedAt)
         };
         var posts = await ordered.ThenByDescending(x => x.CreatedAt).ThenBy(x => x.Id)
+            .Skip(Math.Max(0, explore?.Offset ?? 0))
             .Take(Math.Clamp(explore?.Limit ?? 100, 1, 100))
             .Select(x => new GalleryPostResponse(
                 x.Id, x.ImageId, x.UserId, x.User.Username, x.Title, x.Description,

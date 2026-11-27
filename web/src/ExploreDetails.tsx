@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Download, Monitor, Plus, SquarePen, X } from "lucide-react";
+import { Monitor, Plus, SquarePen, X } from "lucide-react";
 import { CreatorAvatar } from "./CreatorAvatar";
 import type { Picture } from "./model";
 import { imageFileFormat, imageResolution } from "./image-information";
@@ -7,7 +7,7 @@ import { ImageFeatureBadges } from "./ImageFeatureBadges";
 import { Busy, Notice, PictureView } from "./ui";
 import { GalleryLikeButton, LowerTagList, PlatformTagList } from "./GalleryBadges";
 
-export function ExploreDetails({ picture, importing, own, local, close, save, openStudio, apply, downloadWebp, downloading, toggleLike, liking }: {
+export function ExploreDetails({ picture, importing, own, local, close, save, openStudio, apply, toggleLike, liking }: {
   picture: Picture;
   importing: boolean;
   own: boolean;
@@ -16,8 +16,6 @@ export function ExploreDetails({ picture, importing, own, local, close, save, op
   save: () => void;
   openStudio: () => void;
   apply: () => void;
-  downloadWebp?: () => void;
-  downloading?: boolean;
   toggleLike?: () => void;
   liking?: boolean;
 }) {
@@ -85,9 +83,6 @@ export function ExploreDetails({ picture, importing, own, local, close, save, op
           </div>}
           {own && <button className="button secondary full" disabled={importing} onClick={openStudio}>
             <SquarePen size={18} /> 작업실에서 열기
-          </button>}
-          {downloadWebp && <button type="button" className="button secondary full" disabled={downloading} onClick={downloadWebp}>
-            {downloading ? <Busy /> : <Download size={18} />} {downloading ? "WebP 준비 중…" : "WebP 다운로드"}
           </button>}
           {!own && <button className="button secondary full" disabled={importing} onClick={apply}>
             <Monitor size={18} /> 연결된 기기에 적용

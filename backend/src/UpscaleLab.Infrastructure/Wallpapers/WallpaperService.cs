@@ -326,6 +326,7 @@ public sealed class WallpaperService(ApplicationDbContext db, IStorageService st
             _ => query.OrderByDescending(x => x.CreatedAt)
         };
         var assets = await ordered.ThenByDescending(x => x.CreatedAt).ThenBy(x => x.Id)
+            .Skip(Math.Max(0, explore?.Offset ?? 0))
             .Take(Math.Clamp(explore?.Limit ?? 100, 1, 100))
             .Select(asset => new { Asset = asset, Likes = shared ? asset.Likes.Count : 0,
                 Liked = shared && userId.HasValue && asset.Likes.Any(like => like.UserId == userId) }).ToListAsync(ct);

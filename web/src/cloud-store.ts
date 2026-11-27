@@ -1,5 +1,4 @@
 import {
-  cloud,
   request,
   requestBlob,
   post,
@@ -14,7 +13,6 @@ import {
 } from "./api";
 import {
   defaultEdit,
-  downloadImage,
   read,
   renderImage,
   type Edit,
@@ -26,6 +24,7 @@ import {
   mergeExploreFeed,
   type GalleryPost,
 } from "./explore-feed";
+import { collectExplorePages, exploreBatchSize } from "./explore-pagination";
 import { unspecifiedTag } from "./image-tags";
 import { subjectPreview } from "./subject-preview";
 import { wallpaperExportPolicy } from "./wallpaper-export-policy";
@@ -246,11 +245,19 @@ export async function importGalleryPicture(picture: Picture): Promise<Picture> {
     { method: "POST", signal: AbortSignal.timeout(180000) },
   ));
 }
-export async function fetchExplore(query: URLSearchParams, signal: AbortSignal): Promise<Picture[]> {
-  const suffix = `?${query}`;
+export async function fetchExplore(query: URLSearchParams, signal: AbortSignal, allPages = false): Promise<Picture[]> {
+  function load<T extends { id: string }>(path: string) {
+    if (!allPages) return request<T[]>(`${path}?${query}`, { signal });
+    return collectExplorePages<T>(offset => {
+      const batch = new URLSearchParams(query);
+      batch.set("limit", String(exploreBatchSize));
+      batch.set("offset", String(offset));
+      return request<T[]>(`${path}?${batch}`, { signal });
+    });
+  }
   const [assets, gallery] = await Promise.all([
-    request<Asset[]>(`/api/wallpapers/shared${suffix}`, { signal }),
-    request<GalleryPost[]>(`/api/gallery${suffix}`, { signal }),
+    load<Asset>("/api/wallpapers/shared"),
+    load<GalleryPost>("/api/gallery"),
   ]);
   const pictures = await Promise.all(assets.map(asset => assetPicture(asset, false, signal)));
   return mergeExploreFeed(pictures, gallery);
@@ -324,8 +331,6 @@ export async function detailPicture(p: Picture, signal?: AbortSignal): Promise<P
     );
     result.src = download.url;
     result.jobId = detail.latestJob.jobId;
-    if (result.exportSources)
-      result.exportSources.image = `/api/projects/${p.projectId}/content?jobId=${encodeURIComponent(result.jobId)}`;
     if (result.edit) result.edit = { ...result.edit, scale: 1 };
     result.kind = "업스케일";
     result.width = detail.latestJob.resultWidth;
@@ -345,22 +350,6 @@ export async function refreshWallpaperPreview(picture: Picture, signal: AbortSig
   return { ...picture, src: files.src, background: files.background, foregrounds: files.foregrounds,
     wallpaperParts: files.wallpaperParts, exportSources: files.exportSources, width: files.width, height: files.height,
     contentType: files.contentType, edit: picture.edit ?? files.edit, legacyMotion: files.legacyMotion };
-}
-
-export async function downloadGalleryWebp(picture: Picture): Promise<void> {
-  const signal = AbortSignal.timeout(30000);
-  let source = cloud ? await refreshWallpaperPreview(picture, signal) : picture;
-  if (cloud && source.galleryPostId && !source.projectId && !source.assetId) {
-    const preview = await request<{ url: string }>(
-      `/api/gallery/${encodeURIComponent(source.galleryPostId)}/preview-url`, { signal, cache: "no-store" },
-    );
-    source = { ...source, src: preview.url };
-  }
-  // Published wallpaper files already contain their saved crop and filter.
-  const edit = source.assetId
-    ? { ...defaultEdit, foreground: source.edit?.foreground ?? defaultEdit.foreground }
-    : { ...defaultEdit, ...source.edit };
-  await downloadImage(source, edit, "webp");
 }
 
 export async function createAsset(picture: Picture, frame?: WallpaperFrame): Promise<Asset> {
