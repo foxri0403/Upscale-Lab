@@ -41,6 +41,8 @@ dotnet run --project src/UpscaleLab.Api
 
 Development Swagger는 기본 실행 프로필의 http://localhost:5080/swagger, 상태 확인은 GET /health다. 웹의 개발/실제 API 설정과 다운로드 파일 검증은 [웹 가이드](web/README.md)를 따른다.
 
+집 PC의 NVIDIA GPU를 개발용 API에 연결하려면 [Windows GPU 워커 실행 안내](gpu-worker-home/README.md)를 따른다. 기존 학교 GPU는 배포 환경의 `LocalGpu` 설정으로 선택한다.
+
 ## 검증
 
 ```powershell

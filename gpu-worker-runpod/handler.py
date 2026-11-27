@@ -4,10 +4,10 @@ import os
 import sys
 import threading
 import types
+from pathlib import Path
 
 import cv2
 import numpy as np
-import runpod
 import torch
 
 # Compatibility patch for older BasicSR imports
@@ -27,7 +27,7 @@ from basicsr.archs.rrdbnet_arch import RRDBNet
 from realesrgan import RealESRGANer
 
 
-MODEL_PATH = "/app/models/RealESRGAN_x4plus.pth"
+MODEL_PATH = str(Path(__file__).resolve().parent / "models" / "RealESRGAN_x4plus.pth")
 
 MAX_INPUT_BYTES = 2 * 1024 * 1024
 MAX_INPUT_PIXELS = 1_000_000
@@ -184,6 +184,8 @@ def handler(event):
 
 
 if __name__ == "__main__":
+    import runpod
+
     runpod.serverless.start({
         "handler": handler
     })
